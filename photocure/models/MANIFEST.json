@@ -1,0 +1,38 @@
+{
+  "models": [
+    {
+      "file": "face_detection_yunet_2023mar.onnx",
+      "name": "YuNet face detector",
+      "purpose": "Finds faces in a photo",
+      "license": "MIT",
+      "upstream_url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+      "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+    },
+    {
+      "file": "face_landmarker.task",
+      "name": "MediaPipe Face Landmarker",
+      "purpose": "Measures how closed each eye is",
+      "license": "Apache-2.0",
+      "upstream_url": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+      "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+    },
+    {
+      "file": "face_recognition_sface_2021dec.onnx",
+      "name": "SFace face recognizer",
+      "purpose": "Turns a detected face into an embedding so the same person can be matched across photos",
+      "license": "Apache-2.0",
+      "upstream_url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+      "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+    },
+    {
+      "file": "aesthetic_laion_sa_v1_vit_b_16.npz",
+      "name": "LAION aesthetic predictor v1 (ViT-B/16 linear head)",
+      "purpose": "Rates how appealing a photo looks from its CLIP embedding",
+      "license": "MIT",
+      "upstream_url": "https://github.com/LAION-AI/aesthetic-predictor/raw/main/sa_0_4_vit_b_16_linear.pth",
+      "upstream_sha256": "8ad3923d7ecf019df20ecd2ab5542a3075fbba0278d239c0371345f3d7fcbde0",
+      "converted_by": "packaging/convert_aesthetic_head.py",
+      "sha256": "2597f84b08c5c6ac71161f10bdb4da864d6ce7f67de1ba72dd365e9bf5221137"
+    }
+  ]
+}
