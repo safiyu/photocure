@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Photocure</title>
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("pcur-theme"); } catch (e) {}
+      if (!t) t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="stylesheet" href="/static/style.css?v={{VERSION}}">
+</head>
+<body>
+  <!-- icon sprite -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-pipeline" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4m-2-2 2 2-2 2"/><rect x="13" y="13" width="8" height="8" rx="2"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24"><use href="#i-pipeline"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5.2a3 3 0 0 1 0 5.6M18 14.3c1.8.8 3 2.6 3 4.7"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></symbol>
+    <symbol id="i-face" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 7h11l-3-3M17 17H6l3 3"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><path d="M9 9h6v6H9z"/><path d="M5 5h14v14H5z"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><path d="M12 17a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><path d="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h11v11H9zM5 15V4h11"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5m0 0-5 5m5-5 5 5"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 4 2c-.9.6-1.5 1-1.5 2M12 17h.01"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M9 9.5h.01"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19zM12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2 12h4l2.5-7 4 14 2.5-7H22"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 13 6 5h12l2 8M4 13v6h16v-6M4 13h5l1 2h4l1-2h5"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  </svg>
+
+  <a class="skip" href="#main">Skip to content</a>
+
+  <div class="shell">
+    <aside class="side" id="side" aria-label="Main navigation">
+      <div class="brand">
+        <img class="logo" src="/static/logo.png" alt="" width="38" height="38">
+        <div><b>Photocure</b></div>
+      </div>
+
+      <nav>
+        <span id="nav-indicator" class="nav-indicator" aria-hidden="true"></span>
+        <div class="navgroup">
+          <h2>Get started</h2>
+          <button class="tab navitem active" data-tab="library"><svg class="ic" aria-hidden="true"><use href="#i-pipeline"/></svg><span>Pipeline</span><em class="count"></em></button>
+        </div>
+        <div class="navgroup" style="margin-top:18px">
+          <h2>Browse</h2>
+          <button class="tab navitem" data-tab="categories"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span>Library</span><em class="count" data-count="categories"></em></button>
+          <button class="tab navitem" data-tab="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span>Search</span><em class="count"></em></button>
+          <button class="tab navitem" data-tab="bursts"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span>Bursts</span><em class="count" data-count="bursts"></em></button>
+          <button class="tab navitem" data-tab="people"><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg><span>People</span><em class="count"></em></button>
+          <button class="tab navitem" data-tab="highlights"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg><span>Highlights</span><em class="count"></em></button>
+          <button class="tab navitem" data-tab="events"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg><span>Events</span><em class="count"></em></button>
+          <button class="tab navitem" data-tab="utility"><svg class="ic" aria-hidden="true"><use href="#i-inbox"/></svg><span>Utility</span><em class="count" data-count="utility"></em></button>
+        </div>
+        <div class="navgroup" style="margin-top:18px">
+          <h2>Review</h2>
+          <button class="tab navitem" data-tab="uncertain"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><span>Finalize</span><em class="count" data-count="uncertain"></em></button>
+          <button class="tab navitem" data-tab="duplicates"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>Duplicates</span><em class="count" data-count="duplicates"></em></button>
+          <button class="tab navitem" data-tab="junk"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Junk</span><em class="count" data-count="junk"></em></button>
+          <button class="tab navitem" data-tab="actions"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg><span>Apply and undo</span><em class="count" data-count="actions"></em></button>
+        </div>
+      </nav>
+
+      <div class="side-foot">
+        <button class="tab navitem" data-tab="settings" title="Settings">
+          <svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg>
+          <span>Settings</span>
+          <span class="devchip" id="device-chip" data-goto="settings" title="Open Settings"><i class="dot"></i><span id="device-chip-text">Checking device</span></span>
+        </button>
+        <div class="foot-controls">
+          <div class="theme-row">
+            <svg class="ic sm" aria-hidden="true"><use href="#i-moon"/></svg>
+            <span class="theme-text">Dark Mode</span>
+            <label class="switch" id="theme-toggle" tabindex="0" title="Switch between light and dark"
+                   aria-label="Switch between light and dark">
+              <input type="checkbox" id="theme-switch" role="switch" aria-checked="false">
+              <span class="slider" aria-hidden="true"></span>
+            </label>
+          </div>
+          <button class="icon-btn help-btn" id="btn-help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
+        </div>
+        <div class="sidebar-footer"><span class="app-credit">v <button id="sidebar-version" class="sidebar-version-badge" type="button" data-goto="settings" data-anchor="sect-about" title="Click to view About Photocure">{{VERSION}}</button> by Safiyu</span></div>
+      </div>
+    </aside>
+
+    <div class="content">
+      <header class="topbar hero">
+        <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open menu"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
+        <div class="grow">
+          <h1 id="page-title">Pipeline</h1>
+          <div class="sub" id="page-sub"></div>
+        </div>
+        <div id="progress-card" class="progress-card" hidden>
+          <div class="progress-header">
+            <div class="progress-task">
+              <span class="spinner" id="progress-spinner"></span>
+              <span id="progress-status-icon" hidden></span>
+              <span id="progress-title">Working</span>
+              <span class="progress-phase" id="progress-phase" hidden></span>
+            </div>
+            <div class="progress-controls">
+              <div class="spectrum-bars" aria-hidden="true">
+                <span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span>
+              </div>
+              <span class="progress-ratio" id="progress-ratio"></span>
+              <span class="progress-pct" id="progress-pct">0%</span>
+              <button id="btn-stop-progress" class="stop-btn" title="Stop current process" style="display:none">Stop</button>
+              <button id="btn-dismiss-progress" class="dismiss-btn" title="Dismiss" aria-label="Dismiss" style="display:none"><svg class="ic sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+            </div>
+          </div>
+          <div class="progress-track" role="progressbar" aria-label="Task progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-fill" class="progress-fill"></div></div>
+          <div class="progress-sub">
+            <span class="progress-msg" id="progress-msg">Starting</span>
+            <span id="progress-counts"></span>
+          </div>
+        </div>
+        <button id="header-version-badge" class="version-pill" type="button" title="Click to view About Photocure" data-goto="settings"></button>
+      </header>
+
+      <main id="main">
+        <!-- PIPELINE -->
+        <section id="tab-library" class="panel active">
+          <div class="banner-host"></div>
+
+          <!-- Pipeline progress bar -->
+          <div class="pipe" aria-label="Import progress">
+            <div class="pipe-node" id="pipe-node-scan">
+              <span class="pipe-dot" id="pipe-dot-scan">1</span>
+              <div>
+                <b>Find photos</b>
+                <small id="pipe-label-scan">Not started</small>
+              </div>
+            </div>
+            <div class="pipe-link" id="pipe-link-1"><i></i></div>
+            <div class="pipe-node" id="pipe-node-infer">
+              <span class="pipe-dot" id="pipe-dot-infer">2</span>
+              <div>
+                <b>Analyze</b>
+                <small id="pipe-label-infer">Waiting</small>
+              </div>
+            </div>
+          </div>
+
+          <!-- Two-column step cards -->
+          <ol class="steps pipe-cols" aria-label="Import steps">
+            <li class="step" id="step-scan">
+              <div class="step-head">
+                <span class="step-num"><span class="n">1</span><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></span>
+                <h3>Find your photos</h3>
+                <span class="state" id="state-scan"></span>
+              </div>
+              <p>Pick the folder that holds your photos. Anything already indexed is skipped.</p>
+              <div class="field">
+                <label for="scan-path">Photo folder</label>
+                <div class="folder-pick-bar" id="folder-pick-bar" tabindex="0" role="button" aria-label="Choose photo folder" title="Click anywhere to choose folder">
+                  <button id="btn-browse-scan" class="browse-icon-btn" type="button" title="Choose photo folder" aria-label="Choose photo folder">
+                    <svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>
+                  </button>
+                  <span id="scan-path-display" class="scan-path-display" data-empty="Choose a folder...">Choose a folder...</span>
+                  <input id="scan-path" type="text" class="sr-only-input" autocomplete="off" spellcheck="false" tabindex="-1">
+                </div>
+              </div>
+              <div class="step-watch">
+                <label class="radio-label" for="watch-toggle">
+                  <input type="checkbox" id="watch-toggle" class="radio-btn">
+                  <span class="radio-caption">Keep watching this folder for new photos</span>
+                </label>
+                <span id="watch-status" class="muted" role="status"></span>
+              </div>
+              <div class="actions">
+                <button id="btn-scan" data-busy class="btn accent"><svg class="ic sm" aria-hidden="true"><use href="#i-camera"/></svg>Scan</button>
+                <span class="step-hint" id="scan-hint">Already-indexed photos are skipped.</span>
+              </div>
+            </li>
+            <li class="step" id="step-infer">
+              <div class="step-head">
+                <span class="step-num"><span class="n">2</span><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></span>
+                <h3>Analyze</h3>
+                <span class="state" id="state-infer"></span>
+                <button class="step-more" id="step-infer-more" type="button" title="Inference settings" aria-label="Inference settings" data-goto="settings"><svg class="ic sm" aria-hidden="true"><use href="#i-menu"/></svg></button>
+              </div>
+              <p>Finds faces, checks sharpness and exposure, labels what each photo shows, then groups burst shots and sorts everything into categories.</p>
+              <div id="infer-stages" class="infer-stages" aria-label="Analysis stages" role="status"></div>
+              <div class="field">
+                <label for="infer-device">Run on</label>
+                <div class="device-chip">
+                  <svg class="ic sm" aria-hidden="true"><use href="#i-cpu"/></svg>
+                  <select id="infer-device">
+                    <option value="auto">Automatic</option>
+                    <option value="cpu">CPU only</option>
+                    <option value="cuda">NVIDIA GPU</option>
+                    <option value="mps">Apple GPU</option>
+                  </select>
+                  <svg class="ic sm chevron" aria-hidden="true"><use href="#i-down"/></svg>
+                </div>
+                <a class="link" href="#settings" data-goto="settings">Devices and workers in Settings</a>
+              </div>
+              <div class="field">
+                <label class="toggle" style="align-self:flex-start"><input type="checkbox" id="approve-all-deletes">Approve all proposed deletions</label>
+                <p class="help">Off: nothing is deleted until you approve it photo by photo in Junk review. Also applies to Run All.</p>
+              </div>
+              <div class="actions">
+                <button id="btn-infer" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Analyze Now</button>
+                <span class="step-hint" id="infer-hint">Nothing waiting to analyze.</span>
+              </div>
+            </li>
+          </ol>
+
+          <div class="dock" role="group" aria-label="Library summary and actions">
+            <div class="dock-summary">
+              <span class="dock-total" id="dock-total">0</span>
+              <span class="dock-label" id="dock-label">photos in your library</span>
+            </div>
+            <div class="dock-actions">
+              <button id="btn-ingest-all" data-busy class="btn commit" title="Run Scan and Analyze" aria-label="Run Scan and Analyze"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Run All</button>
+              <button id="btn-import-reset" data-busy class="btn danger" title="Reset Library" aria-label="Reset Library"><svg class="ic sm" aria-hidden="true"><use href="#i-undo"/></svg>Reset</button>
+            </div>
+            <p class="dock-hint" id="dock-hint" role="status"></p>
+          </div>
+
+          <section class="activity" data-filter="all">
+            <header class="activity-bar">
+              <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity <span class="activity-count"></span></h2>
+              <div class="seg seg-2 activity-filter" role="group" aria-label="Filter activity">
+                <button type="button" class="seg-btn active" data-act-filter="all">All</button>
+                <button type="button" class="seg-btn" data-act-filter="problems">Problems</button>
+              </div>
+              <button type="button" class="btn sm ghost" data-act-clear>Clear</button>
+            </header>
+            <div id="library-log" class="action-log" role="log" aria-label="Activity"><div class="logline logline-empty">Nothing has run yet.</div></div>
+          </section>
+        </section>
+
+        <!-- LIBRARY -->
+        <section id="tab-categories" class="panel">
+          <div class="comp comp-host" data-target="categories"></div>
+          <div class="toolbar">
+            <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+              <input id="q" type="search" placeholder="Search by file name or path" aria-label="Search photos"></div>
+            <select id="catfilter" aria-label="Category"><option value="">All categories</option></select>
+            <label class="toggle"><input type="checkbox" id="manualonly">Changed by me</label>
+            <label class="toggle"><input type="checkbox" id="neardup">Near duplicates</label>
+            <select id="f-camera" aria-label="Camera" hidden><option value="">All cameras</option></select>
+            <select id="f-rating" aria-label="Rating">
+              <option value="">Any rating</option>
+              <option value="min:5">5 stars</option>
+              <option value="min:4">4 stars or more</option>
+              <option value="min:3">3 stars or more</option>
+              <option value="min:1">Rated</option>
+              <option value="0">Not rated</option>
+              <option value="-1">Rejected</option>
+            </select>
+            <select id="f-country" aria-label="Country" hidden><option value="">All countries</option></select>
+            <label class="toggle"><input type="checkbox" id="f-fav">Favourites</label>
+            <button id="reset-filters" class="icon-btn" type="button" title="Reset filters" aria-label="Reset filters" hidden><svg class="ic sm" aria-hidden="true"><use href="#i-undo"/></svg></button>
+            <span class="grow"></span>
+            <label class="density">Size <input type="range" id="density" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
+            <span id="rowcount" class="rowcount"></span>
+          </div>
+          <div class="scrubber" id="scrubber" hidden>
+            <div class="scrub-presets seg" id="scrub-presets" role="group" aria-label="Date presets">
+              <button type="button" class="preset-btn seg-btn active" data-preset="all">All</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="year">This year</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="90d">Last 90 days</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="30d">Last 30 days</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="custom">Custom</button>
+            </div>
+            <label>From <span id="scrub-from-label"></span>
+              <input type="range" id="scrub-from" min="0" max="0" value="0" aria-label="Earliest date shown"></label>
+            <label>To <span id="scrub-to-label"></span>
+              <input type="range" id="scrub-to" min="0" max="0" value="0" aria-label="Latest date shown"></label>
+          </div>
+          <div id="grid" class="grid"></div>
+          <div id="grid-more" class="loadmore"></div>
+        </section>
+
+        <!-- SEARCH -->
+        <section id="tab-search" class="panel">
+          <form id="search-form" class="toolbar" role="search">
+            <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+              <input id="searchq" type="search" maxlength="300" autocomplete="off"
+                     placeholder="Describe a photo, like dog on the beach" aria-label="Describe the photo you are looking for"></div>
+            <button class="btn primary" type="submit">Search</button>
+            <label class="toggle"><input type="checkbox" id="search-dups">Include duplicates</label>
+            <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
+            <span id="searchcount" class="rowcount" role="status"></span>
+          </form>
+          <div id="searchgrid" class="grid"></div>
+        </section>
+
+        <!-- BURSTS -->
+        <section id="tab-bursts" class="panel">
+          <div class="split">
+            <div id="burstlist" class="burstlist"></div>
+            <div id="burstdetail" class="detail"></div>
+          </div>
+        </section>
+
+        <!-- PEOPLE -->
+        <section id="tab-people" class="panel">
+          <p class="dup-intro">Photocure groups faces it believes are the same person as photos are analyzed. Give a cluster a name and it carries over everywhere that person appears.</p>
+          <datalist id="people-names"></datalist>
+          <div id="peoplegrid" class="people-grid"></div>
+        </section>
+
+        <!-- DUPLICATES -->
+        <section id="tab-duplicates" class="panel">
+          <div class="toolbar">
+            <select id="dup-kind" aria-label="Type of duplicate">
+              <option value="">All duplicates</option>
+              <option value="exact">Identical files</option>
+              <option value="near">Look-alikes</option>
+            </select>
+            <label class="toggle"><input type="checkbox" id="dup-reviewed">Show decided groups</label>
+            <button id="btn-dup-all" class="btn commit" type="button" title="Keeps the suggested photo in every group and marks the rest as duplicates.">Accept all suggestions</button>
+            <span class="grow"></span>
+            <span id="dup-summary" class="rowcount" role="status"></span>
+          </div>
+          <p class="dup-intro">Each group holds the same photo more than once. Photocure suggests the best copy to keep. Pick a different one if you prefer, then confirm. Nothing is deleted or moved until you apply a plan.</p>
+          <div id="dup-list" class="dup-list"></div>
+          <div class="loadmore"><button id="btn-dup-more" class="btn secondary" type="button" hidden>Show more groups</button></div>
+        </section>
+
+        <!-- UTILITY -->
+        <section id="tab-utility" class="panel">
+          <p class="dup-intro">Receipts, notes, screenshots, labels, signs and packaging live here, apart from your photos and from Junk. Nothing in this tab is treated as clutter.</p>
+          <div class="toolbar">
+            <div class="kind-chips" role="group" aria-label="Kind of reference photo">
+              <button type="button" class="chip-btn" data-ukind="" aria-pressed="true">All</button>
+              <button type="button" class="chip-btn" data-ukind="screenshot" aria-pressed="false">Screenshots</button>
+              <button type="button" class="chip-btn" data-ukind="document" aria-pressed="false">Receipts and documents</button>
+              <button type="button" class="chip-btn" data-ukind="slide" aria-pressed="false">Notes and whiteboards</button>
+              <button type="button" class="chip-btn" data-ukind="utility" aria-pressed="false">Labels, signs and packaging</button>
+            </div>
+            <button id="btn-rescore" class="btn sm secondary" type="button" title="Looks at your already analyzed photos again with the latest categories. No photo is read again.">Re-check my photos</button>
+            <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
+            <span id="utilitycount" class="rowcount"></span>
+          </div>
+          <div id="utilitygrid" class="grid"></div>
+          <div id="utilitygrid-more" class="loadmore"></div>
+        </section>
+
+        <!-- JUNK -->
+        <section id="tab-junk" class="panel">
+          <div class="toolbar">
+            <select id="junkfilter" aria-label="Junk type">
+              <option value="">All junk</option>
+              <option value="duplicate">Duplicates</option>
+              <option value="near_duplicate">Near duplicates</option>
+              <option value="graphic">Graphics</option>
+              <option value="accidental">Accidental</option>
+              <option value="unreadable">Unreadable</option>
+            </select>
+            <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
+            <span id="junkcount" class="rowcount"></span>
+          </div>
+          <div id="junkgrid" class="grid"></div>
+          <div id="junkgrid-more" class="loadmore"></div>
+        </section>
+
+        <!-- NEEDS A LOOK / FINALIZE -->
+        <section id="tab-uncertain" class="panel">
+          <div class="banner-host"></div>
+          <div class="toolbar">
+            <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+              <input id="q-uncertain" type="search" placeholder="Search by file name or path" aria-label="Search finalize photos"></div>
+            <select id="filter-uncertain-status" aria-label="Filter status">
+              <option value="all">All undecided photos</option>
+              <option value="unreviewed">Needs choice</option>
+              <option value="chosen">Chosen by me</option>
+            </select>
+            <button id="btn-learn" class="btn primary" type="button">Learn from my choices</button>
+            <span id="learn-help" class="help">Fix a few photos, then let the app re-sort the rest using what you chose.</span>
+            <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
+            <span id="uncertaincount" class="rowcount"></span>
+          </div>
+          <div id="uncertaingrid" class="grid"></div>
+          <div id="uncertaingrid-more" class="loadmore"></div>
+        </section>
+
+        <!-- HIGHLIGHTS -->
+        <section id="tab-highlights" class="panel">
+          <div class="toolbar">
+            <select id="hl-view" aria-label="Show">
+              <option value="all">All photos, best first</option>
+              <option value="events">Best of each event</option>
+              <option value="story">Event stories (balanced)</option>
+            </select>
+            <label class="inline-num" title="Filters on the AI appeal score, in both views">Minimum appeal <input id="minaes" type="number" step="0.1" placeholder="any"></label>
+            <select id="hl-year" aria-label="Year in review"><option value="">Year in review</option></select>
+            <button id="btn-hl-export" class="btn secondary" type="button" disabled>Download page</button>
+            <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
+            <span id="highlightcount" class="rowcount"></span>
+          </div>
+          <details id="hl-tune" class="sect tune">
+            <summary>Tune the ranking</summary>
+            <p class="lede">Photos are ranked by how appealing the AI finds them. These settings let your own choices count too.</p>
+            <div class="tune-grid">
+              <div class="field"><label for="hl-w-rating">Star ratings <output id="hl-o-rating"></output></label>
+                <input type="range" id="hl-w-rating" min="0" max="0.5" step="0.01" data-feat="highlight_rating_weight">
+                <p class="help">Five stars lift a photo, one star lowers it. Zero ignores stars.</p></div>
+              <div class="field"><label for="hl-w-fav">Favourites <output id="hl-o-fav"></output></label>
+                <input type="range" id="hl-w-fav" min="0" max="0.5" step="0.01" data-feat="highlight_favorite_weight">
+                <p class="help">A flat bonus for every favourite.</p></div>
+              <div class="field"><label for="hl-w-taste">My taste <output id="hl-o-taste"></output></label>
+                <input type="range" id="hl-w-taste" min="0" max="1" step="0.05" data-feat="highlight_preference_weight">
+                <p class="help">How much the taste learned from your ratings counts against the AI's view.</p></div>
+            </div>
+            <div class="taste" id="taste-box">
+              <h3>Learn my taste</h3>
+              <p id="taste-text" class="help" role="status"></p>
+              <div class="btn-row">
+                <button id="btn-taste-learn" class="btn secondary" type="button">Learn from my ratings</button>
+                <button id="btn-taste-reset" class="btn ghost" type="button">Forget what it learned</button>
+              </div>
+            </div>
+          </details>
+          <div id="highlightgrid" class="grid"></div>
+          <div id="highlightgrid-more" class="loadmore"></div>
+          <div id="hl-events" hidden></div>
+        </section>
+
+        <!-- EVENTS -->
+        <section id="tab-events" class="panel">
+          <div class="toolbar">
+            <label class="inline-num">Gap between events <input id="ev-gap" type="number" step="0.5" value="2"> hours</label>
+            <label class="inline-num">Distance <input id="ev-km" type="number" step="0.5" value="1"> km</label>
+            <button id="btn-events" class="btn primary" data-busy>Find events</button>
+            <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
+            <span id="eventcount" class="rowcount"></span>
+          </div>
+          <div class="split">
+            <div id="eventlist" class="burstlist"></div>
+            <div>
+              <div id="eventdetail" class="grid"></div>
+              <div id="eventdetail-more" class="loadmore"></div>
+            </div>
+          </div>
+        </section>
+
+
+        <!-- APPLY AND UNDO -->
+        <section id="tab-actions" class="panel">
+          <div class="sect">
+            <h2>Organize your files</h2>
+            <p class="lede">Build a plan, preview exactly what will change, then apply it. Every change is recorded and can be undone.</p>
+            <div class="form-grid">
+              <div class="field">
+                <label for="op">What to do with the files</label>
+                <select id="op">
+                  <option value="move">Move them</option>
+                  <option value="copy">Copy them</option>
+                  <option value="hardlink">Hard link them (same disk)</option>
+                  <option value="symlink">Symbolic link them</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="orgmode">Folder layout</label>
+                <select id="orgmode">
+                  <option value="category_first">Sort into category folders</option>
+                  <option value="in_place">Leave originals, add links</option>
+                </select>
+              </div>
+              <div class="field wide">
+                <label for="orgroot">Destination folder</label>
+                <div class="with-btn">
+                  <input id="orgroot" type="text" placeholder="Choose where organized photos go" autocomplete="off" spellcheck="false">
+                  <button class="btn" id="btn-browse-out" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+                </div>
+                <p class="help">Pick a folder outside your photo library so the result is easy to review.</p>
+              </div>
+              <div class="field">
+                <label for="onlycat">Apply to</label>
+                <select id="onlycat"><option value="">Every category</option></select>
+              </div>
+              <div class="field">
+                <span class="lbl">Junk handling</span>
+                <label class="toggle" style="align-self:flex-start"><input type="checkbox" id="trash" checked>Move photos marked for delete to a trash folder</label>
+                <p class="help">Photos you marked for delete are always left out of the result. With this on, they are moved to a trash folder that you can restore or purge later. Junk you did not mark stays in the junk review folder.</p>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button id="btn-rebuild" data-busy class="btn secondary">Rebuild plan</button>
+              <button id="btn-diff" data-busy class="btn secondary">Preview changes</button>
+              <span class="grow"></span>
+              <button id="btn-apply" data-busy class="btn commit">Review and apply</button>
+            </div>
+          </div>
+
+          <div id="plan-summary" class="plan-summary">No plan yet. Rebuild the plan to see where each photo will go.</div>
+          <div id="diff-panel" class="diffpanel" hidden></div>
+
+          <div class="sect danger">
+            <h2>Undo and verify</h2>
+            <p class="lede">Restore files to where they were, or check that organized files still match the record.</p>
+            <div class="txnbar">
+              <div class="field">
+                <label for="txnselect">Change to undo</label>
+                <select id="txnselect"><option value="">Latest</option></select>
+              </div>
+              <label class="toggle"><input type="checkbox" id="undo-verify" checked>Check file contents first</label>
+            </div>
+            <div class="btn-row">
+              <button id="btn-undo" data-busy class="btn danger">Undo this change</button>
+              <button id="btn-verify" class="btn secondary">Verify files</button>
+              <button id="btn-repair" data-busy class="btn secondary">Repair paths</button>
+            </div>
+          </div>
+
+          <section class="activity" data-filter="all">
+            <header class="activity-bar">
+              <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity <span class="activity-count"></span></h2>
+              <div class="seg seg-2 activity-filter" role="group" aria-label="Filter activity">
+                <button type="button" class="seg-btn active" data-act-filter="all">All</button>
+                <button type="button" class="seg-btn" data-act-filter="problems">Problems</button>
+              </div>
+              <button type="button" class="btn sm ghost" data-act-clear>Clear</button>
+            </header>
+            <div id="action-log" class="action-log" role="log" aria-label="Activity"><div class="logline logline-empty">Nothing has run yet.</div></div>
+          </section>
+        </section>
+
+        <!-- SETTINGS -->
+        <section id="tab-settings" class="panel">
+          <div class="sect">
+            <h2>Processing device</h2>
+            <p class="lede">Choose what runs the analysis. Automatic picks the fastest device that works on this computer.</p>
+            <div id="active-device" class="active-device" aria-live="polite"></div>
+            <div id="accel-list" class="accel-list" role="radiogroup" aria-label="Processing device"></div>
+            <div class="field gpu-index" id="gpu-index-field" hidden>
+              <label for="gpu-index">Which GPU</label>
+              <select id="gpu-index"></select>
+              <p class="help">Your computer has more than one. Pick the one to use.</p>
+            </div>
+          </div>
+
+          <div class="sect">
+            <h2>File name collisions</h2>
+            <p class="lede">What to do when a file with the same name is already in the destination. Photocure never overwrites a file.</p>
+            <div class="field">
+              <label for="set-collision">When a name is taken</label>
+              <select id="set-collision">
+                <option value="sequence">Add a number: photo (1).jpg</option>
+                <option value="date_suffix">Add the date taken: photo_20240501.jpg</option>
+                <option value="skip">Leave the file where it is</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="sect">
+            <h2>Workers</h2>
+            <p class="lede">More workers can speed things up but use more memory and disk bandwidth. Leave a box empty to let the app decide.</p>
+            <div class="form-grid workers">
+              <div class="field">
+                <div class="field-head"><label for="set-scan">Scan workers</label><span class="eff" id="eff-scan"></span></div>
+                <input id="set-scan" type="number" inputmode="numeric" min="0" max="128" step="1" placeholder="Auto">
+                <p class="help">Reads and fingerprints files. Raise it for SSDs or fast network drives. Lower it for spinning disks.</p>
+                <p class="field-error" id="err-scan" hidden></p>
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="set-decode">Analysis decode workers</label><span class="eff" id="eff-decode"></span></div>
+                <input id="set-decode" type="number" inputmode="numeric" min="0" max="128" step="1" placeholder="Auto">
+                <p class="help">Opens and resizes photos ahead of the model. Each worker holds a photo in memory.</p>
+                <p class="field-error" id="err-decode" hidden></p>
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="set-threads">CPU threads</label><span class="eff" id="eff-threads"></span></div>
+                <input id="set-threads" type="number" inputmode="numeric" min="0" max="128" step="1" placeholder="Auto">
+                <p class="help">Used when the analysis runs on the CPU. Fewer threads keep the computer responsive.</p>
+                <p class="field-error" id="err-threads" hidden></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button id="btn-save-settings" class="btn primary" type="button">Save settings</button>
+            <button id="btn-reset-settings" class="btn secondary" type="button">Back to saved</button>
+            <span id="settings-msg" class="help" role="status"></span>
+          </div>
+
+          <div class="sect" id="sect-keywords" style="margin-top:28px">
+            <h2>Keywords in sidecar files</h2>
+            <p class="lede">Photocure can add its own keywords to each photo's XMP sidecar: its category, an event name you chose, and Highlight for your best photos. Programs such as digiKam or Lightroom can then search and filter by them. Your ratings and other keywords are never changed.</p>
+            <label class="toggle"><input type="checkbox" id="set-keywords">Add keywords whenever a rating is saved</label>
+            <div class="btn-row" style="margin-top:14px">
+              <button id="btn-kw-write" class="btn secondary" type="button" data-busy>Write keywords for every photo</button>
+              <button id="btn-kw-remove" class="btn danger" type="button" data-busy>Remove them</button>
+            </div>
+            <p id="kw-note" class="help" style="margin-top:10px" role="status"></p>
+          </div>
+
+          <div class="sect" id="sect-about" tabindex="-1" style="margin-top:28px">
+            <h2>About Photocure</h2>
+            <p class="lede"><span>Intelligent image curator</span></p>
+            <div id="about-card"></div>
+          </div>
+
+          <div class="sect" style="margin-top:28px">
+            <h2>Restart server</h2>
+            <p class="lede">Restart Photocure and reload this page. A restart is refused while files are being moved or restored.</p>
+            <div class="btn-row"><button id="btn-restart" class="btn secondary" type="button">Restart Photocure</button></div>
+          </div>
+
+          <div class="sect danger" style="margin-top:28px">
+            <h2>Reset library</h2>
+            <p class="lede">Clear all indexed photos, metadata, bursts, events, and AI analysis from the database. Original photo files on your disk will NOT be deleted or modified.</p>
+            <div class="btn-row">
+              <button id="btn-reset-library" class="btn danger" type="button" data-busy>Clear indexed library</button>
+              <span id="reset-library-msg" class="help" role="status"></span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="bulkbar" class="bulk" hidden role="region" aria-label="Selected photos">
+    <b id="bulk-count">0 selected</b>
+    <select id="bulk-cat" aria-label="Move selected to category"></select>
+    <button class="btn sm ghost" id="bulk-lock">Lock</button>
+    <button class="btn sm ghost" id="bulk-delete" title="Leave the selected photos out of the result">Mark for delete</button>
+    <button class="btn sm ghost" id="bulk-clean" title="Make copies without location or other hidden details">Clean export</button>
+    <button class="btn sm ghost" id="bulk-clear">Clear</button>
+  </div>
+
+  <!-- lightbox -->
+  <div id="lightbox" class="lb" hidden role="dialog" aria-modal="true" aria-label="Photo viewer">
+    <button class="lb-close" id="lb-close" aria-label="Close viewer"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+    <figure class="lb-stage">
+      <button class="lb-nav prev" id="lb-prev" aria-label="Previous photo"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
+      <img id="lb-img" alt="">
+      <span class="spinner lb-loading" id="lb-loading" hidden></span>
+      <button class="lb-nav next" id="lb-next" aria-label="Next photo"><svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button>
+    </figure>
+    <aside class="lb-info">
+      <div>
+        <h2 id="lb-title"></h2>
+        <div class="path" id="lb-path"></div>
+      </div>
+      <dl id="lb-meta"></dl>
+      <section id="lb-why" class="why" hidden aria-label="Why this is uncertain">
+        <h3>Why this is uncertain</h3>
+        <p id="lb-why-text"></p>
+        <div id="lb-guesses" class="bars"></div>
+        <p class="help">Choose a category below. Then use Learn from my choices on the Finalize page.</p>
+      </section>
+      <div class="lb-rate" id="lb-rate" role="group" aria-label="Rating">
+        <button type="button" class="star" data-star="1" aria-label="1 star"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">1</span></button>
+        <button type="button" class="star" data-star="2" aria-label="2 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">2</span></button>
+        <button type="button" class="star" data-star="3" aria-label="3 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">3</span></button>
+        <button type="button" class="star" data-star="4" aria-label="4 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">4</span></button>
+        <button type="button" class="star" data-star="5" aria-label="5 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">5</span></button>
+        <button type="button" class="btn sm" id="lb-fav" aria-pressed="false">&#9829; Favourite</button>
+        <button type="button" class="btn sm" id="lb-reject" aria-pressed="false">Reject</button>
+      </div>
+      <div class="field">
+        <label for="lb-cat">Category</label>
+        <select id="lb-cat"></select>
+      </div>
+      <div class="lb-actions">
+        <button class="btn sm secondary" id="lb-lock"><svg class="ic sm" aria-hidden="true"><use href="#i-lock"/></svg><span>Lock</span></button>
+        <button class="btn sm secondary" id="lb-similar"><svg class="ic sm" aria-hidden="true"><use href="#i-copy"/></svg>Find similar</button>
+        <button class="btn sm secondary" id="lb-clear">Back to AI choice</button>
+        <button class="btn sm secondary" id="lb-approve" aria-pressed="false">Mark for delete</button>
+      </div>
+      <div class="lb-count" id="lb-count"></div>
+      <div class="keys"><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> browse</span><span><kbd>1</kbd>-<kbd>5</kbd> rate</span><span><kbd>0</kbd> clear</span><span><kbd>x</kbd> reject</span><span><kbd>f</kbd> favourite</span><span><kbd>l</kbd> lock</span><span><kbd>Esc</kbd> close</span></div>
+    </aside>
+  </div>
+
+  <!-- similar images -->
+  <div id="similar-panel" class="similar" hidden>
+    <div class="similar-head"><h2 id="similar-title">Similar photos</h2>
+      <button id="similar-close" class="btn">Close</button></div>
+    <div id="similar-grid" class="grid"></div>
+  </div>
+
+  <!-- folder picker -->
+  <div id="picker" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+      <header>
+        <h2 id="picker-title">Choose a folder</h2>
+        <button class="icon-btn" id="picker-close" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="picker-bar">
+        <button class="icon-btn" id="picker-up" title="Up one level" aria-label="Up one level"><svg class="ic" aria-hidden="true"><use href="#i-up"/></svg></button>
+        <input id="picker-path" type="text" aria-label="Current folder" spellcheck="false" autocomplete="off">
+        <button class="btn" id="picker-new"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>New folder</button>
+      </div>
+      <div class="picker-body">
+        <ul class="picker-roots" id="picker-roots" aria-label="Places"></ul>
+        <ul class="picker-list" id="picker-list" aria-label="Folders"></ul>
+      </div>
+      <footer>
+        <div class="grow" id="picker-info"></div>
+        <button class="btn" id="picker-cancel">Cancel</button>
+        <button class="btn primary" id="picker-ok">Use this folder</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- clean export -->
+  <div id="cleanexport" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="ce-title">
+      <header>
+        <h2 id="ce-title">Clean export</h2>
+        <button class="icon-btn" id="ce-close" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="modal-body">
+        <p class="help">Makes copies of the selected photos without location, camera or other hidden details, ready to share. Your originals are never changed.</p>
+        <div class="field wide">
+          <label for="ce-dest">Destination folder</label>
+          <div class="with-btn">
+            <input id="ce-dest" type="text" placeholder="Choose where the clean copies go" autocomplete="off" spellcheck="false">
+            <button class="btn" id="ce-browse" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+          </div>
+        </div>
+        <div class="field wide">
+          <span class="lbl">Sensitive details</span>
+          <div><button class="btn secondary" id="ce-scan" type="button">Check for sensitive details</button></div>
+          <p class="help" id="ce-scan-result" role="status">Not checked yet. This looks for license plates, payment cards, screens, house numbers and ID documents. It can miss small ones, so look over anything you share.</p>
+          <ul id="ce-flagged" class="help"></ul>
+        </div>
+        <div class="field">
+          <label for="ce-policy">Photos with sensitive details</label>
+          <select id="ce-policy">
+            <option value="blur">Blur the sensitive areas</option>
+            <option value="skip">Leave them out</option>
+            <option value="include">Export them as they are</option>
+          </select>
+        </div>
+        <label class="toggle"><input type="checkbox" id="ce-html" checked>Add a web gallery (index.html)</label>
+        <label class="toggle"><input type="checkbox" id="ce-rename" checked>Use neutral file names (photo-0001.jpg)</label>
+      </div>
+      <footer>
+        <div class="grow" id="ce-status"></div>
+        <button class="btn" id="ce-cancel">Cancel</button>
+        <button class="btn primary" id="ce-go">Export</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- shortcuts -->
+  <div id="help" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <header>
+        <h2 id="help-title">Keyboard shortcuts</h2>
+        <button class="icon-btn" id="help-close" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="modal-body">
+        <table class="helptable">
+          <tr><td colspan="2"><h3>Moving around</h3></td></tr>
+          <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd> <kbd>&uarr;</kbd> <kbd>&darr;</kbd></td><td>Move the highlight over the photos. It scrolls into view.</td></tr>
+          <tr><td><kbd>Enter</kbd> <kbd>Space</kbd></td><td>Open the highlighted photo</td></tr>
+          <tr><td colspan="2"><h3>Any photo, in a list or in the viewer</h3></td></tr>
+          <tr><td><kbd>1</kbd>-<kbd>5</kbd></td><td>Rate with that many stars</td></tr>
+          <tr><td><kbd>0</kbd></td><td>Clear the rating</td></tr>
+          <tr><td><kbd>x</kbd></td><td>Reject, or un-reject. Nothing is deleted.</td></tr>
+          <tr><td><kbd>f</kbd></td><td>Favourite, or remove from favourites (kept in Photocure only)</td></tr>
+          <tr><td><kbd>l</kbd></td><td>Lock or unlock the photo so re-analysis never changes it</td></tr>
+          <tr><td colspan="2"><h3>Finalize and Junk review</h3></td></tr>
+          <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Next or previous photo</td></tr>
+          <tr><td><kbd>1</kbd>-<kbd>9</kbd></td><td>Set the category of the highlighted photo (instead of rating)</td></tr>
+          <tr><td><kbd>u</kbd></td><td>Undo the last category change</td></tr>
+          <tr><td colspan="2"><h3>Photo viewer</h3></td></tr>
+          <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>Previous or next photo</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Close the viewer</td></tr>
+          <tr><td colspan="2"><h3>Selecting</h3></td></tr>
+          <tr><td>Click the tick</td><td>Select a photo. Hold Shift to select a range.</td></tr>
+          <tr><td><kbd>?</kbd></td><td>Show this list</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="banners" class="banners" role="region" aria-label="Notices"></div>
+
+  <div id="confirm-modal" class="confirm-modal" role="alertdialog" aria-modal="true"
+       aria-labelledby="confirm-modal-title" aria-describedby="confirm-modal-message" hidden>
+    <div class="confirm-backdrop"></div>
+    <div class="confirm-content">
+      <p id="confirm-modal-subtitle" class="confirm-subtitle" hidden></p>
+      <h2 id="confirm-modal-title"></h2>
+      <p id="confirm-modal-message"></p>
+      <div id="confirm-modal-detail" class="confirm-detail"></div>
+      <div id="confirm-modal-input-wrap" class="confirm-input-wrap" hidden>
+        <label id="confirm-modal-input-label" for="confirm-modal-input" class="confirm-input-label"></label>
+        <input id="confirm-modal-input" type="text" autocomplete="off" class="confirm-input">
+        <p id="confirm-modal-input-error" class="field-error" role="alert" hidden></p>
+      </div>
+      <div class="confirm-buttons">
+        <button type="button" id="confirm-modal-cancel" class="btn"></button>
+        <button type="button" id="confirm-modal-ok" class="btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="auth-modal" class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" hidden>
+    <div class="confirm-backdrop"></div>
+    <form id="auth-form" class="confirm-content">
+      <h2 id="auth-title">Sign in to Photocure</h2>
+      <p>Paste the one-time code printed in the terminal, or your access token.</p>
+      <input id="auth-input" type="password" autocomplete="off" spellcheck="false" aria-label="Code or token" required>
+      <p id="auth-error" class="field-error" role="alert" hidden></p>
+      <div class="confirm-buttons"><button type="submit" class="btn primary">Continue</button></div>
+    </form>
+  </div>
+
+  <div id="restart-overlay" class="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="restart-text" hidden>
+    <div class="confirm-backdrop"></div>
+    <div class="confirm-content restart-box">
+      <div id="restart-spinner" class="spinner" aria-hidden="true"></div>
+      <p id="restart-text">Restarting Photocure...</p>
+    </div>
+  </div>
+
+  <div id="facepanel" class="bio-overlay bg-cyber-grid" hidden role="dialog" aria-label="Face inspection panel"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script type="module" src="/static/virtual_grid.mjs"></script>
+  <script src="/static/app.js?v={{VERSION}}"></script>
+</body>
+</html>
