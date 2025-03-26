@@ -1,0 +1,17 @@
+# Intel GPU access for Arc and integrated Iris Xe (UNTESTED):
+#   docker compose -f docker-compose.yml -f docker-compose.intel.yml up --build
+# The container installs the Intel (XPU) build of PyTorch on first start. It also needs the
+# Intel compute runtime inside the image. Pass the package names your base image provides:
+#   APT_PACKAGES="libze1 intel-opencl-icd" docker compose -f docker-compose.yml -f docker-compose.intel.yml up --build
+# Find your render group id with: getent group render
+services:
+  photocure:
+    build:
+      args:
+        APT_PACKAGES: ${APT_PACKAGES:-}
+    environment:
+      PCUR_ACCEL: xpu
+    devices:
+      - /dev/dri
+    group_add:
+      - "${RENDER_GID:-109}"

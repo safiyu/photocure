@@ -1,0 +1,25 @@
+#!/bin/sh
+# /usr/bin/photocure: run the per-user environment, creating or upgrading it when needed.
+USER_VENV="${XDG_DATA_HOME:-$HOME/.local/share}/photocure/venv"
+VENV_CLI="$USER_VENV/bin/photocure"
+VENV_VERSION="$USER_VENV/.photocure_version"
+SYSTEM_VERSION="/opt/photocure/VERSION"
+
+# The environment belongs to the user, never to a system location.
+case "$USER_VENV" in
+    /opt/*|/usr/*|/etc/*|/var/*|/bin/*|/sbin/*|/lib*|/boot/*|/sys/*|/proc/*)
+        echo "photocure: refusing to use $USER_VENV (a system path). Check XDG_DATA_HOME." >&2
+        exit 1 ;;
+esac
+
+# First run, or an earlier install that never finished (the marker is written last).
+if [ ! -x "$VENV_CLI" ] || [ ! -f "$VENV_VERSION" ]; then
+    exec python3 /opt/photocure/bootstrap.py "$@"
+fi
+
+# Package upgrade: keep the venv, upgrade only the wheel.
+if [ -f "$SYSTEM_VERSION" ] && [ "$(cat "$SYSTEM_VERSION")" != "$(cat "$VENV_VERSION")" ]; then
+    exec python3 /opt/photocure/bootstrap.py --upgrade "$@"
+fi
+
+exec "$VENV_CLI" "$@"

@@ -1,0 +1,59 @@
+# Sample Docker Compose / Portainer Stack for Photocure
+# Ready to copy-paste directly into Portainer (Stacks > Add stack) or run via:
+#   docker compose -f docker-compose.stack.yml up -d
+#
+# Once started, open http://<your-server-ip>:8080 and enter the PCUR_AUTH_TOKEN below.
+
+services:
+  photocure:
+    image: safiyu/photocure:latest
+    container_name: photocure
+    restart: unless-stopped
+    # Run as your host user/group ID to avoid file permission issues.
+    # Check your host UID/GID with: id -u && id -g
+    user: "1000:1000"
+    ports:
+      - "8080:8080"
+    environment:
+      # Allow access from any LAN IP, hostname, or reverse proxy.
+      # (Or set a comma-separated list like: 192.168.1.50,photos.home.arpa)
+      - PCUR_ALLOWED_HOSTS=*
+      # Access token required to log into the web dashboard.
+      - PCUR_AUTH_TOKEN=change-me-to-a-secure-password
+      # 1 = auto-detect hardware and install AI models into /data on first start
+      - PCUR_AUTO_SETUP=1
+      # Device selection: auto, cuda, cpu, rocm, xpu
+      - PCUR_DEVICE_DEVICE=auto
+      - PCUR_ACCEL=
+      # Comma-separated list of folders that appear in the Photocure folder picker
+      - PCUR_BROWSE_ROOTS=/photos,/output
+      # Set to false if photos are mounted read-only (:ro) to avoid XMP write errors
+      - PCUR_WRITE_SIDECARS=false
+
+    volumes:
+      # Source photo library (use :ro for read-only scan, or :rw if you want moves)
+      - /path/to/photos:/photos:ro
+      # Output destination for curated and organized photos
+      - /path/to/organized:/output:rw
+      # Named volume for persistent database, cache, and downloaded AI model weights
+      - curator-data:/data
+
+    # Optional: NVIDIA GPU Acceleration
+    # (Requires nvidia-container-toolkit installed on the host Docker daemon)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 1800s
+
+volumes:
+  curator-data:

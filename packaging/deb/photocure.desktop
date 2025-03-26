@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Photocure
+Comment=Intelligent, local photo curation and cull assistant
+Exec=/usr/bin/photocure start
+Icon=io.github.safiyu.photocure
+Terminal=false
+Type=Application
+Categories=Graphics;Photography;
+Keywords=photo;curate;raw;cull;gallery;
+StartupNotify=true

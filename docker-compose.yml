@@ -1,0 +1,53 @@
+# Usage: PHOTOS_DIR=/path/to/photos OUTPUT_DIR=/path/to/organized docker compose up --build
+# Then open http://localhost:8080 and pick /photos in the folder picker.
+#
+# One image for every machine. On the first start it detects your hardware and installs the
+# matching AI libraries into the data volume (a few GB, once). Follow progress with:
+#   docker compose logs -f
+# The web page appears when that finishes. Later starts reuse the install and are quick.
+#
+# GPU access: add one override file, for example
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+# (docker-compose.rocm.yml for AMD, docker-compose.intel.yml for Intel). Without one the
+# CPU is used.
+services:
+  photocure:
+    build: .
+    image: safiyu/photocure:latest
+    # Published on localhost only. Every API call needs the access token, which is generated
+    # on first start, printed in `docker compose logs`, and kept in the data volume
+    # (/data/auth_token). Set PCUR_AUTH_TOKEN below to choose your own. To reach the page
+    # by another name or address (reverse proxy, LAN), publish the port accordingly and list
+    # that host in PCUR_ALLOWED_HOSTS, otherwise requests are rejected with "invalid host header".
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      PCUR_DEVICE_DEVICE: auto
+      PCUR_AUTH_TOKEN: ${PCUR_AUTH_TOKEN:-}
+      PCUR_ALLOWED_HOSTS: ${PCUR_ALLOWED_HOSTS:-}
+      # Set to cuda, rocm, xpu or cpu to skip detection.
+      PCUR_ACCEL: ${PCUR_ACCEL:-}
+      # Set to 0 to stop installing at start (offline or pre-baked images).
+      PCUR_AUTO_SETUP: ${PCUR_AUTO_SETUP:-1}
+    volumes:
+      # Hardlinks only work inside one filesystem. To organize with hardlinks instead of copies,
+      # mount a common parent (for example -v /mnt/storage:/media with /media/raw and
+      # /media/curated) rather than two unrelated folders; otherwise files are copied and
+      # Photocure says so after the apply.
+      # Use :ro instead of :rw if you only want to scan and copy, never move originals.
+      - ${PHOTOS_DIR:-./photos}:/photos:rw
+      - ${OUTPUT_DIR:-./output}:/output:rw
+      - curator-data:/data
+    # Files are written as this user; match your host user if moves fail with permission errors.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+    # The first start installs the AI libraries (a few GB), so allow it plenty of time.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 1800s
+
+volumes:
+  curator-data:
