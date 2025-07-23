@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from photo_curator.config import CuratorConfig
-from photo_curator.db.models import FaceDetection, ImageRecord, QualityMetric, SemanticScore
-from photo_curator.rules.decision_matrix import DecisionMatrix
-from photo_curator.rules.organizer import FolderOrganizer, OrganizeMode, _safe_name
-from photo_curator.rules.taxonomy import (
+from photocure.config import CuratorConfig
+from photocure.db.models import FaceDetection, ImageRecord, QualityMetric, SemanticScore
+from photocure.rules.decision_matrix import Decision, DecisionMatrix
+from photocure.rules.organizer import FolderOrganizer, OrganizeMode, _safe_name
+from photocure.rules.taxonomy import (
     CLIP_CATEGORIES,
     CategoryType,
     TAXONOMY_PROMPTS,
@@ -49,7 +49,7 @@ def _face(conf: float = 0.9) -> FaceDetection:
                          eye_aspect_ratio=0.25, face_sharpness=300)
 
 
-def _eval(rec) -> "Decision":
+def _eval(rec) -> Decision:
     return DecisionMatrix(CuratorConfig()).evaluate_record(rec)
 
 
@@ -113,8 +113,9 @@ def test_low_confidence_face_does_not_route_to_people():
 
 def test_clip_routes_categories(cfg):
     for cat in ("screenshot", "document", "graphic", "food", "animal", "scenery"):
+        rival = "food" if cat == "scenery" else "scenery"
         rec = _rec(quality=_good_quality(),
-                   semantic=_semantic(cat, 0.85, top2_score=0.05))
+                   semantic=_semantic(cat, 0.85, top2=rival, top2_score=0.05))
         d = _eval(rec)
         assert d.category == CategoryType(cat), cat
         assert d.reason.startswith("clip top1")
@@ -175,8 +176,8 @@ def test_taxonomy_prompts_cover_all_clip_categories():
 
 
 def test_category_folders_match_spec():
-    assert CategoryType.SCREENSHOT.folder == "Junk_Review/Screenshots"
-    assert CategoryType.DOCUMENT.folder == "Junk_Review/Documents"
+    assert CategoryType.SCREENSHOT.folder == "Utility_Reference/Screenshots"
+    assert CategoryType.DOCUMENT.folder == "Utility_Reference/Documents"
     assert CategoryType.FOOD.folder == "Non-Human/Food"
     assert CategoryType.ANIMAL.folder == "Non-Human/Animals"
     assert CategoryType.SCENERY.folder == "Non-Human/Scenery"
@@ -192,7 +193,7 @@ def test_category_folders_match_spec():
 
 def test_organizer_people_date_hierachy(cfg):
     org = FolderOrganizer(cfg, organize_root=Path("/org"))
-    from photo_curator.rules.decision_matrix import Decision
+    from photocure.rules.decision_matrix import Decision
     rec = _rec(path="/lib/a.jpg", filename="a.jpg")
     dec = Decision(CategoryType.PEOPLE, "face", needs_date=True)
     target = org.full_target(rec, dec)
@@ -201,7 +202,7 @@ def test_organizer_people_date_hierachy(cfg):
 
 def test_organizer_food_date_hierarchy(cfg):
     org = FolderOrganizer(cfg, organize_root=Path("/org"))
-    from photo_curator.rules.decision_matrix import Decision
+    from photocure.rules.decision_matrix import Decision
     rec = _rec(path="/lib/b.jpg", filename="b.jpg")
     dec = Decision(CategoryType.FOOD, "clip", needs_date=True)
     assert org.full_target(rec, dec) == Path("/org/Non-Human/Food/2024/05/12/b.jpg")
@@ -209,15 +210,15 @@ def test_organizer_food_date_hierarchy(cfg):
 
 def test_organizer_screenshot_no_date(cfg):
     org = FolderOrganizer(cfg, organize_root=Path("/org"))
-    from photo_curator.rules.decision_matrix import Decision
+    from photocure.rules.decision_matrix import Decision
     rec = _rec(path="/lib/c.jpg", filename="c.jpg")
     dec = Decision(CategoryType.SCREENSHOT, "clip")
-    assert org.full_target(rec, dec) == Path("/org/Junk_Review/Screenshots/c.jpg")
+    assert org.full_target(rec, dec) == Path("/org/Utility_Reference/Screenshots/c.jpg")
 
 
 def test_organizer_missing_date_uses_unknown(cfg):
     org = FolderOrganizer(cfg, organize_root=Path("/org"))
-    from photo_curator.rules.decision_matrix import Decision
+    from photocure.rules.decision_matrix import Decision
     rec = _rec(path="/lib/d.jpg", filename="d.jpg",
                taken_at=None, taken_at_source="unknown")
     dec = Decision(CategoryType.SCENERY, "clip", needs_date=True)
@@ -227,7 +228,7 @@ def test_organizer_missing_date_uses_unknown(cfg):
 
 def test_organizer_epoch_date_never_used(cfg):
     org = FolderOrganizer(cfg, organize_root=Path("/org"))
-    from photo_curator.rules.decision_matrix import Decision
+    from photocure.rules.decision_matrix import Decision
     rec = _rec(path="/lib/e.jpg", filename="e.jpg",
                taken_at=datetime(1970, 1, 1), taken_at_source="mtime")
     dec = Decision(CategoryType.PEOPLE, "face", needs_date=True)
@@ -237,12 +238,12 @@ def test_organizer_epoch_date_never_used(cfg):
 
 
 def test_organizer_alternate_goes_to_burst_folder(cfg):
-    from photo_curator.db.models import BurstGroup
+    from photocure.db.models import BurstGroup
     org = FolderOrganizer(cfg, organize_root=Path("/org"))
     bg = BurstGroup(name="Burst_20240512_0001")
     bg.id = 7
     org.set_bursts([bg])
-    from photo_curator.rules.decision_matrix import Decision
+    from photocure.rules.decision_matrix import Decision
     rec = _rec(path="/lib/f.jpg", filename="f.jpg", id=42, burst_id=7)
     dec = Decision(CategoryType.UNCERTAIN, "burst alternate", is_alternate=True)
     target = org.full_target(rec, dec)
@@ -250,7 +251,7 @@ def test_organizer_alternate_goes_to_burst_folder(cfg):
 
 
 def test_organizer_in_place_mode_uses_hardlink(cfg):
-    from photo_curator.rules.decision_matrix import Decision
+    from photocure.rules.decision_matrix import Decision
     org = FolderOrganizer(cfg, organize_root=Path("/org"),
                           mode=OrganizeMode.IN_PLACE)
     rec = _rec(path="/lib/g.jpg", filename="g.jpg")
@@ -261,6 +262,128 @@ def test_organizer_in_place_mode_uses_hardlink(cfg):
 
 
 def test_safe_name_strips_unsafe_chars():
-    assert _safe_name("a b/c:*.jpg") == "a_b_c_.jpg"
+    assert _safe_name("a b/c:*.jpg") == "a b_c_.jpg"
     assert _safe_name("...") == "unnamed"
     assert _safe_name("IMG_1234.JPG") == "IMG_1234.JPG"
+
+
+# ---------------------------------------------------------------------------
+# Review fixes: new buckets and routing order
+# ---------------------------------------------------------------------------
+
+def test_new_category_folders():
+    assert CategoryType.UNREADABLE.folder == "Junk_Review/Unreadable"
+    assert CategoryType.NEAR_DUPLICATE.folder == "Junk_Review/Near_Duplicates"
+    assert CategoryType.BURST_ALTERNATE.folder == "Bursts"
+    assert CategoryType.UNREADABLE.is_junk and CategoryType.NEAR_DUPLICATE.is_junk
+    assert not CategoryType.BURST_ALTERNATE.is_junk
+
+
+def test_failed_decode_routes_to_unreadable():
+    d = _eval(_rec(infer_status="failed"))
+    assert d.category == CategoryType.UNREADABLE
+
+
+def test_duplicate_beats_unreadable():
+    d = _eval(_rec(infer_status="failed", is_duplicate=True))
+    assert d.category == CategoryType.DUPLICATE
+
+
+def test_burst_alternate_has_its_own_category():
+    d = _eval(_rec(is_alternate=True, burst_id=3))
+    assert d.category == CategoryType.BURST_ALTERNATE
+    assert d.is_alternate is True
+
+
+def test_near_duplicate_routes_to_near_duplicates():
+    d = _eval(_rec(near_dup_of=7, quality=_good_quality(),
+                   semantic=_semantic("food", 0.8)))
+    assert d.category == CategoryType.NEAR_DUPLICATE
+
+
+def test_near_duplicate_flag_is_ignored_for_burst_members():
+    rec = _rec(near_dup_of=7, burst_id=2, quality=_good_quality(),
+               semantic=_semantic("food", 0.8, "scenery", 0.1))
+    assert _eval(rec).category == CategoryType.FOOD
+
+
+def test_alternate_beats_near_duplicate():
+    rec = _rec(near_dup_of=7, burst_id=2, is_alternate=True)
+    assert _eval(rec).category == CategoryType.BURST_ALTERNATE
+
+
+def test_rule_buckets_never_come_from_the_model():
+    rec = _rec(quality=_good_quality(), semantic=_semantic("duplicate", 0.9))
+    assert _eval(rec).category == CategoryType.UNCERTAIN
+
+
+# ---------------------------------------------------------------------------
+# Review fixes: organizer
+# ---------------------------------------------------------------------------
+
+def test_safe_name_keeps_unicode_and_distinct_names():
+    assert _safe_name("Fête_été.jpg") == "Fête_été.jpg"
+    a, b = _safe_name("照片1.jpg"), _safe_name("照片2.jpg")
+    assert a == "照片1.jpg" and b == "照片2.jpg" and a != b
+
+
+def test_safe_name_strips_reserved_and_control_chars():
+    assert _safe_name('a<b>c"d|e?.jpg') == "a_b_c_d_e_.jpg"
+    assert _safe_name("x\x00y\x1fz.png") == "x_y_z.png"
+    assert _safe_name("../../etc/passwd") == "_.._etc_passwd"
+    assert "/" not in _safe_name("../../etc/passwd")
+
+
+def test_safe_name_normalizes_nfc_and_caps_length():
+    import unicodedata
+    decomposed = unicodedata.normalize("NFD", "é.jpg")
+    assert _safe_name(decomposed) == unicodedata.normalize("NFC", "é.jpg")
+    long = _safe_name("é" * 300 + ".jpg")
+    assert len(long.encode("utf-8")) <= 255 and long.endswith(".jpg")
+
+
+def test_unknown_date_folder_has_no_zero_padding_dirs(cfg):
+    org = FolderOrganizer(cfg, organize_root=Path("/org"))
+    rec = _rec(path="/lib/d.jpg", filename="d.jpg", taken_at=None,
+               taken_at_source="unknown")
+    dec = Decision(CategoryType.PEOPLE, "face", needs_date=True)
+    assert org.full_target(rec, dec) == Path("/org/People/Unknown_Date/d.jpg")
+
+
+def test_uncertain_without_date_stays_in_uncertain_folder(cfg):
+    org = FolderOrganizer(cfg, organize_root=Path("/org"))
+    rec = _rec(path="/lib/d.jpg", filename="d.jpg", taken_at=None)
+    dec = Decision(CategoryType.UNCERTAIN, "low confidence")
+    assert org.full_target(rec, dec) == Path("/org/Uncertain_Review/d.jpg")
+
+
+def test_organizer_event_label_in_day_folder(cfg):
+    from photocure.db.models import EventGroup
+    org = FolderOrganizer(cfg, organize_root=Path("/org"), use_events=True)
+    ev = EventGroup(label="Event3")
+    ev.id = 3
+    org.set_events([ev])
+    rec = _rec(path="/lib/a.jpg", filename="a.jpg", event_id=3)
+    dec = Decision(CategoryType.PEOPLE, "face", needs_date=True)
+    assert org.full_target(rec, dec) == Path("/org/People/2024/05/12_Event3/a.jpg")
+
+
+def test_organizer_event_label_is_opt_in(cfg):
+    org = FolderOrganizer(cfg, organize_root=Path("/org"))
+    rec = _rec(path="/lib/a.jpg", filename="a.jpg", event_id=3)
+    dec = Decision(CategoryType.PEOPLE, "face", needs_date=True)
+    assert org.full_target(rec, dec) == Path("/org/People/2024/05/12/a.jpg")
+
+
+def test_organizer_event_without_event_id_uses_plain_day(cfg):
+    org = FolderOrganizer(cfg, organize_root=Path("/org"), use_events=True)
+    rec = _rec(path="/lib/a.jpg", filename="a.jpg")
+    dec = Decision(CategoryType.FOOD, "clip", needs_date=True)
+    assert org.full_target(rec, dec) == Path("/org/Non-Human/Food/2024/05/12/a.jpg")
+
+
+def test_organizer_decision_folder_override(cfg):
+    org = FolderOrganizer(cfg, organize_root=Path("/org"))
+    rec = _rec(path="/lib/a.jpg", filename="a.jpg")
+    dec = Decision(CategoryType.CUSTOM, "clip", folder="Family/Kids")
+    assert org.full_target(rec, dec) == Path("/org/Family/Kids/a.jpg")

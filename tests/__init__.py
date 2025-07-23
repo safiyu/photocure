@@ -1,1 +1,1 @@
-# Test package for photo-curator.
+# Test package for photocure.

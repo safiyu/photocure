@@ -3,7 +3,7 @@
 Covers:
 - Dry-run: no filesystem mutation.
 - Move / copy / hardlink execution with transactional ledger (PENDING → COMMITTED).
-- Collision rename (_dup<sha6>).
+- Collision rename (sequence policy: name (1).ext).
 - Rollback: move-back, copy-removal, hardlink-removal, symlink-removal.
 - Rollback hash verification (refuses on mismatch).
 - Rollback idempotency.
@@ -12,24 +12,20 @@ Covers:
 """
 from __future__ import annotations
 
-import filecmp
 import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
 from tests.conftest import make_image
-from photo_curator.config import CuratorConfig
-from photo_curator.db.models import ImageRecord
-from photo_curator.db.repository import PhotoRepository
-from photo_curator.db.session import get_session, init_db
-from photo_curator.engine.action_engine import ActionEngine, new_transaction_id
-from photo_curator.engine.rollback import RollbackEngine
-from photo_curator.rules.organizer import PlannedAction
-from photo_curator.rules.taxonomy import CategoryType
-from photo_curator.scanner.hasher import compute_sha256
+from photocure.config import CuratorConfig
+from photocure.db.repository import PhotoRepository
+from photocure.db.session import get_session, init_db
+from photocure.engine.action_engine import ActionEngine, new_transaction_id
+from photocure.engine.rollback import RollbackEngine
+from photocure.rules.organizer import PlannedAction
+from photocure.rules.taxonomy import CategoryType
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +57,7 @@ def seeded_repo(cfg, tmp_db, tmp_path):
         for i in range(1, 6)
     ]
     init_db(tmp_db, drop=True)
-    from photo_curator.scanner.file_scanner import FileScanner
+    from photocure.scanner.file_scanner import FileScanner
     res = FileScanner(cfg).scan_directory(root, db_path=tmp_db, show_progress=False)
     assert res.new == len(paths)
 
@@ -232,9 +228,9 @@ def test_collision_renames_target(cfg, seeded_repo, tmp_path):
     assert rep.collisions >= 1
     # The pre-existing file must be untouched.
     assert victim.read_bytes() == b"pre-existing content"
-    # The moved file got a _dup suffix.
+    # The moved file got a sequence suffix.
     moved = [p for p in target.iterdir() if p.name != records[0].filename and p.is_file()]
-    assert any("_dup" in p.name for p in moved), f"no _dup rename found in {list(target.iterdir())}"
+    assert any(" (1)" in p.name for p in moved), f"no sequence rename found in {list(target.iterdir())}"
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +402,7 @@ def test_rollback_invariance_100_files(cfg, tmp_path):
         paths.append(p)
 
     init_db(cfg.db_path, drop=True)
-    from photo_curator.scanner.file_scanner import FileScanner
+    from photocure.scanner.file_scanner import FileScanner
     res = FileScanner(cfg).scan_directory(root, db_path=cfg.db_path, show_progress=False)
     assert res.new == n
 

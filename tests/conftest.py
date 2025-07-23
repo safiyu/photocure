@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the photo-curator test suite.
+"""Shared pytest fixtures for the photocure test suite.
 
 All inference tests force the deterministic CPU backends (Haar face detector
 and the stub CLIP engine) via the ``PCUR_BACKEND`` environment variable so the
@@ -21,17 +21,20 @@ if str(_ROOT) not in sys.path:
 # unless the operator explicitly wants the real engines.
 os.environ.setdefault("PCUR_BACKEND", os.environ.get("PCUR_BACKEND", "stub"))
 os.environ.setdefault("PCUR_DEVICE_DEVICE", "cpu")
+# Starlette's TestClient sends "Host: testserver"; pin a token so no auth_token file is written.
+os.environ.setdefault("PCUR_ALLOWED_HOSTS", "testserver")
+os.environ.setdefault("PCUR_AUTH_TOKEN", "test-token-for-the-suite")
 
 
 @pytest.fixture()
 def tmp_db(tmp_path):
     """A fresh SQLite state store path inside the temp sandbox."""
-    return tmp_path / "photo_curator.db"
+    return tmp_path / "photocure.db"
 
 
 @pytest.fixture()
 def cfg(tmp_db):
-    from photo_curator.config import CuratorConfig
+    from photocure.config import CuratorConfig
 
     c = CuratorConfig()
     c.db_path = tmp_db
@@ -42,7 +45,7 @@ def cfg(tmp_db):
 @pytest.fixture()
 def session(cfg, tmp_db):
     """An open, committed-at-exit SQLModel session over a fresh schema."""
-    from photo_curator.db.session import get_session, init_db
+    from photocure.db.session import get_session, init_db
 
     init_db(tmp_db, drop=True)
     with get_session(tmp_db) as s:
@@ -51,7 +54,7 @@ def session(cfg, tmp_db):
 
 @pytest.fixture()
 def repo(session):
-    from photo_curator.db.repository import PhotoRepository
+    from photocure.db.repository import PhotoRepository
 
     return PhotoRepository(session)
 
@@ -81,10 +84,21 @@ def make_image(path: Path, size=(480, 320), rng_seed: int = 0,
         step = max(8, min(h, w) // 16)
         for y in range(0, h, step):
             for x in range(0, w, step):
-                v = int(255 * ((x * 7 + y * 13) % 97) / 97)
+                v = int(255 * ((x * 7 + y * 13 + rng_seed * 37) % 97) / 97)
                 img[y:y + step, x:x + step] = v
+        # Stamp the seed into the first MCU so every seed yields distinct bytes.
+        img[:16, :16] = (rng_seed & 255, (rng_seed >> 8) & 255, (rng_seed * 7) & 255)
         if blur:
             img = cv2.GaussianBlur(img, (21, 21), 11)
     ok = cv2.imwrite(str(path), img, [cv2.IMWRITE_JPEG_QUALITY, 92])
     assert ok, f"could not write {path}"
     return path
+
+
+@pytest.fixture(autouse=True)
+def _pretend_in_venv(monkeypatch, request):
+    """Install hints depend on where Python runs; keep them stable unless a test says otherwise."""
+    if "real_venv_detection" in request.keywords:
+        return
+    from photocure.inference import backends
+    monkeypatch.setattr(backends, "in_venv", lambda: True)
