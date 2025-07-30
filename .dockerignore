@@ -1,0 +1,17 @@
+.git
+.venv
+venv
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+tests
+*.db
+*.db-wal
+*.db-shm
+.cache
+Organized
+Organized_Drive
+output
+photos
+data

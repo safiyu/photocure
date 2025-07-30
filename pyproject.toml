@@ -3,13 +3,13 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "photo-curator"
-version = "0.1.0"
-description = "AI Photo Curator & Categorizer - offline, GPU-accelerated, transactionally reversible photo library curation engine."
+name = "photocure"
+dynamic = ["version"]
+description = "Intelligent image curator. Offline, GPU-accelerated, transactionally reversible photo library curation engine."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Safi" }]
+authors = [{ name = "Safiyu Vattaparambil" }]
 dependencies = [
     "numpy>=1.24",
     "sqlmodel>=0.0.14",
@@ -25,27 +25,84 @@ dependencies = [
     "rich>=13.0",
     "exifread>=3.0",
     "python-multipart>=0.0.9",
+    "pyyaml>=6",
+    "lxml>=5.0",
+    "reverse_geocoder>=1.5.1",
 ]
 
 [project.optional-dependencies]
+# AI model for recognising photos. Works on Apple Silicon (MPS), NVIDIA and plain CPU.
+ml = [
+    "torch>=2.1",
+    "torchvision>=0.16",
+    "open-clip-torch>=2.20",
+]
+# Blink detection. Optional: faces are found with the bundled YuNet model either way, but
+# eye state stays "unknown" without MediaPipe. It installs OpenCV's GUI build as a
+# dependency; "photocure setup" swaps the headless build back in.
+faces = [
+    "mediapipe>=0.10.14",
+]
+# The ml packages for NVIDIA GPUs.
 gpu = [
     "torch>=2.1",
     "torchvision>=0.16",
     "open-clip-torch>=2.20",
-    "insightface>=0.7.3",
-    "onnxruntime-gpu>=1.16",
 ]
-dev = ["pytest>=7.0", "httpx>=0.26"]
+watch = ["watchdog>=3"]
+# Lets an AI agent search, view and act on the library: photocure mcp.
+mcp = ["mcp>=1.2"]
+dev = ["pytest>=7.0", "httpx>=0.26", "psd-tools>=1.9"]
 
 [project.scripts]
-photo-curator = "photo_curator.cli:cli"
+photocure = "photocure.cli:cli"
+photo-curator = "photocure.cli:cli"  # old command name, kept so existing habits keep working
 
 [tool.setuptools.packages.find]
-include = ["photo_curator*"]
+include = ["photocure*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "photocure.__version__" }
 
 [tool.setuptools.package-data]
-photo_curator = ["ui/static/*"]
+photocure = ["ui/static/*", "models/*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+# Enforce the rules that catch real defects + modernization.
+select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes (undefined names, unused imports, ...)
+    "W",     # pycodestyle warnings
+    "UP",    # pyupgrade (modern syntax)
+    "B",     # flake8-bugbear
+    "I",     # isort
+    "C4",    # comprehensions
+    "SIM",   # simplifications
+    "RET",   # return simplifications
+    "RUF",   # ruff-specific
+    "S110",  # try/except/pass
+    "TRY",   # try/except style
+    "PLW",   # pydocstyle warnings
+]
+ignore = [
+    # Intentional: model/decoder backends degrade gracefully on corrupt inputs.
+    "BLE001",
+    # Intentional: the standard Typer idiom of Option/Argument in signatures.
+    "B008",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["photocure"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "real_venv_detection: do not pin in_venv() for this test",
+    "browser: drives a real Chrome through node (skipped when node or Chrome is missing)",
+]
