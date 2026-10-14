@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Environments
+.venv/
+venv/
+
+# State store & caches (local artifacts, never source)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.cache/
+
+# Organized output trees
+Organized/
+Organized_Drive/
+
+# Model weights (open_clip / insightface caches)
+~/.cache/
+*.gguf
+
+# OS noise
+.DS_Store
+Thumbs.db
+__MACOSX/

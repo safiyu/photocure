@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photo-curator"
+version = "0.1.0"
+description = "AI Photo Curator & Categorizer - offline, GPU-accelerated, transactionally reversible photo library curation engine."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Safi" }]
+dependencies = [
+    "numpy>=1.24",
+    "sqlmodel>=0.0.14",
+    "xxhash>=3.0",
+    "opencv-python-headless>=4.8",
+    "pillow>=10.0",
+    "pillow-heif>=0.11",
+    "rawpy>=0.19",
+    "typer[all]>=0.9",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic-settings>=2.0",
+    "rich>=13.0",
+    "exifread>=3.0",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "torch>=2.1",
+    "torchvision>=0.16",
+    "open-clip-torch>=2.20",
+    "insightface>=0.7.3",
+    "onnxruntime-gpu>=1.16",
+]
+dev = ["pytest>=7.0", "httpx>=0.26"]
+
+[project.scripts]
+photo-curator = "photo_curator.cli:cli"
+
+[tool.setuptools.packages.find]
+include = ["photo_curator*"]
+
+[tool.setuptools.package-data]
+photo_curator = ["ui/static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
