@@ -20,7 +20,7 @@ scan → infer → cluster → plan → apply → (undo)
 | Stage | What happens |
 |---|---|
 | **1. Scan** | Multi-threaded recursive walk. Two-tier dedup (xxHash64 head/tail → SHA-256 only on collision). 4-tier date cascade: EXIF `DateTimeOriginal` → EXIF `CreateDate` → strict filename regex → `mtime` → `Unknown_Date/` (never 1970). |
-| **2. Infer** | Sequential GPU phases — never both models in VRAM at once. Phase A: faces (InsightFace/SCRFD, Haar fallback, stub). Memory sweep. Phase B: OpenCLIP ViT-B-16 zero-shot classification + 512-dim L2-normalized embeddings. Quality metrics (Laplacian blur, luminance, clipped-tail ratios) on the same decoded frame. |
+| **2. Infer** | Sequential GPU phases — never both models in VRAM at once, and **never the whole library in RAM** (frames are decoded in `infer_chunk_size` chunks and released per chunk). Phase A: faces (InsightFace/SCRFD, Haar fallback, stub). Memory sweep. Phase B: OpenCLIP ViT-B-16 zero-shot classification + 512-dim L2-normalized embeddings. Quality metrics (Laplacian blur, luminance, clipped-tail ratios) on the same decoded frame. |
 | **3. Cluster** | Burst detection: `Δt ≤ 30 s AND cosine(e_i, e_j) ≥ 0.88`, graph-constrained temporal sliding window (`O(N log N)` sort + in-window pairwise, union-find transitivity). Best-shot score: `0.40·blur + 0.30·face_sharp + 0.20·eye_open + 0.10·log(resolution)`. |
 | **4. Plan** | Pure decision matrix over DB state → destination path graph + HTML/CLI audit report. **Zero filesystem mutation.** |
 | **5. Apply** | `move` / `copy` / `hardlink` / `symlink` with collision renaming (`_dup<sha6>`). Each op: ledger row `PENDING` → FS mutation → `COMMITTED`. |
@@ -123,6 +123,7 @@ All settings are Pydantic models overridable via environment variables
 | `PCUR_DEVICE_CUDA_MEMORY_FRACTION` | `0.75` | PyTorch VRAM cap (headroom for Xorg/Jellyfin) |
 | `PCUR_DEVICE_FACE_BATCH_SIZE` | `32` | face batch |
 | `PCUR_DEVICE_CLIP_BATCH_SIZE` | `64` | CLIP batch |
+| `PCUR_DEVICE_INFER_CHUNK_SIZE` | `512` | decoded frames held in RAM at once (streaming bound) |
 | `PCUR_BURST_WINDOW_SECONDS` | `30` | burst temporal window |
 | `PCUR_BURST_SIMILARITY_THRESHOLD` | `0.88` | burst cosine threshold |
 | `PCUR_BURST_MIN_GROUP_SIZE` | `2` | minimum burst size |
@@ -163,7 +164,8 @@ routing) + child tables `quality`, `faces`, `semantics` (float16-quantized
 - `test_scanner.py` / `test_hasher.py` — EXIF cascade, two-tier dedup, resumption
 - `test_quality.py` — blur/brightness synthetic frames
 - `test_inference.py` — stub determinism + real OpenCLIP path (auto-skipped if
-  weights are not cached); EAR geometry
+  weights are not cached); EAR geometry; multi-chunk streaming (no image lost
+  across chunk boundaries)
 - `test_clustering.py` — burst windows, transitive chaining, best-shot scenario
 - `test_rules.py` — decision matrix routing
 - `test_action_engine.py` — ledger lifecycle, collision rename, rollback hash

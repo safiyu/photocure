@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Optional
+from collections.abc import Iterator
 
 from sqlalchemy import create_engine, event
 from sqlmodel import Session, SQLModel, Session as _Session

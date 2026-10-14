@@ -8,7 +8,7 @@ import pytest
 
 from photo_curator.config import CuratorConfig
 from photo_curator.db.models import FaceDetection, ImageRecord, QualityMetric, SemanticScore
-from photo_curator.rules.decision_matrix import DecisionMatrix
+from photo_curator.rules.decision_matrix import Decision, DecisionMatrix
 from photo_curator.rules.organizer import FolderOrganizer, OrganizeMode, _safe_name
 from photo_curator.rules.taxonomy import (
     CLIP_CATEGORIES,
@@ -49,7 +49,7 @@ def _face(conf: float = 0.9) -> FaceDetection:
                          eye_aspect_ratio=0.25, face_sharpness=300)
 
 
-def _eval(rec) -> "Decision":
+def _eval(rec) -> Decision:
     return DecisionMatrix(CuratorConfig()).evaluate_record(rec)
 
 

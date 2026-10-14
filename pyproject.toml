@@ -46,6 +46,38 @@ include = ["photo_curator*"]
 [tool.setuptools.package-data]
 photo_curator = ["ui/static/*"]
 
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+# Enforce the rules that catch real defects + modernization.
+select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes (undefined names, unused imports, ...)
+    "W",     # pycodestyle warnings
+    "UP",    # pyupgrade (modern syntax)
+    "B",     # flake8-bugbear
+    "I",     # isort
+    "C4",    # comprehensions
+    "SIM",   # simplifications
+    "RET",   # return simplifications
+    "RUF",   # ruff-specific
+    "S110",  # try/except/pass
+    "TRY",   # try/except style
+    "PLW",   # pydocstyle warnings
+]
+ignore = [
+    # Intentional: model/decoder backends degrade gracefully on corrupt inputs.
+    "BLE001",
+    # Intentional: the standard Typer idiom of Option/Argument in signatures.
+    "B008",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["photo_curator"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

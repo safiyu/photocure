@@ -12,12 +12,11 @@ from __future__ import annotations
 import concurrent.futures as cf
 import logging
 import mimetypes
-import sys
 import time
 from dataclasses import dataclass, field
 from datetime import timezone
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Set
+from collections.abc import Callable, Iterable
 
 from rich.progress import (
     BarColumn,
@@ -79,6 +78,19 @@ def _aware(d):
     return d
 
 
+def _safe_sha256(path: Path) -> str:
+    """Full-file SHA-256 that degrades to ``""`` on I/O failure.
+
+    A single unreadable file must not abort a scan; the caller treats an empty
+    result as "could not verify" rather than a crash.
+    """
+    try:
+        return compute_sha256(path)
+    except OSError as e:
+        log.warning("sha256 failed for %s: %s", path, e)
+        return ""
+
+
 class FileScanner:
     """Recursive scanner producing :class:`ImageRecord` rows via batch upserts."""
 
@@ -107,7 +119,7 @@ class FileScanner:
     # ------------------------------------------------------------------ scan
     def scan_directory(self, root: Path | str,
                        db_path: Path | str | None = None,
-                       on_progress: Optional[Callable[[int, int, str], None]] = None,
+                       on_progress: Callable[[int, int, str], None] | None = None,
                        show_progress: bool = True) -> ScanResult:
         root = Path(root).expanduser().resolve()
         if not root.exists():
@@ -122,6 +134,10 @@ class FileScanner:
         with get_session(db) as session:
             repo = PhotoRepository(session)
             known = repo.known_paths()
+            # Tier-1 fingerprints already in the store. A new file only needs a
+            # full-file SHA-256 if its quick-hash is in this set (or collides
+            # with an earlier file in this same scan pass) -- see _resolve_dedup.
+            known_qh = repo.known_quick_hashes()
 
             # Split into known (skip) vs new.
             new_files: list[Path] = []
@@ -172,7 +188,9 @@ class FileScanner:
             def build_record(wr: _WorkerResult) -> ImageRecord | None:
                 """Main-thread: turn a worker result into an ImageRecord.
 
-                Computes SHA-256, resolves dedup and assigns the row.
+                Resolves dedup (SHA-256 is computed *lazily*, only on a Tier-1
+                quick-hash collision -- see :meth:`_resolve_dedup`) and assigns
+                the row.
                 """
                 if wr.error or wr.exif is None:
                     log.warning("scan error %s: %s", wr.path, wr.error)
@@ -195,33 +213,17 @@ class FileScanner:
                 rec.gps_lat = exif.gps_lat
                 rec.gps_lon = exif.gps_lon
                 rec.camera_model = exif.camera_model
-                try:
-                    rec.sha256 = compute_sha256(wr.path)
-                    mem_match = seen_sha256.get(rec.sha256)
-                    if mem_match is not None:
-                        # Original is still in the unflushed batch (no id yet):
-                        # flag the duplicate now, link duplicate_of post-flush.
-                        rec.is_duplicate = True
-                        pending_dupes.append((rec, mem_match))
-                        result.duplicates += 1
-                    else:
-                        db_match = repo.find_by_sha256(
-                            rec.sha256, exclude_id=rec.id)
-                        if db_match is not None:
-                            repo.mark_duplicate(rec, db_match)
-                            result.duplicates += 1
-                        else:
-                            seen_sha256[rec.sha256] = rec
-                except OSError as e:
-                    log.warning("sha256 failed for %s: %s", wr.path, e)
-                    rec.sha256 = ""
+                self._resolve_dedup(rec, wr.path, repo, seen_qh, pending_dupes,
+                                    known_qh, result)
                 return rec
 
             batch: list[ImageRecord] = []
-            # Tier-2 dedup across the current batch: find_by_sha256 only sees
-            # rows already in the session, so a copy scanned in the same pass
-            # would otherwise slip through. This map closes that gap.
-            seen_sha256: dict[str, ImageRecord] = {}
+            # Same-pass originals keyed by Tier-1 quick-hash. Exact duplicates
+            # always share the quick-hash (same size + head/tail), so this map
+            # lets a later copy in the same scan pass find its original without
+            # a DB round-trip -- and lets _resolve_dedup backfill the original's
+            # (lazily-skipped) SHA-256 only when a real duplicate turns up.
+            seen_qh: dict[str, ImageRecord] = {}
             # (dup, original) pairs whose duplicate_of is linked after flush.
             pending_dupes: list[tuple[ImageRecord, ImageRecord]] = []
 
@@ -265,17 +267,88 @@ class FileScanner:
         result.duration_s = time.monotonic() - t0
         return result
 
+    # --------------------------------------------------------------- dedup
+    def _resolve_dedup(self, rec: ImageRecord, path: Path, repo,
+                       seen_qh: dict, pending_dupes: list,
+                       known_qh: set, result: "ScanResult") -> None:
+        """Lazy two-tier dedup for a single new record (mutates ``rec``).
+
+        Tier-1 (cheap head/tail, always) has already run in the worker. Tier-2
+        (the expensive full-file SHA-256) is read **only** when a quick-hash
+        collision forces verification::
+
+            same-pass quick-hash hit  -> hash both sides, dup if they match
+            in-store quick-hash hit   -> hash this file, verify vs the store
+            first sighting (no hit)   -> store NO hash (deferred to apply time)
+
+        Net effect: a library of *unique* photos pays only the O(1) head/tail
+        cost and never triggers a full-file read during scan; the expensive
+        read happens solely for files sharing a fingerprint with something
+        already known (i.e. real or near-duplicates).
+        """
+        # 1. Same-pass original (in the current/previous batch).
+        orig = seen_qh.get(rec.quick_hash)
+        if orig is not None:
+            # A same-pass file shares this fingerprint. Confirm the bytes match
+            # (a quick-hash collision can still be distinct content) before
+            # calling it a duplicate. Backfill the original's deferred hash.
+            if not orig.sha256:
+                orig.sha256 = _safe_sha256(Path(orig.path))
+            sha = _safe_sha256(path)
+            rec.sha256 = sha
+            if sha and sha == orig.sha256:
+                rec.is_duplicate = True
+                pending_dupes.append((rec, orig))
+                result.duplicates += 1
+            # Mismatch => genuinely different file; keep it, hash now stored.
+            return
+
+        # 2. In-store original from an earlier scan pass.
+        if rec.quick_hash in known_qh:
+            sha = _safe_sha256(path)
+            rec.sha256 = sha
+            if sha:
+                match = self._find_db_original(sha, repo, rec)
+                if match is not None:
+                    repo.mark_duplicate(rec, match)
+                    result.duplicates += 1
+                    return
+            seen_qh[rec.quick_hash] = rec
+            return
+
+        # 3. First sighting of this fingerprint: no full-file read (lazy
+        #    Tier-2). The SHA-256 stays deferred until a collision forces
+        #    verification, or the action engine computes it at apply time.
+        seen_qh[rec.quick_hash] = rec
+
+    @staticmethod
+    def _find_db_original(sha: str, repo, rec: ImageRecord) -> ImageRecord | None:
+        """Locate a definitive SHA-256 match already persisted (any path)."""
+        # Fast path: an earlier pass stored this exact sha256.
+        hit = repo.find_by_sha256(sha, exclude_id=rec.id)
+        if hit is not None:
+            return hit
+        # Otherwise confirm against the quick-hash candidates. A prior *lazy*
+        # run may have left the candidate's sha256 empty, so backfill it.
+        for cand in repo.find_by_quick_hash(rec.quick_hash, exclude_id=rec.id):
+            if not cand.sha256:
+                cand.sha256 = _safe_sha256(Path(cand.path))
+                repo.s.flush()
+            if cand.sha256 == sha:
+                return cand
+        return None
+
 
 @dataclass
 class _WorkerResult:
     path: Path
     size: int = 0
     quick_hash: str = ""
-    exif: Optional["ExifInfo"] = None
+    exif: ExifInfo | None = None
     error: str = ""
 
 
-def _os_walk(root: Path, skip_dirs: Set[str]):
+def _os_walk(root: Path, skip_dirs: set[str]):
     """os.walk wrapper kept local so skip logic is testable."""
     import os
     return os.walk(root, followlinks=False)

@@ -14,8 +14,7 @@ Implements spec section 4.B (and the milestone-4 routing rules). Precedence:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import datetime
 
 from ..config import CuratorConfig, TaxonomySettings
 from ..db.models import FaceDetection, ImageRecord
@@ -34,7 +33,7 @@ class Decision:
     diagnostics: dict = field(default_factory=dict)
 
 
-def _date_components(taken_at: Optional[datetime]):
+def _date_components(taken_at: datetime | None):
     """Return (year, month, day) strings, or None if no usable date."""
     if taken_at is None:
         return None
@@ -72,7 +71,7 @@ class DecisionMatrix:
         # Gather child metrics.
         q = getattr(rec, "quality", None)
         sem = getattr(rec, "semantic", None)
-        faces: List[FaceDetection] = getattr(rec, "faces", None) or []
+        faces: list[FaceDetection] = getattr(rec, "faces", None) or []
 
         # 3. Pathological quality -> accidental junk.
         if self.cfg.quality.force_review_quality and q is not None:
@@ -146,12 +145,12 @@ class DecisionMatrix:
         )
 
     @staticmethod
-    def _map_category(name: str) -> Optional[CategoryType]:
+    def _map_category(name: str) -> CategoryType | None:
         try:
             return CategoryType(name)
         except ValueError:
             return None
 
     # ---------------------------------------------------------- bulk helper
-    def evaluate_many(self, records: List[ImageRecord]) -> List[Decision]:
+    def evaluate_many(self, records: list[ImageRecord]) -> list[Decision]:
         return [self.evaluate_record(r) for r in records]

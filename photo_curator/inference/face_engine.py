@@ -15,9 +15,8 @@ Backends:
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence
+from collections.abc import Sequence
 
 import cv2
 import numpy as np
@@ -39,9 +38,9 @@ class FaceInfo:
     x2: float
     y2: float
     confidence: float
-    landmarks: List[tuple[float, float]] = field(default_factory=list)
-    eye_aspect_ratio: Optional[float] = None
-    face_sharpness: Optional[float] = None
+    landmarks: list[tuple[float, float]] = field(default_factory=list)
+    eye_aspect_ratio: float | None = None
+    face_sharpness: float | None = None
 
     @property
     def w(self) -> float:
@@ -71,7 +70,7 @@ def eye_aspect_ratio(points: Sequence[Sequence[float]]) -> float:
     return float(num / denom)
 
 
-def _ear_from_five_landmarks(lm: List[tuple[float, float]], bgr: np.ndarray) -> float:
+def _ear_from_five_landmarks(lm: list[tuple[float, float]], bgr: np.ndarray) -> float:
     """EAR-like openness score from SCRFD's 5 landmarks (no per-eye contour).
 
     SCRFD does not expose the 6 contour points per eye, so we derive a stable
@@ -83,10 +82,10 @@ def _ear_from_five_landmarks(lm: List[tuple[float, float]], bgr: np.ndarray) -> 
     """
     if len(lm) < 3:
         return 0.0
-    r, l, n = (np.asarray(lm[0], float), np.asarray(lm[1], float),
-               np.asarray(lm[2], float))
-    inter_eye = float(np.linalg.norm(r - l))
-    eye_mid = (r + l) / 2.0
+    r, left, n = (np.asarray(lm[0], float), np.asarray(lm[1], float),
+                  np.asarray(lm[2], float))
+    inter_eye = float(np.linalg.norm(r - left))
+    eye_mid = (r + left) / 2.0
     eye_nose = float(np.linalg.norm(eye_mid - n))
     if inter_eye < 1e-3 or eye_nose < 1e-3:
         return 0.0
@@ -130,11 +129,11 @@ class FaceEngine:
     """Batched face detector with automatic backend selection."""
 
     def __init__(self, config: CuratorConfig | None = None,
-                 backend: Optional[BackendState] = None):
+                 backend: BackendState | None = None):
         self.cfg = config or CuratorConfig()
         self.bs = backend or detect_backend(self.cfg)
         self._insightface = None
-        self._haar: Optional["cv2.CascadeClassifier"] = None
+        self._haar: cv2.CascadeClassifier | None = None
 
     # ------------------------------------------------------------- lifecycle
     def _ensure_loaded(self) -> None:
@@ -193,10 +192,10 @@ class FaceEngine:
     # -------------------------------------------------------------- detection
     def detect_faces_batch(self,
                            images: Sequence[np.ndarray],
-                           ) -> List[List[FaceInfo]]:
+                           ) -> list[list[FaceInfo]]:
         """Detect faces in a list of BGR images; returns per-image face lists."""
         self._ensure_loaded()
-        results: List[List[FaceInfo]] = []
+        results: list[list[FaceInfo]] = []
         if self.bs.face_backend == "stub":
             results = [[] for _ in images]
             return results
@@ -204,7 +203,7 @@ class FaceEngine:
             results.append(self._detect_one(bgr))
         return results
 
-    def _detect_one(self, bgr: np.ndarray) -> List[FaceInfo]:
+    def _detect_one(self, bgr: np.ndarray) -> list[FaceInfo]:
         h, w = bgr.shape[:2]
         if self.bs.face_backend == "insightface" and self._insightface is not None:
             return self._detect_insightface(bgr, w, h)
@@ -212,8 +211,8 @@ class FaceEngine:
             return self._detect_haar(bgr, w, h)
         return []
 
-    def _detect_insightface(self, bgr: np.ndarray, w: int, h: int) -> List[FaceInfo]:
-        out: List[FaceInfo] = []
+    def _detect_insightface(self, bgr: np.ndarray, w: int, h: int) -> list[FaceInfo]:
+        out: list[FaceInfo] = []
         try:
             faces = self._insightface.get(bgr)
         except Exception as e:
@@ -231,12 +230,12 @@ class FaceEngine:
             out.append(fi)
         return out
 
-    def _detect_haar(self, bgr: np.ndarray, w: int, h: int) -> List[FaceInfo]:
+    def _detect_haar(self, bgr: np.ndarray, w: int, h: int) -> list[FaceInfo]:
         gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
         gray = cv2.equalizeHist(gray)
         boxes = self._haar.detectMultiScale(gray, scaleFactor=1.1,
                                             minNeighbors=5, minSize=(48, 48))
-        out: List[FaceInfo] = []
+        out: list[FaceInfo] = []
         for (x, y, bw, bh) in boxes:
             fi = FaceInfo(float(x), float(y), float(x + bw), float(y + bh),
                           confidence=0.75)
@@ -246,5 +245,5 @@ class FaceEngine:
 
 
 def detect_faces(images: Sequence[np.ndarray],
-                 config: CuratorConfig | None = None) -> List[List[FaceInfo]]:
+                 config: CuratorConfig | None = None) -> list[list[FaceInfo]]:
     return FaceEngine(config).detect_faces_batch(images)

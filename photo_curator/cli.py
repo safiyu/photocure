@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -24,7 +23,7 @@ from . import __version__
 from .config import CuratorConfig
 from .db.session import get_session, init_db
 from .db.repository import PhotoRepository
-from .inference.backends import BackendState, detect_backend, reset_backend_cache
+from .inference.backends import detect_backend, reset_backend_cache
 from .services import Planner
 
 app = typer.Typer(
@@ -75,7 +74,7 @@ def scan(
     t.add_row("Duration", f"{result.duration_s:.2f}s")
     console.print(t)
     if result.errors_list:
-        console.print(f"[red]First errors:[/red]\n  " +
+        console.print("[red]First errors:[/red]\n  " +
                       "\n  ".join(result.errors_list[:10]))
 
 
@@ -87,8 +86,8 @@ def infer(
     db: Path = typer.Option(Path("photo_curator.db"), "--db"),
     batch_size: int = typer.Option(32, "--batch-size", "-b"),
     device: str = typer.Option("auto", "--device", "-d", help="cuda|cpu|auto"),
-    limit: Optional[int] = typer.Option(None, "--limit", "-n", help="Max images."),
-    paths: Optional[str] = typer.Option(None, "--paths", help="Comma-separated paths (debug)."),
+    limit: int | None = typer.Option(None, "--limit", "-n", help="Max images."),
+    paths: str | None = typer.Option(None, "--paths", help="Comma-separated paths (debug)."),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ):
     """Run quality + face + semantic inference (sequential GPU phases)."""
@@ -191,9 +190,9 @@ def plan(
                              help="category_first (Option 1) | in_place (Option 2)."),
     operation: str = typer.Option("move", "--operation",
                                   help="move|copy|hardlink|symlink."),
-    report: Optional[Path] = typer.Option(None, "--report", "-r",
+    report: Path | None = typer.Option(None, "--report", "-r",
                                           help="Write an HTML audit report here."),
-    plan_id: Optional[str] = typer.Option(None, "--plan-id"),
+    plan_id: str | None = typer.Option(None, "--plan-id"),
     exclude_duplicates: bool = typer.Option(False, "--exclude-duplicates"),
 ):
     """Build a dry-run routing plan and print a summary."""
@@ -224,7 +223,7 @@ def plan(
 @app.command()
 def apply(
     db: Path = typer.Option(Path("photo_curator.db"), "--db"),
-    plan_id: Optional[str] = typer.Option(None, "--plan-id",
+    plan_id: str | None = typer.Option(None, "--plan-id",
                                           help="Rebuild this plan before applying."),
     operation: str = typer.Option("move", "--operation",
                                   help="move|copy|hardlink|symlink"),
@@ -270,7 +269,7 @@ def apply(
 @app.command()
 def undo(
     db: Path = typer.Option(Path("photo_curator.db"), "--db"),
-    transaction_id: Optional[str] = typer.Option(None, "--transaction-id", "-t",
+    transaction_id: str | None = typer.Option(None, "--transaction-id", "-t",
                                                  help="Defaults to the latest."),
     no_verify: bool = typer.Option(False, "--no-verify",
                                    help="Skip the pre-flight SHA-256 check."),
@@ -295,7 +294,7 @@ def undo(
     t.add_row("Duration", f"{rep.duration_s:.2f}s")
     console.print(t)
     if rep.errors:
-        console.print(f"[red]Errors:[/red]\n  " + "\n  ".join(rep.errors[:20]))
+        console.print("[red]Errors:[/red]\n  " + "\n  ".join(rep.errors[:20]))
 
 
 # ---------------------------------------------------------------------------

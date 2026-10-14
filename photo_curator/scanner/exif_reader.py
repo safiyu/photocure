@@ -13,7 +13,6 @@ import datetime as dt
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 try:
     from PIL import Image
@@ -56,10 +55,10 @@ class ExifInfo:
     width: int = 0
     height: int = 0
     orientation: int = 1
-    taken_at: Optional[dt.datetime] = None
+    taken_at: dt.datetime | None = None
     taken_at_source: str = "unknown"
-    gps_lat: Optional[float] = None
-    gps_lon: Optional[float] = None
+    gps_lat: float | None = None
+    gps_lon: float | None = None
     camera_model: str = ""
     error: str = field(default="")
 
@@ -68,7 +67,7 @@ class ExifInfo:
         return self.taken_at is not None
 
 
-def _parse_exif_date(s: Optional[str]) -> Optional[dt.datetime]:
+def _parse_exif_date(s: str | None) -> dt.datetime | None:
     """Parse EXIF date strings such as ``2024:05:12 15:30:45``."""
     if not s:
         return None
@@ -85,7 +84,7 @@ def _parse_exif_date(s: Optional[str]) -> Optional[dt.datetime]:
     return None
 
 
-def extract_from_filename(filename: str) -> Optional[dt.datetime]:
+def extract_from_filename(filename: str) -> dt.datetime | None:
     """Tier-3: strict filename regex extraction. Naive local time."""
     for pat in _FILENAME_PATTERNS:
         m = pat.search(filename)
@@ -106,7 +105,7 @@ def extract_from_filename(filename: str) -> Optional[dt.datetime]:
     return None
 
 
-def _gps_from_exif(tags) -> Optional[tuple[float, float]]:
+def _gps_from_exif(tags) -> tuple[float, float] | None:
     """Read GPS from exifread tags; returns (lat, lon) or None."""
     try:
         lat_ref = str(tags.get("GPS GPSLatitudeRef", "N"))
@@ -273,7 +272,7 @@ def extract_exif(path: Path | str) -> ExifInfo:
     return ExifReader().read(path)
 
 
-def effective_date(info: ExifInfo) -> tuple[Optional[dt.datetime], str]:
+def effective_date(info: ExifInfo) -> tuple[dt.datetime | None, str]:
     """Return ``(date, source)`` where source is one of the cascade tiers."""
     if info.taken_at is not None:
         return info.taken_at, info.taken_at_source

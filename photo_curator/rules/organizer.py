@@ -19,11 +19,10 @@ concern of the ActionEngine.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from collections.abc import Sequence
 
 from ..config import CuratorConfig
 from ..db.models import BurstGroup, ImageRecord
@@ -47,7 +46,7 @@ class PlannedAction:
     operation: str = "move"   # move | copy | hardlink | symlink
     reason: str = ""
     is_alternate: bool = False
-    burst_name: Optional[str] = None
+    burst_name: str | None = None
     # Collision flag set by the ActionEngine at execution time.
     collides: bool = False
     # Filled by the ActionEngine at execution time (ledger provenance).
@@ -72,13 +71,13 @@ class FolderOrganizer:
     """Build the destination path graph from a set of decisions."""
 
     def __init__(self, config: CuratorConfig | None = None,
-                 organize_root: Optional[Path] = None,
+                 organize_root: Path | None = None,
                  mode: OrganizeMode = OrganizeMode.CATEGORY_FIRST):
         self.cfg = config or CuratorConfig()
         self.root = Path(organize_root or self.cfg.organize_root)
         self.mode = mode
         # burst id -> stable burst name (set via set_bursts before planning).
-        self._burst_id_to_name: Dict[int, str] = {}
+        self._burst_id_to_name: dict[int, str] = {}
 
     # --------------------------------------------------------------- bursts
     def set_bursts(self, bursts: Sequence[BurstGroup]) -> None:
@@ -86,7 +85,7 @@ class FolderOrganizer:
             if b.id is not None:
                 self._burst_id_to_name[b.id] = b.name
 
-    def burst_name_for(self, rec: ImageRecord) -> Optional[str]:
+    def burst_name_for(self, rec: ImageRecord) -> str | None:
         if rec.burst_id is not None:
             return self._burst_id_to_name.get(rec.burst_id)
         return None
@@ -125,9 +124,9 @@ class FolderOrganizer:
             records: Sequence[ImageRecord],
             decisions: Sequence[Decision],
             operation: str = "move",
-            ) -> List[PlannedAction]:
+            ) -> list[PlannedAction]:
         """Produce the ordered list of :class:`PlannedAction` for the plan."""
-        plan: List[PlannedAction] = []
+        plan: list[PlannedAction] = []
         # Option 2 uses hardlinks by default (non-destructive, no extra space).
         op = operation
         if self.mode == OrganizeMode.IN_PLACE and op == "move":

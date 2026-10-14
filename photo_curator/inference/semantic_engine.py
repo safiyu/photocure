@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -38,20 +38,20 @@ class SemanticResult:
     top2_score: float
     margin: float
     distribution: dict = field(default_factory=dict)
-    embedding: Optional[List[float]] = None
+    embedding: list[float] | None = None
 
 
 class SemanticEngine:
     """Zero-shot CLIP classifier + embedding extractor."""
 
     def __init__(self, config: CuratorConfig | None = None,
-                 backend: Optional[BackendState] = None):
+                 backend: BackendState | None = None):
         self.cfg = config or CuratorConfig()
         self.bs = backend or detect_backend(self.cfg)
         self._model = None
         self._preprocess = None
         self._tokenize = None
-        self._text_features: Optional[np.ndarray] = None
+        self._text_features: object | None = None  # torch tensor (device-local)
         self._device = None
         self._autocast = None
 
@@ -71,64 +71,35 @@ class SemanticEngine:
             model_name = self.cfg.taxonomy.clip_model_name
             pretrained = self.cfg.taxonomy.clip_pretrained
             self._device = "cuda" if self.bs.cuda_available else "cpu"
-            self._model, self._preprocess, _ = open_clip.create_model_and_transforms(
-                model_name, pretrained=pretrained)
-            # The transforms above are the *training* pipeline: its
-            # RandomResizedCrop would make the same input produce a different
-            # crop (and embedding) on every call. Swap in the canonical,
-            # deterministic CLIP eval transform instead.
-            self._preprocess = self._build_eval_transform(self._preprocess)
+            # Match the activation architecture the weights were trained with:
+            # the OpenAI tags use QuickGELU, most LAION tags use standard GELU.
+            # Without this the model silently runs with the wrong activation
+            # (and open_clip warns about the mismatch on every load).
+            quick_gelu = _pretrained_quick_gelu(open_clip, model_name, pretrained)
+            model, _train_preprocess, val_preprocess = (
+                open_clip.create_model_and_transforms(
+                    model_name, pretrained=pretrained,
+                    force_quick_gelu=quick_gelu))
+            # Use the *validation* pipeline: the first transform returned is
+            # the training one, whose RandomResizedCrop is stochastic — the
+            # same photo would then produce a different crop (and embedding)
+            # on every encode, breaking determinism and burst clustering.
+            self._preprocess = val_preprocess
             self._tokenize = open_clip.get_tokenizer(model_name)
-            self._model = self._model.to(self._device).eval()
+            self._model = model.to(self._device).eval()
             self._autocast = (
                 torch.autocast(device_type=self._device, dtype=torch.float16)
                 if self.bs.fp16 and self._device == "cuda"
                 else None
             )
             self._encode_texts()
-            log.info("OpenCLIP %s/%s ready on %s (fp16=%s)",
-                     model_name, pretrained, self._device, self.bs.fp16)
+            log.info("OpenCLIP %s/%s ready on %s (fp16=%s, quick_gelu=%s)",
+                     model_name, pretrained, self._device, self.bs.fp16,
+                     quick_gelu)
             return True
         except Exception as e:
             log.warning("OpenCLIP load failed (%s)", e.__class__.__name__)
             return False
-
-    @staticmethod
-    def _build_eval_transform(train_transform):
-        """Deterministic CLIP eval pipeline: Resize -> CenterCrop -> Normalize.
-
-        ``create_model_and_transforms`` returns the *training* pipeline whose
-        ``RandomResizedCrop`` is stochastic — the same photo would then
-        produce a different embedding on every encode. We reuse its normalize
-        constants (CLIP image mean/std) and target size, but replace the crop
-        with the standard deterministic eval crop.
-        """
-        from torchvision import transforms as T
-
-        mean, std, size = (0.48145466, 0.4578275, 0.40821073), (
-            0.26862954, 0.26130258, 0.27577711), 224
-        ops = getattr(train_transform, "transforms", None) or []
-        for op in ops:
-            if isinstance(op, T.Normalize):
-                mean, std = tuple(op.mean), tuple(op.std)
-            elif isinstance(op, T.RandomResizedCrop):
-                s = op.size
-                size = s if isinstance(s, int) else (s[0], s[1])
-            elif isinstance(op, T.Resize) and op.size:
-                s = op.size
-                if isinstance(s, (tuple, list)):
-                    size = s[0]
-                elif isinstance(s, int):
-                    size = s
-        try:
-            interp = T.InterpolationMode.BICUBIC
-        except AttributeError:  # very old torchvision
-            interp = 3
-        return T.Compose([
-            T.Resize(size, interpolation=interp, antialias=True),
-            T.CenterCrop(size),
-            T.Normalize(mean=mean, std=std),
-        ])
 
     def _encode_texts(self) -> None:
         import torch
@@ -139,7 +110,9 @@ class SemanticEngine:
             tf = self._model.encode_text(tok)
         tf = tf.float()
         tf = tf / tf.norm(dim=-1, keepdim=True)
-        self._text_features = tf.cpu().numpy()
+        # Keep as a torch tensor on the model device: matmul between a torch
+        # tensor and a numpy array trips numpy-2.0 __array_wrap__ deprecations.
+        self._text_features = tf
 
     def release(self) -> None:
         self._model = None
@@ -153,7 +126,7 @@ class SemanticEngine:
 
     # --------------------------------------------------------------- helpers
     @staticmethod
-    def _bgr_to_tensor(bgr: np.ndarray, preprocess) -> "object":
+    def _bgr_to_tensor(bgr: np.ndarray, preprocess) -> object:
         import torch
         rgb = bgr[:, :, ::-1].copy()
         img = torch.from_numpy(rgb).permute(2, 0, 1).float() / 255.0
@@ -162,17 +135,17 @@ class SemanticEngine:
     # ------------------------------------------------------------ inference
     def classify_and_embed(self,
                            images: Sequence[np.ndarray],
-                           ) -> List[SemanticResult]:
+                           ) -> list[SemanticResult]:
         """Zero-shot classify + embed a batch of BGR images."""
         self._ensure_loaded()
         if self.bs.semantic_backend == "stub" or self._model == "stub":
             return [self._stub_result(bgr) for bgr in images]
         return self._clip_batch(images)
 
-    def _clip_batch(self, images: Sequence[np.ndarray]) -> List[SemanticResult]:
+    def _clip_batch(self, images: Sequence[np.ndarray]) -> list[SemanticResult]:
         import torch
         batch_size = self.cfg.device.clip_batch_size
-        out: List[SemanticResult] = []
+        out: list[SemanticResult] = []
         for start in range(0, len(images), batch_size):
             chunk = images[start:start + batch_size]
             tensors = torch.stack(
@@ -258,6 +231,21 @@ class SemanticEngine:
         )
 
 
+def _pretrained_quick_gelu(open_clip, model_name: str,
+                           pretrained: str) -> bool:
+    """QuickGELU flag of the pretrained tag (default False).
+
+    The OpenAI ViT-B/16 & B/32 weights were trained with QuickGELU while the
+    built-in config defaults to standard GELU; running the weights with the
+    wrong activation silently degrades quality (and warns on every load).
+    """
+    try:
+        cfg = open_clip.get_pretrained_cfg(model_name, pretrained)
+        return bool((cfg or {}).get("quick_gelu", False))
+    except Exception:
+        return False
+
+
 def classify(images: Sequence[np.ndarray],
-             config: CuratorConfig | None = None) -> List[SemanticResult]:
+             config: CuratorConfig | None = None) -> list[SemanticResult]:
     return SemanticEngine(config).classify_and_embed(images)

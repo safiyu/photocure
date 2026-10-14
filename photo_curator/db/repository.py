@@ -2,12 +2,10 @@
 from __future__ import annotations
 
 import json
-import math
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Iterator, List, Optional, Sequence
+from collections.abc import Iterator, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 from sqlmodel import Session, col, select as sselect
 
@@ -37,7 +35,7 @@ def quantize_embedding(vec: Sequence[float]) -> str:
     return json.dumps([_f16(v) for v in vec])
 
 
-def dequantize_embedding(blob: str) -> Optional[List[float]]:
+def dequantize_embedding(blob: str) -> list[float] | None:
     """Deserialize an embedding produced by :func:`quantize_embedding`."""
     import numpy as np
 
@@ -83,12 +81,12 @@ class PhotoRepository:
                 self.s.commit()
         return written
 
-    def get_by_path(self, path: str) -> Optional[ImageRecord]:
+    def get_by_path(self, path: str) -> ImageRecord | None:
         return self.s.exec(
             sselect(ImageRecord).where(ImageRecord.path == str(path))
         ).first()
 
-    def get_by_id(self, image_id: int, with_faces: bool = False) -> Optional[ImageRecord]:
+    def get_by_id(self, image_id: int, with_faces: bool = False) -> ImageRecord | None:
         stmt = sselect(ImageRecord).where(ImageRecord.id == image_id)
         if with_faces:
             stmt = stmt.options(joinedload(ImageRecord.faces))
@@ -99,7 +97,17 @@ class PhotoRepository:
         rows = self.s.exec(sselect(ImageRecord.path)).all()
         return set(rows)
 
-    def images_pending_inference(self, limit: int = 0) -> List[ImageRecord]:
+    def known_quick_hashes(self) -> set[str]:
+        """All Tier-1 quick-hashes already in the store.
+
+        Used for *lazy* Tier-2 hashing: a new file only needs the expensive
+        full-file SHA-256 if its quick-hash appears in this set (or collides
+        with an earlier file in the same scan pass).
+        """
+        rows = self.s.exec(sselect(ImageRecord.quick_hash)).all()
+        return {r for r in rows if r}
+
+    def images_pending_inference(self, limit: int = 0) -> list[ImageRecord]:
         stmt = sselect(ImageRecord).where(ImageRecord.infer_status == "pending")
         if limit:
             stmt = stmt.limit(limit)
@@ -112,8 +120,8 @@ class PhotoRepository:
             .where(ImageRecord.infer_status == "inferred")
         ).one() or 0)
 
-    def all_images(self, category: Optional[str] = None,
-                   route_status: Optional[str] = None) -> List[ImageRecord]:
+    def all_images(self, category: str | None = None,
+                   route_status: str | None = None) -> list[ImageRecord]:
         stmt = sselect(ImageRecord)
         if category:
             stmt = stmt.where(ImageRecord.category == category)
@@ -130,12 +138,20 @@ class PhotoRepository:
             yield from rows[i:i + chunk]
 
     # --------------------------------------------------------------- dedup
-    def find_by_sha256(self, sha256: str, exclude_id: Optional[int] = None
-                       ) -> Optional[ImageRecord]:
+    def find_by_sha256(self, sha256: str, exclude_id: int | None = None
+                       ) -> ImageRecord | None:
         stmt = sselect(ImageRecord).where(ImageRecord.sha256 == sha256)
         if exclude_id is not None:
             stmt = stmt.where(ImageRecord.id != exclude_id)
         return self.s.exec(stmt).first()
+
+    def find_by_quick_hash(self, quick_hash: str, exclude_id: int | None = None
+                           ) -> list[ImageRecord]:
+        """All records sharing a Tier-1 quick-hash (duplicate candidates)."""
+        stmt = sselect(ImageRecord).where(ImageRecord.quick_hash == quick_hash)
+        if exclude_id is not None:
+            stmt = stmt.where(ImageRecord.id != exclude_id)
+        return list(self.s.exec(stmt).all())
 
     def mark_duplicate(self, dup: ImageRecord, original: ImageRecord) -> None:
         dup.is_duplicate = True
@@ -201,10 +217,10 @@ class PhotoRepository:
         self.s.flush()
         return existing
 
-    def get_burst_by_name(self, name: str) -> Optional[BurstGroup]:
+    def get_burst_by_name(self, name: str) -> BurstGroup | None:
         return self.s.exec(sselect(BurstGroup).where(BurstGroup.name == name)).first()
 
-    def all_bursts(self) -> List[BurstGroup]:
+    def all_bursts(self) -> list[BurstGroup]:
         return list(self.s.exec(sselect(BurstGroup)).all())
 
     # --------------------------------------------------------------- routing
@@ -229,7 +245,7 @@ class PhotoRepository:
         self.s.flush()
         return len(rows)
 
-    def set_manual_bucket(self, image_id: int, bucket: Optional[str]) -> None:
+    def set_manual_bucket(self, image_id: int, bucket: str | None) -> None:
         img = self.get_by_id(image_id)
         if img is not None:
             img.manual_bucket = bucket
@@ -241,7 +257,7 @@ class PhotoRepository:
         """No-op hook kept for API symmetry (ledger rows are appended lazily)."""
         return None
 
-    def ledger_add(self, txn: str, image_id: Optional[int], source: str, target: str,
+    def ledger_add(self, txn: str, image_id: int | None, source: str, target: str,
                    op: str, sha256: str = "", size: int = 0) -> ActionLedger:
         row = ActionLedger(
             transaction_id=txn, image_id=image_id, source_path=str(source),
@@ -262,7 +278,7 @@ class PhotoRepository:
         entry.error = error
         self.s.flush()
 
-    def ledger_by_txn(self, transaction_id: str) -> List[ActionLedger]:
+    def ledger_by_txn(self, transaction_id: str) -> list[ActionLedger]:
         rows = self.s.exec(
             sselect(ActionLedger)
             .where(ActionLedger.transaction_id == transaction_id)
@@ -270,7 +286,7 @@ class PhotoRepository:
         ).all()
         return rows
 
-    def ledger_committed_desc(self, transaction_id: str) -> List[ActionLedger]:
+    def ledger_committed_desc(self, transaction_id: str) -> list[ActionLedger]:
         """Committed actions in reverse chronological order (for rollback)."""
         rows = self.s.exec(
             sselect(ActionLedger)
@@ -286,7 +302,7 @@ class PhotoRepository:
         entry.status = "rolled_back"
         self.s.flush()
 
-    def latest_transaction(self) -> Optional[str]:
+    def latest_transaction(self) -> str | None:
         row = self.s.exec(
             sselect(func.max(ActionLedger.id))
         ).one()

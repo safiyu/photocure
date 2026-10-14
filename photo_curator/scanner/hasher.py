@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import os
 from pathlib import Path
-from typing import Tuple
 
 import xxhash
 
@@ -74,7 +73,7 @@ def is_same_quick_hash(a: str, b: str) -> bool:
     return a.rsplit(":", 1)[-1] == b.rsplit(":", 1)[-1]
 
 
-def quick_hash_parts(quick_hash: str) -> Tuple[int, str]:
+def quick_hash_parts(quick_hash: str) -> tuple[int, str]:
     """Split ``"size:xxh64hex"`` into ``(size, hex)``."""
     size_s, hexv = quick_hash.rsplit(":", 1)
     return int(size_s), hexv

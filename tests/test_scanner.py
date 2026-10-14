@@ -138,7 +138,7 @@ def test_heic_parsing(tmp_path):
         pil = Image.new("RGB", (128, 96), (200, 30, 30))
         p = tmp_path / "sample.heic"
         pil.save(p, format="HEIF")
-    except Exception as e:  # encoder unavailable -> decode-path check below
+    except Exception:  # encoder unavailable -> decode-path check below
         p = tmp_path / "sample.heic"
         p.write_bytes(b"\x00\x00\x00\x18heifmifh" + b"\x00" * 32)
 

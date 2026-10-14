@@ -16,7 +16,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
 import numpy as np
 from rich.progress import (
@@ -24,7 +24,6 @@ from rich.progress import (
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
-    TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
     TimeRemainingColumn,
@@ -75,15 +74,15 @@ class InferencePipeline:
     """Run face + semantic inference over all pending images."""
 
     def __init__(self, config: CuratorConfig | None = None,
-                 backend: Optional[BackendState] = None):
+                 backend: BackendState | None = None):
         self.cfg = config or CuratorConfig()
         self.bs = backend or detect_backend(self.cfg)
         self.quality = QualityEngine(self.cfg.quality)
 
     # ------------------------------------------------------------------ run
     def run(self, db_path: Path | str | None = None,
-            only_paths: Optional[List[str]] = None,
-            on_progress: Optional[Callable[[int, int, str], None]] = None,
+            only_paths: list[str] | None = None,
+            on_progress: Callable[[int, int, str], None] | None = None,
             show_progress: bool = True,
             ) -> InferResult:
         db = db_path or self.cfg.db_path
@@ -98,7 +97,7 @@ class InferencePipeline:
                 pending = repo.images_pending_inference()
 
             # Skip already-inferred.
-            todo: List[ImageRecord] = []
+            todo: list[ImageRecord] = []
             for rec in pending:
                 if rec.infer_status == "inferred":
                     result.skipped_already_inferred += 1
@@ -115,20 +114,43 @@ class InferencePipeline:
                 return result
 
             face_max = self.cfg.device.face_max_side
-            clip_max = self.cfg.device.clip_max_side
-            frames: List[_LoadedFrame] = []
-            load_failed: list = []
+            # Memory-bounded streaming (review rec 2): never hold the whole
+            # library in RAM. Records are processed in ``infer_chunk_size``
+            # chunks; each chunk is decoded, passed to the (already-loaded)
+            # model, persisted, and its decoded frames dropped before the next
+            # chunk. Peak decoded memory is therefore ~O(chunk), not
+            # ~O(library), which is what keeps a 100k+ image sweep viable.
+            chunk_size = max(1, int(self.cfg.device.infer_chunk_size))
+            chunks = [todo[i:i + chunk_size]
+                      for i in range(0, len(todo), chunk_size)]
 
-            def _load(rec: ImageRecord) -> Optional[_LoadedFrame]:
-                try:
-                    img = load_image(rec.path, max_side=face_max,
-                                     orientation=rec.orientation)
-                    return _LoadedFrame(image_id=rec.id, bgr=img.bgr)
-                except Exception as e:
-                    log.warning("decode failed for %s: %s", rec.path, e)
-                    return None
+            def _decode(chunk_recs: list[ImageRecord],
+                        mark_failed: bool) -> list[_LoadedFrame]:
+                """Decode a chunk of records to BGR frames.
 
-            tasks = {}
+                Failed decodes are logged; when ``mark_failed`` is set they are
+                also counted once and the record flipped to "failed". Phase A
+                decodes the whole chunk (mark_failed=True); Phase B re-decodes
+                only the records Phase A left "inferred", so any failure there
+                is a *new* one and is safe to count too (no double-counting,
+                because records that failed in Phase A are never re-decoded).
+                """
+                frames: list[_LoadedFrame] = []
+                for rec in chunk_recs:
+                    try:
+                        img = load_image(rec.path, max_side=face_max,
+                                         orientation=rec.orientation)
+                        frames.append(_LoadedFrame(image_id=rec.id, bgr=img.bgr))
+                    except Exception as e:
+                        log.warning("decode failed for %s: %s", rec.path, e)
+                        if mark_failed:
+                            rec.infer_status = "failed"
+                            repo.s.flush()
+                            result.failures += 1
+                            result.errors.append(f"{rec.path}: decode failure")
+                return frames
+
+            tasks: dict = {}
             if show_progress:
                 progress = Progress(
                     SpinnerColumn(),
@@ -139,38 +161,52 @@ class InferencePipeline:
                     TimeRemainingColumn(),
                     transient=False,
                 )
-                tasks["decode"] = progress.add_task("Decode", total=len(todo))
-                tasks["faces"] = progress.add_task("Faces (Phase A)", total=0)
-                tasks["clip"] = progress.add_task("CLIP (Phase B)", total=0)
+                tasks["faces"] = progress.add_task("Faces (Phase A)",
+                                                   total=len(todo))
+                tasks["clip"] = progress.add_task("CLIP (Phase B)",
+                                                  total=len(todo))
                 progress.start()
             else:
                 progress = None
 
-            for i, rec in enumerate(todo):
-                fr = _load(rec)
-                if fr is None:
-                    load_failed.append(rec)
-                else:
-                    frames.append(fr)
-                if show_progress:
-                    progress.update(tasks["decode"], completed=i + 1)
-
-            if show_progress:
-                progress.update(tasks["faces"], total=len(frames))
-                progress.update(tasks["clip"], total=len(frames))
-
             # ------------------------------------------------ Phase A: faces
+            # Decode -> detect -> quality, persist per chunk, then free the
+            # chunk's pixels. The face model is loaded once for the whole phase
+            # (not per chunk), so there is no per-chunk model load overhead.
             face_engine = FaceEngine(self.cfg, backend=self.bs)
-            face_by_id: dict = {}
             try:
-                # Face engine already detects per-image; feed the batch.
-                faces_batch = face_engine.detect_faces_batch(
-                    [f.bgr for f in frames])
-                for fr, faces in zip(frames, faces_batch):
-                    face_by_id[fr.image_id] = faces
-                    result.faces_total += len(faces)
-                    if show_progress:
-                        progress.advance(tasks["faces"])
+                for chunk in chunks:
+                    rec_by_id = {r.id: r for r in chunk}
+                    frames = _decode(chunk, mark_failed=True)
+                    faces_batch = face_engine.detect_faces_batch(
+                        [f.bgr for f in frames])
+                    for fr, faces in zip(frames, faces_batch):
+                        result.faces_total += len(faces)
+                        if show_progress:
+                            progress.advance(tasks["faces"])
+                        rec = rec_by_id[fr.image_id]
+                        try:
+                            q = self.quality.score(fr.bgr)
+                            repo.upsert_quality(QualityMetric(
+                                image_id=fr.image_id,
+                                **{k: v for k, v in q.items()
+                                   if k != "needs_review"},
+                            ))
+                            repo.replace_faces(
+                                fr.image_id,
+                                [self._face_row(fr.image_id, f) for f in faces],
+                            )
+                            # Tentatively inferred; Phase B (CLIP) finalizes it
+                            # and flips it to "failed" if semantic persist breaks.
+                            rec.infer_status = "inferred"
+                            repo.s.flush()
+                        except Exception as e:
+                            log.warning("persist failed for %s: %s", rec.path, e)
+                            rec.infer_status = "failed"
+                            repo.s.flush()
+                            result.failures += 1
+                            result.errors.append(f"{rec.path}: {e}")
+                    frames.clear()  # release this chunk's decoded pixels
             finally:
                 face_engine.release()
                 gc.collect()
@@ -181,14 +217,57 @@ class InferencePipeline:
                         pass
 
             # ------------------------------------------------ Phase B: CLIP
+            # CLIP only encodes (no detection). Rather than holding every
+            # Phase-A frame in RAM, re-decode each chunk here: re-decoding a
+            # JPEG/HEIC is far cheaper than reloading the model, and it keeps
+            # peak memory bounded to a single chunk. Only records Phase A left
+            # "inferred" are re-decoded, so Phase-A failures are not re-counted.
             sem_engine = SemanticEngine(self.cfg, backend=self.bs)
-            sem_by_id: dict = {}
             try:
-                sems_batch = sem_engine.classify_and_embed([f.bgr for f in frames])
-                for fr, sem in zip(frames, sems_batch):
-                    sem_by_id[fr.image_id] = sem
-                    if show_progress:
-                        progress.advance(tasks["clip"])
+                for chunk in chunks:
+                    rec_by_id = {r.id: r for r in chunk}
+                    ok_recs = [r for r in chunk if r.infer_status == "inferred"]
+                    frames = _decode(ok_recs, mark_failed=True)
+                    sems_batch = (
+                        sem_engine.classify_and_embed([f.bgr for f in frames])
+                        if frames else []
+                    )
+                    for fr, sem in zip(frames, sems_batch):
+                        if show_progress:
+                            progress.advance(tasks["clip"])
+                        rec = rec_by_id[fr.image_id]
+                        try:
+                            if sem is not None:
+                                repo.upsert_semantic(SemanticScore(
+                                    image_id=fr.image_id,
+                                    model_name=(
+                                        self.cfg.taxonomy.clip_model_name
+                                        if self.bs.semantic_backend == "clip"
+                                        else "stub"
+                                    ),
+                                    top1_category=sem.top1.value,
+                                    top1_score=sem.top1_score,
+                                    top2_category=sem.top2.value,
+                                    top2_score=sem.top2_score,
+                                    score_margin=sem.margin,
+                                    distribution=_json_sem(sem.distribution),
+                                    embedding=quantize_embedding(
+                                        sem.embedding or []),
+                                ))
+                            result.quality_computed += 1
+                            result.semantic_computed += 1
+                            result.processed += 1
+                            if on_progress:
+                                on_progress(result.processed, len(todo),
+                                            rec.path)
+                        except Exception as e:
+                            log.warning("semantic persist failed for %s: %s",
+                                        rec.path, e)
+                            rec.infer_status = "failed"
+                            repo.s.flush()
+                            result.failures += 1
+                            result.errors.append(f"{rec.path}: {e}")
+                    frames.clear()  # release this chunk's decoded pixels
             finally:
                 sem_engine.release()
                 gc.collect()
@@ -197,59 +276,6 @@ class InferencePipeline:
                         self.bs.torch.cuda.empty_cache()
                     except Exception:
                         pass
-
-            # ------------------------------------------------ persist
-            rec_by_id = {r.id: r for r in todo}
-            for fr in frames:
-                rec = rec_by_id.get(fr.image_id)
-                if rec is None:
-                    continue
-                try:
-                    # Quality on the decoded frame.
-                    q = self.quality.score(fr.bgr)
-                    repo.upsert_quality(QualityMetric(
-                        image_id=fr.image_id,
-                        **{k: v for k, v in q.items() if k != "needs_review"},
-                    ))
-                    # Faces.
-                    faces = face_by_id.get(fr.image_id, [])
-                    repo.replace_faces(
-                        fr.image_id,
-                        [self._face_row(fr.image_id, f) for f in faces],
-                    )
-                    # Semantic.
-                    sem = sem_by_id.get(fr.image_id)
-                    if sem is not None:
-                        repo.upsert_semantic(SemanticScore(
-                            image_id=fr.image_id,
-                            model_name=(
-                                self.cfg.taxonomy.clip_model_name
-                                if self.bs.semantic_backend == "clip" else "stub"
-                            ),
-                            top1_category=sem.top1.value,
-                            top1_score=sem.top1_score,
-                            top2_category=sem.top2.value,
-                            top2_score=sem.top2_score,
-                            score_margin=sem.margin,
-                            distribution=_json_sem(sem.distribution),
-                            embedding=quantize_embedding(sem.embedding or []),
-                        ))
-                    rec.infer_status = "inferred"
-                    result.quality_computed += 1
-                    result.semantic_computed += 1
-                    result.processed += 1
-                    if on_progress:
-                        on_progress(result.processed, len(frames), rec.path)
-                except Exception as e:
-                    log.warning("persist failed for %s: %s", rec.path, e)
-                    rec.infer_status = "failed"
-                    result.failures += 1
-                    result.errors.append(f"{rec.path}: {e}")
-
-            for rec in load_failed:
-                rec.infer_status = "failed"
-                result.failures += 1
-                result.errors.append(f"{rec.path}: decode failure")
 
             if show_progress and progress is not None:
                 progress.stop()
@@ -280,7 +306,7 @@ def _json_sem(obj) -> str:
 
 def run_inference(config: CuratorConfig | None = None,
                   db_path: Path | str | None = None,
-                  only_paths: Optional[List[str]] = None,
+                  only_paths: list[str] | None = None,
                   show_progress: bool = True) -> InferResult:
     cfg = config or CuratorConfig.load(db_path)
     return InferencePipeline(cfg).run(db_path=db_path, only_paths=only_paths,

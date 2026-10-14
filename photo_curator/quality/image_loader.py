@@ -8,14 +8,12 @@ engine and semantic engine, so HEIC/RAW quirks are handled exactly once.
 """
 from __future__ import annotations
 
-import io
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
 
 import cv2
 import numpy as np
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 
 try:
     import pillow_heif
@@ -52,8 +50,8 @@ def _bgr_from_pil(im: Image.Image) -> np.ndarray:
 
 
 def load_image(path: Path | str,
-               max_side: Optional[int] = None,
-               orientation: Optional[int] = None) -> LoadedImage:
+               max_side: int | None = None,
+               orientation: int | None = None) -> LoadedImage:
     """Decode any supported photo to a BGR ndarray.
 
     Args:
@@ -140,7 +138,7 @@ def to_thumbnail_jpg(bgr: np.ndarray, max_side: int = 384, quality: int = 82) ->
     return buf.tobytes()
 
 
-def encode_preview(path: Path | str, max_side: int = 384) -> Tuple[bytes, str]:
+def encode_preview(path: Path | str, max_side: int = 384) -> tuple[bytes, str]:
     """Load + encode a preview; returns (jpeg_bytes, mime)."""
     img = load_image(path, max_side=max_side)
     return to_thumbnail_jpg(img.bgr, max_side=max_side), "image/jpeg"

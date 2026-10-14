@@ -17,16 +17,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..config import CuratorConfig
-from ..db.models import ImageRecord
 from ..db.repository import PhotoRepository
 from ..db.session import get_session, init_db
 from ..quality.image_loader import load_image, to_thumbnail_jpg
@@ -37,8 +35,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 class ReassignReq(BaseModel):
-    bucket: Optional[str] = None  # None clears a manual override
-    category: Optional[str] = None  # explicit category override
+    bucket: str | None = None  # None clears a manual override
+    category: str | None = None  # explicit category override
 
 
 class PlanReq(BaseModel):
@@ -48,10 +46,10 @@ class PlanReq(BaseModel):
 
 
 class UndoReq(BaseModel):
-    transaction_id: Optional[str] = None
+    transaction_id: str | None = None
 
 
-def create_app(db_path: Optional[str] = None) -> FastAPI:
+def create_app(db_path: str | None = None) -> FastAPI:
     dbp = Path(db_path or os.environ.get("PCUR_DB_PATH", "photo_curator.db"))
     init_db(dbp)
     cfg = CuratorConfig.load(dbp)
@@ -87,9 +85,9 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/images")
     def images(
-        category: Optional[str] = Query(None),
+        category: str | None = Query(None),
         manual: bool = Query(False),
-        q: Optional[str] = Query(None),
+        q: str | None = Query(None),
         limit: int = Query(400, le=5000),
         offset: int = Query(0),
     ):
@@ -166,8 +164,6 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             repo = PhotoRepository(s)
             out = []
             for b in repo.all_bursts():
-                members = [r for r in repo.all_images()
-                           if r.burst_id == b.id and r.infer_status == "inferred"]
                 best = repo.get_by_id(b.best_shot_id) if b.best_shot_id else None
                 out.append({
                     "id": b.id, "name": b.name, "image_count": b.image_count,

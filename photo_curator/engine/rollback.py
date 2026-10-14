@@ -19,7 +19,6 @@ import logging
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
 
 from ..config import CuratorConfig
 from ..db.repository import PhotoRepository
@@ -44,7 +43,7 @@ class RollbackEngine:
     """Reverse a committed transaction using the action ledger."""
 
     def __init__(self, config: CuratorConfig | None = None,
-                 db_path: Optional[Path] = None):
+                 db_path: Path | None = None):
         self.cfg = config or CuratorConfig()
         self.db_path = db_path or self.cfg.db_path
 

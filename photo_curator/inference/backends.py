@@ -10,12 +10,11 @@ from __future__ import annotations
 import os
 import threading
 from dataclasses import dataclass
-from typing import Optional
 
 from ..config import CuratorConfig, DeviceSettings
 
 _lock = threading.Lock()
-_cached: Optional["BackendState"] = None
+_cached: BackendState | None = None
 
 
 @dataclass
@@ -51,7 +50,6 @@ def detect_backend(config: CuratorConfig | None = None) -> BackendState:
         cuda_available = False
         try:
             import torch  # noqa: F401
-            torch = torch
             cuda_available = bool(torch.cuda.is_available())
         except Exception:
             torch = None

@@ -7,13 +7,10 @@ import numpy as np
 from photo_curator.config import QualityThresholds
 from photo_curator.quality.blur_detector import (
     BlurDetector,
-    compute_blur,
     compute_edge_frequency,
     compute_laplacian_variance,
 )
 from photo_curator.quality.brightness_detector import (
-    BrightnessDetector,
-    compute_brightness,
     compute_luminance_metrics,
 )
 from photo_curator.quality.engine import QualityEngine
@@ -21,7 +18,6 @@ from photo_curator.quality.engine import QualityEngine
 
 def _sharp_image(size=(400, 400), seed=0) -> np.ndarray:
     """High-contrast structured frame (edges everywhere)."""
-    rng = np.random.default_rng(seed)
     h = w = size[0]
     img = np.zeros((h, w, 3), dtype=np.uint8)
     for y in range(0, h, 8):

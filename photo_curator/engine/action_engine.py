@@ -19,7 +19,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Sequence
+from collections.abc import Sequence
 
 from ..config import CuratorConfig
 from ..db.repository import PhotoRepository
@@ -55,7 +55,7 @@ class ActionEngine:
     """Execute a :class:`PlannedAction` list transactionally."""
 
     def __init__(self, config: CuratorConfig | None = None,
-                 db_path: Optional[Path] = None):
+                 db_path: Path | None = None):
         self.cfg = config or CuratorConfig()
         self.db_path = db_path or self.cfg.db_path
 
@@ -74,7 +74,7 @@ class ActionEngine:
 
     # --------------------------------------------------------------- execute
     def execute(self, plan: Sequence[PlannedAction],
-                transaction_id: Optional[str] = None,
+                transaction_id: str | None = None,
                 ) -> ExecutionReport:
         """Apply every planned mutation, recording the ledger as we go.
 
@@ -206,7 +206,4 @@ class ActionEngine:
 
     @staticmethod
     def _symlink(src: Path, target: Path) -> None:
-        try:
-            target.symlink_to(src.resolve())
-        except FileExistsError:
-            raise
+        target.symlink_to(src.resolve())

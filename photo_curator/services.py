@@ -8,9 +8,8 @@ from __future__ import annotations
 import html
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from rich.console import Console
 from rich.table import Table
@@ -18,7 +17,7 @@ from rich.table import Table
 from .clustering.best_shot_selector import BestShotSelector, _candidate_from_record
 from .clustering.burst_detector import BurstDetector
 from .config import CuratorConfig
-from .db.models import BurstGroup, ImageRecord
+from .db.models import BurstGroup
 from .db.repository import PhotoRepository
 from .db.session import get_session
 from .engine.action_engine import ActionEngine, ExecutionReport
@@ -40,26 +39,26 @@ class Plan:
     organize_root: str
     created_at: float
     total: int = 0
-    by_category: Dict[str, int] = field(default_factory=dict)
-    actions: List[PlannedAction] = field(default_factory=list)
+    by_category: dict[str, int] = field(default_factory=dict)
+    actions: list[PlannedAction] = field(default_factory=list)
     burst_count: int = 0
     dry_run: bool = True
-    report_path: Optional[str] = None
+    report_path: str | None = None
 
 
 class Planner:
     """Cluster + decide + organize into a reviewable plan."""
 
     def __init__(self, config: CuratorConfig | None = None,
-                 db_path: Optional[Path] = None):
+                 db_path: Path | None = None):
         self.cfg = config or CuratorConfig()
         self.db_path = db_path or self.cfg.db_path
 
     def build_plan(self,
-                   organize_root: Optional[Path] = None,
+                   organize_root: Path | None = None,
                    operation: str = "move",
                    mode: OrganizeMode = OrganizeMode.CATEGORY_FIRST,
-                   plan_id: Optional[str] = None,
+                   plan_id: str | None = None,
                    include_duplicates: bool = True) -> Plan:
         root = Path(organize_root or self.cfg.organize_root)
         pid = plan_id or f"PLAN_{int(time.time())}"
@@ -112,8 +111,8 @@ class Planner:
             organizer = FolderOrganizer(self.cfg, organize_root=root, mode=mode)
             organizer.set_bursts(repo.all_bursts())
 
-            actions: List[PlannedAction] = []
-            by_category: Dict[str, int] = {}
+            actions: list[PlannedAction] = []
+            by_category: dict[str, int] = {}
             for r in records:
                 if r.infer_status != "inferred":
                     continue
@@ -143,7 +142,7 @@ class Planner:
 
     # -------------------------------------------------------------- execute
     def execute_plan(self, plan: Plan,
-                     operation: Optional[str] = None) -> ExecutionReport:
+                     operation: str | None = None) -> ExecutionReport:
         engine = ActionEngine(self.cfg, db_path=self.db_path)
         if operation:
             for a in plan.actions:
@@ -159,7 +158,7 @@ class Planner:
 
     # --------------------------------------------------------------- report
     def render_html_report(self, plan: Plan, output: Path | str,
-                           extra: Optional[dict] = None) -> Path:
+                           extra: dict | None = None) -> Path:
         out = Path(output)
         out.parent.mkdir(parents=True, exist_ok=True)
         rows = _plan_to_rows(self.db_path, plan)
@@ -183,7 +182,7 @@ class Planner:
         console.print(f"[dim]Organize root: {plan.organize_root}[/dim]")
 
 
-def _plan_to_rows(db_path: Path, plan: Plan) -> List[dict]:
+def _plan_to_rows(db_path: Path, plan: Plan) -> list[dict]:
     with get_session(db_path) as session:
         repo = PhotoRepository(session)
         rows = []
@@ -224,7 +223,7 @@ def _rel_target(target: str, root: str) -> str:
         return target
 
 
-def _render_html(plan: Plan, rows: List[dict], extra: dict) -> str:
+def _render_html(plan: Plan, rows: list[dict], extra: dict) -> str:
     total = plan.total
     cats = plan.by_category
 

@@ -12,9 +12,7 @@ Covers:
 """
 from __future__ import annotations
 
-import filecmp
 import os
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,14 +20,12 @@ import pytest
 
 from tests.conftest import make_image
 from photo_curator.config import CuratorConfig
-from photo_curator.db.models import ImageRecord
 from photo_curator.db.repository import PhotoRepository
 from photo_curator.db.session import get_session, init_db
 from photo_curator.engine.action_engine import ActionEngine, new_transaction_id
 from photo_curator.engine.rollback import RollbackEngine
 from photo_curator.rules.organizer import PlannedAction
 from photo_curator.rules.taxonomy import CategoryType
-from photo_curator.scanner.hasher import compute_sha256
 
 
 # ---------------------------------------------------------------------------

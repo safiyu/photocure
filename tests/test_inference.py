@@ -12,7 +12,6 @@ import pytest
 
 from tests.conftest import make_image
 from photo_curator.config import CuratorConfig
-from photo_curator.db.models import ImageRecord
 from photo_curator.db.repository import PhotoRepository, dequantize_embedding
 from photo_curator.db.session import get_session, init_db
 from photo_curator.inference.backends import detect_backend, reset_backend_cache
@@ -183,7 +182,6 @@ def test_pipeline_marks_images_inferred(tmp_db, tmp_path):
                                           show_progress=False)
     assert res.new == 2
 
-    os_environ_backup = None
     import os
     prev = os.environ.get("PCUR_BACKEND")
     os.environ["PCUR_BACKEND"] = "stub"
@@ -238,3 +236,48 @@ def test_pipeline_resumable_skips_inferred(tmp_db, tmp_path):
     assert first.processed == 1
     assert second.processed == 0
     assert second.skipped_already_inferred == 1
+
+
+def test_pipeline_streams_across_chunks(tmp_db, tmp_path):
+    """Memory-bounded streaming: with a small ``infer_chunk_size`` the whole
+    library is processed in several chunks. No image may be dropped across a
+    chunk boundary, and each surviving record must carry quality, a (stub)
+    semantic row and a full 512-dim embedding."""
+    import os
+    from photo_curator.scanner.file_scanner import FileScanner
+    cfg = _cfg(tmp_db)
+    # Force the library to be split into many chunks (5 images, chunk of 2 ->
+    # 3 chunks), exercising the per-chunk decode/persist/release loop.
+    cfg.device.infer_chunk_size = 2
+    init_db(tmp_db, drop=True)
+    root = tmp_path / "lib"
+    paths = [make_image(root / f"IMG_20240301_10000{i}.jpg", rng_seed=40 + i)
+             for i in range(5)]
+    FileScanner(cfg).scan_directory(root, db_path=tmp_db, show_progress=False)
+
+    prev = os.environ.get("PCUR_BACKEND")
+    os.environ["PCUR_BACKEND"] = "stub"
+    try:
+        reset_backend_cache()
+        ires = InferencePipeline(cfg).run(db_path=tmp_db, show_progress=False)
+    finally:
+        if prev is None:
+            os.environ.pop("PCUR_BACKEND", None)
+        else:
+            os.environ["PCUR_BACKEND"] = prev
+        reset_backend_cache()
+
+    # Every image processed exactly once, none lost between chunks.
+    assert ires.processed == 5
+    assert ires.failures == 0
+    assert ires.quality_computed == 5
+    assert ires.semantic_computed == 5
+
+    with get_session(tmp_db) as s:
+        repo = PhotoRepository(s)
+        for p in paths:
+            rec = repo.get_by_path(str(p))
+            assert rec.infer_status == "inferred"
+            assert rec.quality is not None
+            assert rec.semantic is not None
+            assert len(dequantize_embedding(rec.semantic.embedding) or []) == 512

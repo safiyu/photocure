@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,6 +21,10 @@ class DeviceSettings(BaseSettings):
     # Downscale longest edge before model inference (saves VRAM on 48MP frames).
     face_max_side: int = 1280
     clip_max_side: int = 512
+    # How many decoded frames to hold in RAM at once while running inference.
+    # Bounding this (instead of the whole library) keeps peak memory ~O(chunk)
+    # on 100k+ image sweeps; each phase decodes its chunks and discards them.
+    infer_chunk_size: int = 512
 
 
 class QualityThresholds(BaseSettings):
@@ -106,7 +109,7 @@ class CuratorConfig(BaseSettings):
     unknown_date_dir: str = "Unknown_Date"
 
     @classmethod
-    def load(cls, db_path: Optional[Path] = None) -> "CuratorConfig":
+    def load(cls, db_path: Path | None = None) -> CuratorConfig:
         cfg = cls()
         if db_path is not None:
             cfg.db_path = Path(db_path)

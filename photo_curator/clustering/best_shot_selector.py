@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -55,13 +55,13 @@ _RES_MIN = math.log(1024 * 768)
 _RES_MAX = math.log(4000 * 3000)
 
 
-def _normalize_face_sharpness(v: Optional[float]) -> float:
+def _normalize_face_sharpness(v: float | None) -> float:
     if v is None:
         return 0.0
     return float(np.clip(v / _FACE_SHARP_REF, 0.0, 1.0))
 
 
-def _eye_open_score(ear: Optional[float], t: BurstThresholds) -> float:
+def _eye_open_score(ear: float | None, t: BurstThresholds) -> float:
     """Map a canonical EAR to an openness score in [0, 1]."""
     if ear is None:
         return 0.0
@@ -87,7 +87,7 @@ class BestShotSelector:
         self.cfg = config or CuratorConfig()
         self.t = thresholds or self.cfg.burst
 
-    def score(self, c: ShotCandidate) -> Tuple[float, dict]:
+    def score(self, c: ShotCandidate) -> tuple[float, dict]:
         """Return ``(composite_score, breakdown)`` for a single candidate."""
         w = self.t
         s_blur = float(np.clip(c.sharpness_norm, 0.0, 1.0))
@@ -105,11 +105,11 @@ class BestShotSelector:
         }
         return float(composite), breakdown
 
-    def pick_best_shot(self, candidates: Sequence[ShotCandidate]) -> Optional[ShotCandidate]:
+    def pick_best_shot(self, candidates: Sequence[ShotCandidate]) -> ShotCandidate | None:
         """Return the best candidate (or None for an empty list)."""
         if not candidates:
             return None
-        best: Optional[ShotCandidate] = None
+        best: ShotCandidate | None = None
         best_key = None
         for c in candidates:
             _, br = self.score(c)
@@ -128,7 +128,7 @@ class BestShotSelector:
                 best, best_key = c, key
         return best
 
-    def rank(self, candidates: Sequence[ShotCandidate]) -> List[ShotCandidate]:
+    def rank(self, candidates: Sequence[ShotCandidate]) -> list[ShotCandidate]:
         """Return candidates sorted best-first."""
         for c in candidates:
             _, br = self.score(c)
@@ -152,7 +152,7 @@ def _candidate_from_record(rec) -> ShotCandidate:
     from datetime import timezone
     q = getattr(rec, "quality", None)
     sharp = q.sharpness_norm if q is not None else 0.0
-    faces: List[FaceDetection] = getattr(rec, "faces", None) or []
+    faces: list[FaceDetection] = getattr(rec, "faces", None) or []
     # Pick the highest-confidence face for sharpness/EAR.
     best_face = None
     best_conf = -1.0
@@ -180,12 +180,12 @@ def _candidate_from_record(rec) -> ShotCandidate:
 
 
 def pick_best_shot(candidates: Sequence[ShotCandidate],
-                   config: CuratorConfig | None = None) -> Optional[ShotCandidate]:
+                   config: CuratorConfig | None = None) -> ShotCandidate | None:
     return BestShotSelector(config).pick_best_shot(candidates)
 
 
 def pick_best_shot_records(records: Sequence,
-                           config: CuratorConfig | None = None) -> Optional[int]:
+                           config: CuratorConfig | None = None) -> int | None:
     """Return the image_id of the best shot among DB ``records``."""
     cfg = config or CuratorConfig()
     sel = BestShotSelector(cfg)

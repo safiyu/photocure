@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -26,8 +26,8 @@ from ..db.repository import dequantize_embedding
 @dataclass
 class BurstInput:
     image_id: int
-    taken_at: Optional[datetime]
-    embedding: Optional[List[float]]  # normalized 512-dim
+    taken_at: datetime | None
+    embedding: list[float] | None  # normalized 512-dim
     # Optional pre-computed sharpness so the selector need not re-read pixels.
     sharpness_norm: float = 0.0
 
@@ -58,7 +58,7 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (na * nb))
 
 
-def _ts(v: Optional[datetime]) -> Optional[float]:
+def _ts(v: datetime | None) -> float | None:
     if v is None:
         return None
     if v.tzinfo is None:
@@ -74,7 +74,7 @@ class BurstDetector:
         self.cfg = config or CuratorConfig()
         self.t = thresholds or self.cfg.burst
 
-    def cluster(self, items: Sequence[BurstInput]) -> List[List[int]]:
+    def cluster(self, items: Sequence[BurstInput]) -> list[list[int]]:
         """Return a list of groups; each group is a list of image_ids.
 
         Only groups with >= ``min_group_size`` members are returned; singleton
@@ -127,7 +127,7 @@ class BurstDetector:
             groups.setdefault(root, []).append(gi)
 
         # Keep only real bursts and convert to original image_ids, sorted by time.
-        result: List[List[int]] = []
+        result: list[list[int]] = []
         for members in groups.values():
             if len(members) < self.t.min_group_size:
                 continue
@@ -139,7 +139,7 @@ class BurstDetector:
             result.append([items[gi].image_id for gi in member_items])
         return result
 
-    def cluster_records(self, records: Sequence) -> List[BurstGroupResult]:
+    def cluster_records(self, records: Sequence) -> list[BurstGroupResult]:
         """Convenience: build BurstInputs from DB records and run the detector.
 
         ``records`` may be raw :class:`ImageRecord` rows; their ``semantic``
@@ -171,10 +171,10 @@ class BurstDetector:
 
 @dataclass
 class BurstGroupResult:
-    image_ids: List[int]
+    image_ids: list[int]
 
 
 def cluster_bursts(records: Sequence, config: CuratorConfig | None = None
-                   ) -> List[BurstGroupResult]:
+                   ) -> list[BurstGroupResult]:
     cfg = config or CuratorConfig()
     return BurstDetector(cfg).cluster_records(records)

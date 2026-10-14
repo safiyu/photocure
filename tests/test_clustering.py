@@ -9,10 +9,8 @@ import numpy as np
 import pytest
 from datetime import datetime, timedelta
 
-from photo_curator.config import CuratorConfig
 from photo_curator.clustering.burst_detector import (
     BurstDetector,
-    BurstGroupResult,
     BurstInput,
     cosine_similarity,
 )
