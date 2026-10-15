@@ -83,10 +83,29 @@ jobs:
           chmod +x packaging/deb/build_deb.sh
           ./packaging/deb/build_deb.sh "${{ steps.get_ver.outputs.version }}"
 
-      - name: Generate Checksums
+      - name: Generate Checksums & Release Notes
         run: |
           cd dist
           sha256sum *.deb > SHA256SUMS.txt
+          TAG="${{ steps.get_ver.outputs.tag }}"
+          cat << EOF > release_notes.md
+          ### 📦 Download & Install (.deb)
+
+          Download the package directly below or install via terminal:
+
+          \`\`\`bash
+          curl -LO https://github.com/safiyu/photocure/releases/download/${TAG}/photocure_amd64.deb
+          sudo apt install ./photocure_amd64.deb
+          photocure setup
+          \`\`\`
+
+          ---
+          EOF
+          if [ -n "${{ needs.tag-and-release.outputs.changelog }}" ]; then
+            echo "" >> release_notes.md
+            echo "### Changelog" >> release_notes.md
+            echo "${{ needs.tag-and-release.outputs.changelog }}" >> release_notes.md
+          fi
 
       - name: Upload Debian Artifact
         uses: actions/upload-artifact@v4
@@ -102,7 +121,7 @@ jobs:
         with:
           tag_name: ${{ steps.get_ver.outputs.tag }}
           name: Release ${{ steps.get_ver.outputs.tag }}
-          body: ${{ needs.tag-and-release.outputs.changelog }}
+          body_path: dist/release_notes.md
           files: |
             dist/*.deb
             dist/SHA256SUMS.txt

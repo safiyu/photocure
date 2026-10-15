@@ -61,6 +61,7 @@ fi
 # 5. Build .deb package
 echo "Running dpkg-deb..."
 dpkg-deb --build --root-owner-group "$STAGING_DIR" "$DIST_DIR/$DEB_NAME"
+cp "$DIST_DIR/$DEB_NAME" "$DIST_DIR/photocure_amd64.deb"
 
 echo ""
 echo "=== Package built successfully! ==="

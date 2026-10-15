@@ -10,16 +10,20 @@ Intelligent, offline photo library curation engine with hardware acceleration fo
 
 ### Option 1: Debian / Ubuntu (.deb package)
 
+Download and install the latest `.deb` directly:
+
 ```bash
-# Build the .deb package (or download from GitHub Releases)
-./packaging/deb/build_deb.sh
+# Download the latest .deb package
+curl -LO https://github.com/safiyu/photocure/releases/latest/download/photocure_amd64.deb
 
 # Install with apt
-sudo apt install ./dist/photocure_0.1.0_amd64.deb
+sudo apt install ./photocure_amd64.deb
 
 # Run setup to detect GPU and prepare models
 photocure setup
 ```
+
+*(You can also download versioned `.deb` files directly from [GitHub Releases](https://github.com/safiyu/photocure/releases)).*
 
 ### Option 2: From Source
 
