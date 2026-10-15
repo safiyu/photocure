@@ -3,7 +3,6 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -36,18 +35,53 @@ jobs:
         run: |
           pytest -q tests/test_setup.py tests/test_cli.py tests/test_doctor.py tests/test_rename.py
 
+  tag-and-release:
+    name: Auto-Tag Version
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
+      new_version: ${{ steps.tag_version.outputs.new_version }}
+      changelog: ${{ steps.tag_version.outputs.changelog }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          tag_prefix: "v"
+
   package-deb:
     name: Build & Release Debian Package
-    needs: test
+    needs: [test, tag-and-release]
+    if: always() && needs.test.result == 'success' && !cancelled()
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Determine Version
+        id: get_ver
+        run: |
+          if [ -n "${{ needs.tag-and-release.outputs.new_version }}" ]; then
+            echo "version=${{ needs.tag-and-release.outputs.new_version }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ needs.tag-and-release.outputs.new_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.1.0" >> "$GITHUB_OUTPUT"
+            echo "tag=v0.1.0" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build Debian Package
         run: |
           chmod +x packaging/deb/build_deb.sh
-          ./packaging/deb/build_deb.sh
+          ./packaging/deb/build_deb.sh "${{ steps.get_ver.outputs.version }}"
 
       - name: Generate Checksums
         run: |
@@ -62,22 +96,36 @@ jobs:
             dist/*.deb
             dist/SHA256SUMS.txt
 
-      - name: Publish GitHub Release (on version tag)
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Publish GitHub Release
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.get_ver.outputs.tag }}
+          name: Release ${{ steps.get_ver.outputs.tag }}
+          body: ${{ needs.tag-and-release.outputs.changelog }}
           files: |
             dist/*.deb
             dist/SHA256SUMS.txt
-          generate_release_notes: true
 
   docker-release:
     name: Build & Push Docker Image
-    needs: test
+    needs: [test, tag-and-release]
+    if: always() && needs.test.result == 'success' && !cancelled()
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Determine Docker Tags
+        id: docker_meta
+        run: |
+          VER="${{ needs.tag-and-release.outputs.new_version }}"
+          TAG="${{ needs.tag-and-release.outputs.new_tag }}"
+          if [ -n "$VER" ]; then
+            echo "tags=safiyu/photocure:latest,safiyu/photocure:${TAG},safiyu/photocure:${VER}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=safiyu/photocure:latest" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -89,24 +137,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME || 'safiyu' }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: safiyu/photocure
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,format=short
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.docker_meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

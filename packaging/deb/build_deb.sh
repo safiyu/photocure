@@ -7,8 +7,9 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DIST_DIR="$PROJECT_ROOT/dist"
 STAGING_DIR="$DIST_DIR/deb_staging"
 
-# Extract version from pyproject.toml
-VERSION=$(grep -m1 '^version = ' "$PROJECT_ROOT/pyproject.toml" | cut -d '"' -f2)
+# Extract version (can be passed as $1 or from pyproject.toml)
+VERSION="${1:-${VERSION_OVERRIDE:-$(grep -m1 '^version = ' "$PROJECT_ROOT/pyproject.toml" | cut -d '"' -f2)}}"
+VERSION="${VERSION#v}"
 if [ -z "$VERSION" ]; then
     VERSION="0.1.0"
 fi
