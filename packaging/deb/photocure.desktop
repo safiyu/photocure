@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Photocure
+Comment=Intelligent Photo Curation Engine
+Exec=/usr/bin/photocure start
+Icon=photocure
+Terminal=false
+Type=Application
+Categories=Graphics;Photography;
+Keywords=photos;curator;gallery;images;
+StartupNotify=true

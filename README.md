@@ -8,7 +8,20 @@ Intelligent, offline photo library curation engine with hardware acceleration fo
 
 ## Setup (First time)
 
-Run initial setup to detect your hardware and prepare the AI models:
+### Option 1: Debian / Ubuntu (.deb package)
+
+```bash
+# Build the .deb package (or download from GitHub Releases)
+./packaging/deb/build_deb.sh
+
+# Install with apt
+sudo apt install ./dist/photocure_0.1.0_amd64.deb
+
+# Run setup to detect GPU and prepare models
+photocure setup
+```
+
+### Option 2: From Source
 
 ```bash
 cd photocure

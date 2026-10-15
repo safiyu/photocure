@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -e
+
+VENV_CLI="/opt/photocure/venv/bin/photocure"
+
+if [ ! -x "$VENV_CLI" ]; then
+    echo "Photocure environment not ready at /opt/photocure/venv."
+    echo "Running post-install configuration..."
+    sudo dpkg-reconfigure photocure || {
+        echo "Failed to initialize environment. Please run: sudo dpkg-reconfigure photocure"
+        exit 1
+    }
+fi
+
+exec "$VENV_CLI" "$@"
