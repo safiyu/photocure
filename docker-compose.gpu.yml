@@ -1,0 +1,16 @@
+# NVIDIA GPU access (needs the NVIDIA Container Toolkit on the host):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+# The container detects the GPU and installs the CUDA build of PyTorch on first start.
+# If your driver is older, set the wheel index the setup should use with PCUR_TORCH_INDEX.
+services:
+  photocure:
+    environment:
+      PCUR_ACCEL: cuda
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

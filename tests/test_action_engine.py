@@ -19,13 +19,13 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import make_image
-from photo_curator.config import CuratorConfig
-from photo_curator.db.repository import PhotoRepository
-from photo_curator.db.session import get_session, init_db
-from photo_curator.engine.action_engine import ActionEngine, new_transaction_id
-from photo_curator.engine.rollback import RollbackEngine
-from photo_curator.rules.organizer import PlannedAction
-from photo_curator.rules.taxonomy import CategoryType
+from photocure.config import CuratorConfig
+from photocure.db.repository import PhotoRepository
+from photocure.db.session import get_session, init_db
+from photocure.engine.action_engine import ActionEngine, new_transaction_id
+from photocure.engine.rollback import RollbackEngine
+from photocure.rules.organizer import PlannedAction
+from photocure.rules.taxonomy import CategoryType
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ def seeded_repo(cfg, tmp_db, tmp_path):
         for i in range(1, 6)
     ]
     init_db(tmp_db, drop=True)
-    from photo_curator.scanner.file_scanner import FileScanner
+    from photocure.scanner.file_scanner import FileScanner
     res = FileScanner(cfg).scan_directory(root, db_path=tmp_db, show_progress=False)
     assert res.new == len(paths)
 
@@ -402,7 +402,7 @@ def test_rollback_invariance_100_files(cfg, tmp_path):
         paths.append(p)
 
     init_db(cfg.db_path, drop=True)
-    from photo_curator.scanner.file_scanner import FileScanner
+    from photocure.scanner.file_scanner import FileScanner
     res = FileScanner(cfg).scan_directory(root, db_path=cfg.db_path, show_progress=False)
     assert res.new == n
 

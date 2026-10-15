@@ -1,0 +1,1427 @@
+"""FastAPI review dashboard backend.
+
+Read endpoints are open on localhost; every mutating (POST) endpoint requires the
+per-launch token in the ``X-PCUR-Token`` header (injected into index.html).
+
+Endpoints:
+    GET  /api/config                       defaults, categories
+    GET  /api/stats | /api/progress | /api/plan
+    GET  /api/images                       filtered + paginated listing
+    GET  /api/images/{id}/similar          embedding neighbours
+    GET  /api/thumbnail/{id}               cached JPEG thumbnail
+    GET  /api/bursts | /api/burst/{id}
+    GET  /api/events | /api/people         clusters
+    GET  /api/transactions                 ledger summary (+ latest undoable)
+    GET  /api/transactions/{tid}/verify    re-hash committed targets
+    GET  /api/jobs/{id}                    background apply/undo job + live log
+    POST /api/scan | /api/infer | /api/cluster | /api/ingest
+    POST /api/images/{id}/reassign | /api/images/{id}/lock
+    POST /api/plan/rebuild | /api/plan/diff | /api/plan/apply
+    POST /api/undo | /api/repair | /api/learn | /api/settings
+    POST /api/events/cluster | /api/events/{id}/rename
+    POST /api/people/cluster | /api/people/{id}/rename
+"""
+from __future__ import annotations
+
+import hashlib
+import inspect
+import os
+import secrets
+import shutil
+import threading
+import time
+import uuid
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Annotated, Literal
+
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from sqlalchemy import func
+from sqlalchemy.orm import selectinload
+from sqlmodel import select
+
+from ..config import CuratorConfig, default_db_path
+from ..db import models as M
+from ..db.repository import PhotoRepository
+from ..db.session import get_session, init_db
+from ..quality.image_loader import load_image, to_thumbnail_jpg
+from ..rules.organizer import OrganizeMode
+from ..rules.taxonomy import CategoryType
+from ..services import Planner
+
+STATIC_DIR = Path(__file__).parent / "static"
+TOKEN_HEADER = "X-PCUR-Token"
+TOKEN_PLACEHOLDER = "__PCUR_TOKEN__"
+OPERATIONS = ("move", "copy", "hardlink", "symlink")
+CATEGORY_VALUES = tuple(c.value for c in CategoryType)
+JUNK_VALUES = tuple(c.value for c in CategoryType if c.is_junk)
+
+# Only one long-running task at a time across the whole process.
+_BUSY = threading.Lock()
+
+_BLOCKED_DIRS = (
+    "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/boot", "/dev",
+    "/proc", "/sys", "/System", "/Library", "/Applications", "/private/etc",
+    "/var/lib", "/var/log", "/var/db",
+)
+
+
+class ReassignReq(BaseModel):
+    bucket: str | None = None  # None clears a manual override
+    category: str | None = None  # alias for bucket
+
+
+class LockReq(BaseModel):
+    locked: bool = True
+
+
+class PlanReq(BaseModel):
+    output_dir: str
+    operation: Literal["move", "copy", "hardlink", "symlink"] = "move"
+    mode: Literal["category_first", "in_place"] = "category_first"
+    only_category: str | None = None
+    trash: bool = False
+    include_duplicates: bool = True
+
+
+class UndoReq(BaseModel):
+    transaction_id: str | None = None
+    verify: bool = True
+
+
+DeviceName = Literal["auto", "cuda", "rocm", "xpu", "mps", "directml", "integrated", "cpu"]
+Count = Annotated[int, Field(ge=0, le=128)]
+
+
+class RunOverrides(BaseModel):
+    """Optional per request overrides; anything left out falls back to saved settings."""
+
+    device: DeviceName | None = None
+    device_index: Count | None = None
+    decode_workers: Count | None = None
+    torch_threads: Count | None = None
+    scan_workers: Count | None = None
+
+
+class ScanReq(RunOverrides):
+    path: str
+    workers: Count | None = None
+
+
+class InferReq(RunOverrides):
+    batch_size: int = 32
+
+
+class ClusterReq(BaseModel):
+    window_seconds: int = 30
+    similarity_threshold: float = 0.88
+
+
+class EventClusterReq(BaseModel):
+    gap_hours: float = 2.0
+    gps_km: float = 1.0
+
+
+class RenameReq(BaseModel):
+    name: str
+
+
+class ProgressManager:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.state = {
+            "active": False, "task": "", "step": "", "done": 0, "total": 0,
+            "percent": 0, "message": "", "detail": "", "error": None,
+        }
+
+    def start(self, task: str, step: str = "", total: int = 0, message: str = ""):
+        with self._lock:
+            self.state = {
+                "active": True, "task": task, "step": step or task, "done": 0,
+                "total": total, "percent": 0, "message": message,
+                "detail": f"0 / {total}" if total > 0 else "", "error": None,
+            }
+
+    def update(self, done: int, total: int, message: str = "", detail: str = ""):
+        with self._lock:
+            if not self.state["active"]:
+                return
+            pct = int(done / max(total, 1) * 100) if total > 0 else 0
+            self.state["done"] = done
+            self.state["total"] = total
+            self.state["percent"] = min(pct, 100)
+            if message:
+                self.state["message"] = message
+            if detail:
+                self.state["detail"] = detail
+            elif total > 0:
+                self.state["detail"] = f"{done} / {total}"
+
+    def finish(self, message: str = "Completed successfully"):
+        with self._lock:
+            self.state["active"] = False
+            self.state["percent"] = 100
+            self.state["message"] = message
+
+    def error(self, err_msg: str):
+        with self._lock:
+            self.state["active"] = False
+            self.state["error"] = err_msg
+            self.state["message"] = f"Error: {err_msg}"
+
+    def get(self) -> dict:
+        with self._lock:
+            return dict(self.state)
+
+
+# --------------------------------------------------------------------- helpers
+def _accepts(fn, name: str) -> bool:
+    try:
+        return name in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _not_impl(what: str) -> HTTPException:
+    return HTTPException(501, f"{what} is not available in this build")
+
+
+def _check_category(value: str | None, field: str = "category") -> str | None:
+    if value is None or value == "":
+        return None
+    if value not in CATEGORY_VALUES:
+        raise HTTPException(400, f"invalid {field} '{value}', expected one of "
+                                 f"{', '.join(CATEGORY_VALUES)}")
+    return value
+
+
+def _nearest_existing(p: Path) -> Path:
+    cur = p
+    while not cur.exists() and cur != cur.parent:
+        cur = cur.parent
+    return cur
+
+
+def _library_root(dbp: Path) -> Path | None:
+    """Common directory of all indexed images, or None when unknown/too shallow."""
+    with get_session(dbp) as s:
+        lo, hi = s.exec(select(func.min(M.ImageRecord.path),
+                               func.max(M.ImageRecord.path))).one()
+    if not lo or not hi:
+        return None
+    try:
+        root = os.path.commonpath([lo, hi])
+    except ValueError:
+        return None
+    if root in (lo, hi):
+        root = os.path.dirname(root)
+    rp = Path(root)
+    return rp if len(rp.parts) >= 3 else None
+
+
+def validate_output_dir(raw: str, dbp: Path, in_place: bool) -> Path:
+    """Reject relative, system, shallow, home and in-library output roots."""
+    if not raw or not raw.strip():
+        raise HTTPException(400, "output_dir is required")
+    p = Path(raw.strip()).expanduser()
+    if not p.is_absolute():
+        raise HTTPException(400, "output_dir must be an absolute path")
+    p = p.resolve()
+    if len(p.parts) < 3 or p == Path.home().resolve():
+        raise HTTPException(400, f"output_dir is too broad: {p}")
+    for b in _BLOCKED_DIRS:
+        bp = Path(b)
+        if p == bp or bp in p.parents:
+            raise HTTPException(400, f"output_dir is inside a system directory: {p}")
+    if not in_place:
+        root = _library_root(dbp)
+        if root is not None and (p == root or root in p.parents):
+            raise HTTPException(400, f"output_dir must not be inside the library ({root})")
+    return p
+
+
+def _cat_label(name: str | None) -> str:
+    t = str(name or "").replace("_", " ")
+    return t[:1].upper() + t[1:]
+
+
+def _guesses(sem) -> list[dict]:
+    """Top three class guesses as [{name, score}] from the stored distribution."""
+    import json
+    try:
+        dist = json.loads(sem.distribution or "{}")
+    except (ValueError, TypeError):
+        dist = {}
+    ranked = sorted(((k, float(v)) for k, v in dist.items()), key=lambda kv: -kv[1])[:3]
+    if not ranked:
+        ranked = [(sem.top1_category, float(sem.top1_score))]
+        if sem.top2_category:
+            ranked.append((sem.top2_category, float(sem.top2_score)))
+    return [{"name": k, "score": round(v, 3)} for k, v in ranked if k]
+
+
+def _explain_uncertain(sem, cfg: CuratorConfig | None) -> dict:
+    """Why a photo is uncertain; uses the rules module when it provides one."""
+    if sem is None or not sem.top1_category:
+        return {"kind": "no_data", "text": "This photo has not been analysed yet."}
+    if cfg is not None:
+        try:
+            from ..rules.decision_matrix import explain_uncertain
+            from ..rules.taxonomy import get_taxonomy
+            out = explain_uncertain(sem, get_taxonomy(cfg), cfg)
+            if out and out.get("text"):
+                return {"kind": out.get("kind", ""), "text": out["text"]}
+        except Exception:
+            pass
+    tax = cfg.taxonomy if cfg is not None else None
+    min_conf = float(getattr(tax, "min_confidence", 0.40))
+    min_margin = float(getattr(tax, "min_margin", 0.08))
+    p1, p2 = round(sem.top1_score * 100), round(sem.top2_score * 100)
+    if sem.top1_score < min_conf:
+        return {"kind": "low_confidence",
+                "text": f"Not confident: the best guess is {_cat_label(sem.top1_category)} "
+                        f"at {p1}%, below the {round(min_conf * 100)}% needed."}
+    if sem.score_margin < min_margin:
+        return {"kind": "close_call",
+                "text": f"Close call between {_cat_label(sem.top1_category)} ({p1}%) and "
+                        f"{_cat_label(sem.top2_category)} ({p2}%)."}
+    return {"kind": "other", "text": "The routing rules could not place this photo."}
+
+
+def _item(r: M.ImageRecord, cfg: CuratorConfig | None = None) -> dict:
+    sem = r.semantic
+    qm = r.quality
+    out = {
+        "id": r.id, "filename": r.filename, "relative_path": r.relative_path,
+        "path": r.path, "category": r.category, "manual_bucket": r.manual_bucket,
+        "route_status": r.route_status, "target_path": r.target_path,
+        "is_duplicate": r.is_duplicate, "is_alternate": r.is_alternate,
+        "is_best_shot": r.is_best_shot, "burst_id": r.burst_id,
+        "width": r.width, "height": r.height,
+        "taken_at": r.taken_at.isoformat() if r.taken_at else None,
+        "taken_at_source": r.taken_at_source, "camera_model": r.camera_model,
+        "locked": bool(r.locked), "rating": r.rating, "event_id": r.event_id,
+        "near_dup_of": r.near_dup_of,
+        "top1": sem.top1_category if sem else None,
+        "top1_score": round(sem.top1_score, 3) if sem else None,
+        "margin": round(sem.score_margin, 3) if sem else None,
+        "aesthetic": round(sem.aesthetic, 3) if sem and sem.aesthetic is not None else None,
+        "quality_score": round(qm.quality_score, 3) if qm else None,
+        "is_blurry": bool(qm.is_blurry) if qm else False,
+        "is_too_dark": bool(qm.is_too_dark) if qm else False,
+        "is_overexposed": bool(qm.is_overexposed) if qm else False,
+        "face_count": len(r.faces or []),
+        "top2": sem.top2_category if sem else None,
+        "top2_score": round(sem.top2_score, 3) if sem else None,
+    }
+    if r.category == "uncertain" and not r.manual_bucket:
+        out["uncertain_reason"] = _explain_uncertain(sem, cfg)
+        out["guesses"] = _guesses(sem) if sem else []
+    return out
+
+
+def _load_items(s, ids: list[int], cfg: CuratorConfig | None = None) -> list[dict]:
+    if not ids:
+        return []
+    rows = s.exec(select(M.ImageRecord).where(M.ImageRecord.id.in_(ids)).options(
+        selectinload(M.ImageRecord.quality), selectinload(M.ImageRecord.semantic),
+        selectinload(M.ImageRecord.faces))).all()
+    by_id = {r.id: r for r in rows}
+    return [_item(by_id[i], cfg) for i in ids if i in by_id]
+
+
+def _make_thumb(path: str, ext: str, orientation: int, max_side: int = 384) -> bytes:
+    """Fast thumbnail: JPEG draft mode, RAW embedded preview, generic fallback."""
+    import io
+
+    from PIL import Image, ImageOps
+
+    ext = ext.lower()
+    img = None
+    if ext in (".jpg", ".jpeg"):
+        with Image.open(path) as im:
+            im.draft("RGB", (max_side * 2, max_side * 2))
+            img = ImageOps.exif_transpose(im).convert("RGB")
+    elif ext in (".cr2", ".nef", ".arw", ".dng"):
+        try:
+            import rawpy
+            with rawpy.imread(path) as raw:
+                try:
+                    th = raw.extract_thumb()
+                    if th.format == rawpy.ThumbFormat.JPEG:
+                        with Image.open(io.BytesIO(th.data)) as im:
+                            img = ImageOps.exif_transpose(im).convert("RGB")
+                    else:
+                        img = Image.fromarray(th.data).convert("RGB")
+                except Exception:
+                    rgb = raw.postprocess(half_size=True, use_camera_wb=True)
+                    img = Image.fromarray(rgb)
+        except Exception:
+            img = None
+    if img is not None:
+        img.thumbnail((max_side, max_side))
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=82)
+        return buf.getvalue()
+    frame = load_image(path, max_side=max_side, orientation=orientation)
+    return to_thumbnail_jpg(frame.bgr, max_side=max_side)
+
+
+class MkdirReq(BaseModel):
+    parent: str
+    name: str
+
+
+# --------------------------------------------------------------- folder browser
+def _browse_roots() -> list[Path]:
+    """Folders the picker may show; PCUR_BROWSE_ROOTS confines it (used in Docker)."""
+    raw = os.environ.get("PCUR_BROWSE_ROOTS", "").strip()
+    if raw:
+        found = [Path(p.strip()).expanduser() for p in raw.split(",") if p.strip()]
+        return [r for r in found if r.is_dir()]
+    roots = [Path.home()]
+    if os.name == "nt":
+        roots += [Path(f"{d}:/") for d in "CDEFGHIJKLMNOPQRSTUVWXYZ"
+                  if Path(f"{d}:/").exists()]
+    else:
+        roots.append(Path("/"))
+        for base in ("/Volumes", "/media", "/mnt"):
+            b = Path(base)
+            if b.is_dir():
+                try:
+                    roots += sorted(c for c in b.iterdir() if c.is_dir())
+                except OSError:
+                    pass
+    seen, out = set(), []
+    for r in roots:
+        if str(r) not in seen:
+            seen.add(str(r))
+            out.append(r)
+    return out
+
+
+def _confined() -> bool:
+    return bool(os.environ.get("PCUR_BROWSE_ROOTS", "").strip())
+
+
+def _within(path: Path, roots: list[Path]) -> bool:
+    try:
+        rp = path.resolve()
+    except OSError:
+        return False
+    return any(rp == r.resolve() or r.resolve() in rp.parents for r in roots)
+
+
+def create_app(db_path: str | None = None) -> FastAPI:
+    dbp = Path(db_path or os.environ.get("PCUR_DB_PATH") or default_db_path())
+    init_db(dbp)
+    cfg = CuratorConfig.load(dbp)
+    db_fp = hashlib.sha1(str(dbp.resolve()).encode()).hexdigest()[:8]
+
+    app = FastAPI(title="Photocure Review", version="0.1.0")
+    app.state.db = dbp
+    app.state.cfg = cfg
+    app.state.token = secrets.token_urlsafe(24)
+    progress_mgr = ProgressManager()
+    app.state.progress = progress_mgr
+    jobs: dict[str, dict] = {}
+    app.state.jobs = jobs
+
+    def req_cfg() -> CuratorConfig:
+        return app.state.cfg.model_copy(deep=True)
+
+    def run_cfg(body: RunOverrides | None = None) -> CuratorConfig:
+        """Per request cfg: saved settings first, then explicit overrides from the body."""
+        c = req_cfg()
+        try:
+            from ..services import apply_settings, load_settings
+            c = apply_settings(c, load_settings(dbp))
+            over: dict = {}
+            for k in ("device", "device_index", "decode_workers", "torch_threads",
+                      "scan_workers"):
+                v = getattr(body, k, None)
+                if v is not None:
+                    over[k] = v
+            legacy = getattr(body, "workers", None)
+            if legacy is not None and "scan_workers" not in over:
+                over["scan_workers"] = legacy
+            if over:
+                c = apply_settings(c, over)
+        except ImportError:
+            pass
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return c
+
+    def detect_for(c: CuratorConfig):
+        """Backend for this run; re-detects when the requested device changed."""
+        from ..inference import backends as bk
+        st = bk.detect_backend(c)
+        if (getattr(st, "requested", c.device.device) != c.device.device
+                or getattr(st, "device_index", c.device.device_index) != c.device.device_index):
+            bk.reset_backend_cache()
+            st = bk.detect_backend(c)
+        return st
+
+    def require_token(x_pcur_token: str | None = Header(default=None)):
+        if not x_pcur_token or not secrets.compare_digest(x_pcur_token, app.state.token):
+            raise HTTPException(403, "missing or invalid token")
+
+    auth = [Depends(require_token)]
+
+    @contextmanager
+    def exclusive():
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+        try:
+            yield
+        finally:
+            _BUSY.release()
+
+    def jlog(job: dict, msg: str, level: str = ""):
+        job["log"].append({"t": time.time(), "level": level, "msg": msg})
+
+    def spawn(kind: str, fn) -> dict:
+        """Run fn(job) in a thread; the caller already holds _BUSY, released here."""
+        job = {"id": uuid.uuid4().hex[:10], "kind": kind, "status": "running",
+               "log": [], "result": None, "error": None}
+        jobs[job["id"]] = job
+        while len(jobs) > 20:
+            jobs.pop(next(iter(jobs)))
+
+        def run():
+            try:
+                job["result"] = fn(job)
+                job["status"] = "done"
+            except Exception as e:
+                job["error"] = str(e)
+                job["status"] = "error"
+                jlog(job, f"failed: {e}", "err")
+                progress_mgr.error(str(e))
+            finally:
+                _BUSY.release()
+
+        try:
+            threading.Thread(target=run, daemon=True).start()
+        except Exception:
+            _BUSY.release()
+            raise
+        return job
+
+    def watch_ledger(job: dict, stop: threading.Event, total: int, *, after_id: int = 0,
+                     tid: str | None = None):
+        """Poll the ledger and stream one log line per action state change."""
+        seen: dict[int, str] = {}
+
+        def pump():
+            with get_session(dbp) as s:
+                q = select(M.ActionLedger)
+                q = q.where(M.ActionLedger.transaction_id == tid) if tid \
+                    else q.where(M.ActionLedger.id > after_id)
+                rows = s.exec(q.order_by(M.ActionLedger.id)).all()
+                for r in rows:
+                    if seen.get(r.id) != r.status:
+                        seen[r.id] = r.status
+                        if r.status == "pending":
+                            continue
+                        lvl = "err" if r.status == "failed" else ""
+                        jlog(job, f"{r.status} {r.operation_type} "
+                                  f"{Path(r.source_path).name} -> {r.target_path}"
+                                  + (f" ({r.error})" if r.error else ""), lvl)
+            done = sum(1 for v in seen.values() if v in ("committed", "rolled_back", "failed"))
+            progress_mgr.update(min(done, total), total)
+
+        def loop():
+            while not stop.is_set():
+                try:
+                    pump()
+                except Exception:
+                    pass
+                stop.wait(0.25)
+            try:
+                pump()
+            except Exception:
+                pass
+
+        t = threading.Thread(target=loop, daemon=True)
+        t.start()
+        return t
+
+    def make_planner(c: CuratorConfig) -> Planner:
+        return Planner(c, db_path=dbp)
+
+    def build(planner: Planner, body: PlanReq, root: Path, persist: bool):
+        m = OrganizeMode.IN_PLACE if body.mode == "in_place" else OrganizeMode.CATEGORY_FIRST
+        kw = {"organize_root": root, "operation": body.operation, "mode": m}
+        if _accepts(planner.build_plan, "include_duplicates"):
+            kw["include_duplicates"] = body.include_duplicates
+        if _accepts(planner.build_plan, "persist"):
+            kw["persist"] = persist
+        return planner.build_plan(**kw)
+
+    def latest_undoable() -> str | None:
+        with get_session(dbp) as s:
+            top = s.exec(select(func.max(M.ActionLedger.id)).where(
+                M.ActionLedger.status == "committed")).one()
+            if top is None:
+                return None
+            return s.exec(select(M.ActionLedger.transaction_id).where(
+                M.ActionLedger.id == top)).first()
+
+    # ------------------------------------------------------------------ read api
+    def backend_info() -> dict:
+        """Which AI backends are active, and how many rows the placeholder analysed."""
+        info: dict = {}
+        try:
+            info = dict(make_planner(req_cfg()).backend_info())
+        except Exception:
+            try:
+                from ..services import describe_backends
+                info = dict(describe_backends(req_cfg()))
+            except Exception:
+                info = {}
+        if not info:
+            try:
+                from ..inference.backends import detect_backend
+                bs = detect_backend(req_cfg())
+                info = {"device": bs.device, "semantic_backend": bs.semantic_backend,
+                        "face_backend": bs.face_backend}
+            except Exception:
+                info = {"device": "cpu", "semantic_backend": "stub", "face_backend": "stub"}
+        sem = info.get("semantic_backend", "stub")
+        info.setdefault("semantic_is_stub", sem == "stub")
+        info.setdefault("face_is_fallback", info.get("face_backend") != "insightface")
+        info.setdefault("hint", 'pip install torch torchvision open-clip-torch')
+        info.setdefault("stub_rows", 0)
+        return info
+
+    @app.get("/api/config")
+    def get_config():
+        tax = app.state.cfg.taxonomy
+        return {
+            "default_output_dir": os.environ.get("PCUR_DEFAULT_OUTPUT")
+            or str((dbp.resolve().parent / "Organized")),
+            "categories": [{"value": c.value, "junk": c.is_junk} for c in CategoryType],
+            "backend": backend_info(),
+            "thresholds": {"min_confidence": tax.min_confidence,
+                           "min_margin": tax.min_margin},
+        }
+
+    def settings_payload() -> dict:
+        """Saved settings, what will really run, and every accelerator with its status."""
+        try:
+            from ..config import resolve_workers
+            from ..services import apply_settings, load_settings
+        except ImportError:
+            raise _not_impl("settings")
+        saved = load_settings(dbp)
+        eff_cfg = apply_settings(req_cfg(), saved)
+        info = backend_info()
+        accelerators = info.get("accelerators")
+        if accelerators is None:
+            try:
+                from ..inference.backends import list_accelerators
+                accelerators = list_accelerators()
+            except Exception:
+                accelerators = []
+        selected = info.get("selected") or info.get("device") or "cpu"
+        effective = dict(resolve_workers(eff_cfg, info.get("device")))
+        effective["device"] = selected
+        effective["device_index"] = eff_cfg.device.device_index
+        return {"settings": saved, "effective": effective, "accelerators": accelerators,
+                "selected": selected,
+                "requested": info.get("requested") or eff_cfg.device.device,
+                "fallback_reason": info.get("fallback_reason", "")}
+
+    @app.get("/api/settings")
+    def get_settings():
+        return settings_payload()
+
+    @app.post("/api/settings", dependencies=auth)
+    def post_settings(payload: dict = Body(...)):
+        try:
+            from ..services import apply_settings, save_settings
+        except ImportError:
+            raise _not_impl("settings")
+        try:
+            saved = save_settings(dbp, payload)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        # Re-detect now so the page shows the device that will run, unless a job is busy.
+        if _BUSY.acquire(blocking=False):
+            try:
+                from ..inference import backends as bk
+                bk.reset_backend_cache()
+                bk.detect_backend(apply_settings(req_cfg(), saved))
+            except Exception:
+                pass
+            finally:
+                _BUSY.release()
+        return settings_payload()
+
+    @app.get("/api/stats")
+    def stats():
+        with get_session(dbp) as s:
+            return PhotoRepository(s).stats()
+
+    @app.get("/api/progress")
+    def get_progress():
+        return {**progress_mgr.get(), "busy": _BUSY.locked()}
+
+    @app.get("/api/plan")
+    def plan():
+        """Summarize the currently planned routing (route_status == planned)."""
+        eff = func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category)
+        with get_session(dbp) as s:
+            rows = s.exec(select(eff, func.count()).where(
+                M.ImageRecord.route_status == "planned").group_by(eff)).all()
+            by_cat = {(k or "unrouted"): int(n) for k, n in rows}
+            return {"total_planned": sum(by_cat.values()), "by_category": by_cat,
+                    "organize_root": str(cfg.organize_root)}
+
+    @app.get("/api/images")
+    def images(
+        category: str | None = Query(None),
+        categories: str | None = Query(None),
+        group: Literal["junk"] | None = Query(None),
+        manual: bool = Query(False),
+        q: str | None = Query(None),
+        near_dup: bool = Query(False),
+        highlights: bool = Query(False),
+        min_aesthetic: float | None = Query(None),
+        locked: bool | None = Query(None),
+        event_id: int | None = Query(None),
+        person_id: int | None = Query(None),
+        limit: int = Query(200, ge=1, le=1000),
+        offset: int = Query(0, ge=0),
+    ):
+        I = M.ImageRecord
+        eff = func.coalesce(I.manual_bucket, I.category)
+        conds = []
+        if category:
+            conds.append(eff == category)
+        if categories:
+            conds.append(eff.in_([c for c in categories.split(",") if c]))
+        if group == "junk":
+            conds.append(eff.in_(JUNK_VALUES))
+        if manual:
+            conds.append(I.manual_bucket.is_not(None))
+        if q:
+            like = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            conds.append(I.filename.ilike(like, escape="\\")
+                         | I.relative_path.ilike(like, escape="\\"))
+        if near_dup:
+            conds.append(I.near_dup_of.is_not(None))
+        if locked is not None:
+            conds.append(I.locked == locked)
+        if event_id is not None:
+            conds.append(I.event_id == event_id)
+        if person_id is not None:
+            conds.append(I.id.in_(select(M.FaceDetection.image_id).where(
+                M.FaceDetection.person_id == person_id)))
+        need_sem = highlights or min_aesthetic is not None
+        if need_sem:
+            conds.append(M.SemanticScore.aesthetic.is_not(None))
+        if min_aesthetic is not None:
+            conds.append(M.SemanticScore.aesthetic >= min_aesthetic)
+
+        def apply(stmt):
+            if need_sem:
+                stmt = stmt.join(M.SemanticScore, M.SemanticScore.image_id == I.id)
+            for c in conds:
+                stmt = stmt.where(c)
+            return stmt
+
+        with get_session(dbp) as s:
+            total = s.exec(apply(select(func.count()).select_from(I))).one()
+            order = [M.SemanticScore.aesthetic.desc(), I.id] if highlights else [I.id]
+            ids = s.exec(apply(select(I.id)).order_by(*order)
+                         .offset(offset).limit(limit)).all()
+            return {"total": int(total), "offset": offset, "limit": limit,
+                    "items": _load_items(s, list(ids), app.state.cfg)}
+
+    @app.get("/api/images/{image_id}/similar")
+    def similar(image_id: int, k: int = Query(12, ge=1, le=100)):
+        try:
+            from ..clustering.similarity import find_similar
+        except ImportError:
+            raise _not_impl("similarity search")
+        with get_session(dbp) as s:
+            if s.get(M.ImageRecord, image_id) is None:
+                raise HTTPException(404, "image not found")
+            pairs = list(find_similar(s, image_id, k))
+            items = _load_items(s, [int(i) for i, _ in pairs], app.state.cfg)
+            score = {int(i): float(sc) for i, sc in pairs}
+            for it in items:
+                it["score"] = round(score.get(it["id"], 0.0), 4)
+            return {"id": image_id, "items": items}
+
+    @app.get("/api/thumbnail/{image_id}")
+    def thumbnail(image_id: int):
+        with get_session(dbp) as s:
+            rec = s.get(M.ImageRecord, image_id)
+            if rec is None:
+                raise HTTPException(404, "image not found")
+            cands = [p for p in (rec.path, rec.target_path) if p]
+            fp = hashlib.sha1(f"{rec.quick_hash}|{rec.sha256}|{rec.file_size}|{rec.filename}"
+                              .encode()).hexdigest()[:10]
+            ext, orientation = rec.extension, rec.orientation
+        thumb_dir = cfg.cache_dir / "thumbs"
+        thumb_dir.mkdir(parents=True, exist_ok=True)
+        cache = thumb_dir / f"{db_fp}_{image_id:09d}_{fp}.jpg"
+        if cache.exists():
+            return FileResponse(cache, media_type="image/jpeg")
+        path = next((p for p in cands if os.path.exists(p)), None)
+        if path is None:
+            raise HTTPException(404, "image file not found on disk")
+        try:
+            data = _make_thumb(path, ext or Path(path).suffix, orientation)
+        except Exception as e:
+            raise HTTPException(500, f"thumbnail decode failed: {e}")
+        tmp = cache.with_suffix(f".{uuid.uuid4().hex[:6]}.tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, cache)
+        return Response(data, media_type="image/jpeg")
+
+    @app.get("/api/preview/{image_id}")
+    def preview(image_id: int):
+        """Large (1600 px) JPEG for the lightbox, cached like thumbnails."""
+        with get_session(dbp) as s:
+            rec = s.get(M.ImageRecord, image_id)
+            if rec is None:
+                raise HTTPException(404, "image not found")
+            cands = [p for p in (rec.path, rec.target_path) if p]
+            fp = hashlib.sha1(f"{rec.quick_hash}|{rec.sha256}|{rec.file_size}|{rec.filename}"
+                              .encode()).hexdigest()[:10]
+            ext, orientation = rec.extension, rec.orientation
+        prev_dir = cfg.cache_dir / "previews"
+        prev_dir.mkdir(parents=True, exist_ok=True)
+        cache = prev_dir / f"{db_fp}_{image_id:09d}_{fp}.jpg"
+        if cache.exists():
+            return FileResponse(cache, media_type="image/jpeg")
+        path = next((p for p in cands if os.path.exists(p)), None)
+        if path is None:
+            raise HTTPException(404, "image file not found on disk")
+        try:
+            data = _make_thumb(path, ext or Path(path).suffix, orientation, max_side=1600)
+        except Exception as e:
+            raise HTTPException(500, f"preview decode failed: {e}")
+        tmp = cache.with_suffix(f".{uuid.uuid4().hex[:6]}.tmp")
+        tmp.write_bytes(data)
+        os.replace(tmp, cache)
+        return Response(data, media_type="image/jpeg")
+
+    @app.get("/api/overview")
+    def overview():
+        """Library composition by effective category, for the composition strip."""
+        eff = func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category)
+        with get_session(dbp) as s:
+            rows = s.exec(select(eff, func.count()).group_by(eff)).all()
+            by_cat = {(k or "unrouted"): int(n) for k, n in rows}
+            stats_ = PhotoRepository(s).stats()
+            manual = s.exec(select(func.count()).select_from(M.ImageRecord).where(
+                M.ImageRecord.manual_bucket.is_not(None))).one()
+        return {"by_category": by_cat, "total": sum(by_cat.values()), "stats": stats_,
+                "manual_count": int(manual or 0)}
+
+    @app.get("/api/browse", dependencies=auth)
+    def browse(path: str | None = Query(None), hidden: bool = Query(False)):
+        """List sub-folders of ``path`` so the UI can offer a folder picker."""
+        roots = _browse_roots()
+        if not roots:
+            raise HTTPException(404, "no browsable folders are configured")
+        target = Path(path).expanduser() if path else roots[0]
+        if not target.is_absolute():
+            raise HTTPException(400, "path must be absolute")
+        if _confined() and not _within(target, roots):
+            raise HTTPException(403, "that folder is outside the allowed locations")
+        if not target.is_dir():
+            raise HTTPException(404, "folder not found")
+        target = target.resolve()
+        exts = {e.lower() for e in cfg.extensions}
+        entries, photos, error, truncated = [], 0, None, False
+        try:
+            with os.scandir(target) as it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False) or (e.is_symlink() and e.is_dir()):
+                            if e.name.startswith(".") and not hidden:
+                                continue
+                            if len(entries) >= 2000:
+                                truncated = True
+                                continue
+                            entries.append({"name": e.name, "path": str(Path(e.path))})
+                        elif e.is_file() and Path(e.name).suffix.lower() in exts:
+                            photos += 1
+                    except OSError:
+                        continue
+        except PermissionError:
+            error = "You do not have permission to open this folder."
+        except OSError as ex:
+            error = str(ex)
+        entries.sort(key=lambda d: d["name"].lower())
+        parent = None
+        if target.parent != target and (not _confined() or _within(target.parent, roots)):
+            parent = str(target.parent)
+        return {
+            "path": str(target), "parent": parent, "entries": entries, "photos": photos,
+            "writable": os.access(target, os.W_OK), "error": error, "truncated": truncated,
+            "roots": [{"name": "Home" if r == Path.home()
+                      else ("Computer" if str(r) == "/" else (r.name or str(r))),
+                       "path": str(r)} for r in roots],
+        }
+
+    @app.post("/api/browse/mkdir", dependencies=auth)
+    def browse_mkdir(body: MkdirReq):
+        name = body.name.strip()
+        if (not name or name in (".", "..") or any(c in name for c in '/\\:*?"<>|')
+                or len(name) > 200):
+            raise HTTPException(400, "folder name contains characters that are not allowed")
+        parent = Path(body.parent).expanduser()
+        roots = _browse_roots()
+        if not parent.is_absolute() or not parent.is_dir():
+            raise HTTPException(404, "parent folder not found")
+        if _confined() and not _within(parent, roots):
+            raise HTTPException(403, "that folder is outside the allowed locations")
+        new = parent.resolve() / name
+        try:
+            new.mkdir(exist_ok=False)
+        except FileExistsError:
+            raise HTTPException(409, "a folder with that name already exists")
+        except OSError as ex:
+            raise HTTPException(403, f"could not create folder: {ex}")
+        return {"path": str(new)}
+
+    @app.get("/api/bursts")
+    def bursts():
+        with get_session(dbp) as s:
+            repo = PhotoRepository(s)
+            out = []
+            for b in repo.all_bursts():
+                best = repo.get_by_id(b.best_shot_id) if b.best_shot_id else None
+                out.append({
+                    "id": b.id, "name": b.name, "image_count": b.image_count,
+                    "best_shot_id": b.best_shot_id,
+                    "best_shot": best.filename if best else None,
+                    "start_time": b.start_time.isoformat() if b.start_time else None,
+                })
+            return {"count": len(out), "items": out}
+
+    @app.get("/api/burst/{burst_id}")
+    def burst_detail(burst_id: int):
+        with get_session(dbp) as s:
+            bg = s.get(M.BurstGroup, burst_id)
+            if bg is None:
+                raise HTTPException(404, "burst not found")
+            members = s.exec(select(M.ImageRecord).where(
+                M.ImageRecord.burst_id == burst_id,
+                M.ImageRecord.infer_status == "inferred").options(
+                selectinload(M.ImageRecord.quality),
+                selectinload(M.ImageRecord.faces))).all()
+            items = []
+            for r in members:
+                qm = r.quality
+                faces = r.faces or []
+                best_face = max(faces, key=lambda f: f.confidence, default=None)
+                items.append({
+                    "id": r.id, "filename": r.filename, "is_best_shot": r.is_best_shot,
+                    "is_alternate": r.is_alternate,
+                    "taken_at": r.taken_at.isoformat() if r.taken_at else None,
+                    "width": r.width, "height": r.height,
+                    "sharpness_norm": round(qm.sharpness_norm, 3) if qm else None,
+                    "face_count": len(faces),
+                    "face_confidence": round(best_face.confidence, 3) if best_face else None,
+                    "ear": best_face.eye_aspect_ratio if best_face else None,
+                })
+            return {"burst": bg.name, "members": items}
+
+    @app.get("/api/events")
+    def events():
+        with get_session(dbp) as s:
+            covers = dict(s.exec(select(M.ImageRecord.event_id, func.min(M.ImageRecord.id))
+                                 .where(M.ImageRecord.event_id.is_not(None))
+                                 .group_by(M.ImageRecord.event_id)).all())
+            rows = s.exec(select(M.EventGroup).order_by(M.EventGroup.start)).all()
+            return {"count": len(rows), "items": [{
+                "id": e.id, "label": e.label, "image_count": e.image_count,
+                "start": e.start.isoformat() if e.start else None,
+                "end": e.end.isoformat() if e.end else None,
+                "cover_id": covers.get(e.id),
+            } for e in rows]}
+
+    @app.get("/api/people")
+    def people():
+        with get_session(dbp) as s:
+            covers = dict(s.exec(select(M.FaceDetection.person_id,
+                                        func.min(M.FaceDetection.image_id))
+                                 .where(M.FaceDetection.person_id.is_not(None))
+                                 .group_by(M.FaceDetection.person_id)).all())
+            rows = s.exec(select(M.PersonCluster).order_by(
+                M.PersonCluster.face_count.desc(), M.PersonCluster.id)).all()
+            return {"count": len(rows), "items": [{
+                "id": p.id, "name": p.name, "face_count": p.face_count,
+                "cover_id": covers.get(p.id),
+            } for p in rows]}
+
+    @app.get("/api/transactions")
+    def transactions():
+        with get_session(dbp) as s:
+            rows = s.exec(select(M.ActionLedger.transaction_id, M.ActionLedger.status,
+                                 func.count(), func.max(M.ActionLedger.id),
+                                 func.min(M.ActionLedger.created_at))
+                          .group_by(M.ActionLedger.transaction_id,
+                                    M.ActionLedger.status)).all()
+        txns: dict = {}
+        for tid, status, n, max_id, created in rows:
+            d = txns.setdefault(tid, {
+                "transaction_id": tid, "count": 0, "committed": 0, "rolled_back": 0,
+                "failed": 0, "pending": 0, "max_id": 0, "created_at": "",
+            })
+            d["count"] += n
+            d[status] = d.get(status, 0) + n
+            d["max_id"] = max(d["max_id"], max_id or 0)
+            if created and (not d["created_at"] or created.isoformat() < d["created_at"]):
+                d["created_at"] = created.isoformat()
+        items = sorted(txns.values(), key=lambda d: d["max_id"], reverse=True)
+        for d in items:
+            d["undoable"] = d["committed"] > 0
+            d.pop("max_id")
+        return {"items": items, "latest_undoable": latest_undoable()}
+
+    @app.get("/api/transactions/{tid}/verify")
+    def verify_txn(tid: str):
+        planner = make_planner(req_cfg())
+        if not hasattr(planner, "verify_transaction"):
+            raise _not_impl("transaction verification")
+        if tid == "latest":
+            tid = latest_undoable() or ""
+            if not tid:
+                raise HTTPException(404, "no undoable transactions")
+        return {"transaction_id": tid, "report": planner.verify_transaction(tid)}
+
+    @app.get("/api/jobs/{job_id}")
+    def job_status(job_id: str, since: int = Query(0, ge=0)):
+        job = jobs.get(job_id)
+        if job is None:
+            raise HTTPException(404, "job not found")
+        log = job["log"]
+        return {"id": job["id"], "kind": job["kind"], "status": job["status"],
+                "result": job["result"], "error": job["error"],
+                "log": log[since:], "next": len(log)}
+
+    # ----------------------------------------------------------------- write api
+    def do_scan(c: CuratorConfig, body: ScanReq, finish: bool = True) -> dict:
+        target = Path(body.path).expanduser().resolve()
+        if not target.exists() or not target.is_dir():
+            raise HTTPException(400, f"Directory does not exist: {body.path}")
+        progress_mgr.start("Scanning", f"Scanning directory: {target.name}", 0,
+                           "Discovering image files...")
+        from ..scanner.file_scanner import FileScanner
+        scanner = FileScanner(c)
+
+        def on_prog(done, total, curr):
+            progress_mgr.update(done, total, f"Indexing: {Path(curr).name}",
+                                detail=f"{done} / {total}")
+
+        try:
+            res = scanner.scan_directory(target, db_path=dbp, on_progress=on_prog,
+                                         show_progress=False)
+        except Exception as e:
+            progress_mgr.error(str(e))
+            raise
+        if finish:
+            progress_mgr.finish(f"Scan complete: {res.scanned} files seen, {res.new} new "
+                                f"indexed in {res.duration_s:.1f}s")
+        return {"ok": True, "path": str(target), "scanned": res.scanned, "new": res.new,
+                "duplicates": res.duplicates, "skipped_known": res.skipped_known,
+                "errors": res.errors, "duration_s": round(res.duration_s, 2)}
+
+    def do_infer(c: CuratorConfig, body: InferReq, finish: bool = True) -> dict:
+        progress_mgr.start("AI Inference", "Running quality + faces + CLIP semantics...",
+                           0, "Initializing AI models...")
+        from ..inference.pipeline import InferencePipeline
+        if body.batch_size:
+            c.device.face_batch_size = body.batch_size
+            c.device.clip_batch_size = max(body.batch_size, 1)
+
+        def on_prog(done, total, curr):
+            fn = Path(curr).name if not curr.startswith("Phase") else curr
+            progress_mgr.update(done, total, fn, detail=f"{done} / {total}" if total > 0 else "")
+
+        try:
+            pipeline = InferencePipeline(c, backend=detect_for(c))
+            res = pipeline.run(db_path=dbp, on_progress=on_prog, show_progress=False)
+        except Exception as e:
+            progress_mgr.error(str(e))
+            raise
+        if finish:
+            progress_mgr.finish(f"Inference complete: {res.processed} processed, "
+                                f"{res.faces_total} faces in {res.duration_s:.1f}s")
+        return {"ok": True, "processed": res.processed, "faces_total": res.faces_total,
+                "quality_computed": res.quality_computed,
+                "semantic_computed": res.semantic_computed, "failures": res.failures,
+                "duration_s": round(res.duration_s, 2)}
+
+    def do_cluster(c: CuratorConfig, body: ClusterReq, finish: bool = True) -> dict:
+        from ..clustering.best_shot_selector import BestShotSelector, _candidate_from_record
+        from ..clustering.burst_detector import BurstDetector
+        epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        c.burst.window_seconds = body.window_seconds
+        c.burst.similarity_threshold = body.similarity_threshold
+        progress_mgr.start("Clustering", "Burst detection and best-shot selection...", 1,
+                           "Analyzing timestamps and visual similarity...")
+        try:
+            with get_session(dbp) as s:
+                repo = PhotoRepository(s)
+                records = repo.all_images()
+                for r in records:
+                    r.burst_id = None
+                    r.is_best_shot = False
+                    r.is_alternate = False
+                for b in repo.all_bursts():
+                    repo.s.delete(b)
+                s.flush()
+                results = BurstDetector(c).cluster_records(records)
+                by_id = {r.id: r for r in records}
+                sel = BestShotSelector(c)
+                n = 0
+                for res in results:
+                    members = [by_id[m] for m in res.image_ids if m in by_id]
+                    if len(members) < c.burst.min_group_size:
+                        continue
+                    best_id = sel.pick_best_shot(
+                        [_candidate_from_record(m) for m in members]).image_id
+                    earliest = min(members, key=lambda m: (m.taken_at is None,
+                                                           m.taken_at or epoch))
+                    stamp = (earliest.taken_at.strftime("%Y%m%d")
+                             if earliest.taken_at else "Unknown")
+                    bg = repo.upsert_burst(M.BurstGroup(
+                        name=f"Burst_{stamp}_{n:04d}", image_count=len(members),
+                        best_shot_id=best_id, start_time=earliest.taken_at,
+                        end_time=max((m.taken_at for m in members), default=earliest.taken_at),
+                    ))
+                    for m in members:
+                        m.burst_id = bg.id
+                        m.is_best_shot = (m.id == best_id)
+                        m.is_alternate = (m.id != best_id)
+                    n += 1
+        except Exception as e:
+            progress_mgr.error(str(e))
+            raise
+        if finish:
+            progress_mgr.finish(f"Clustering complete: {n} burst groups detected")
+        return {"ok": True, "burst_groups": n}
+
+    @app.post("/api/scan", dependencies=auth)
+    def scan_folder(body: ScanReq):
+        with exclusive():
+            return do_scan(run_cfg(body), body)
+
+    @app.post("/api/infer", dependencies=auth)
+    def infer_pending(body: InferReq = InferReq()):
+        with exclusive():
+            return do_infer(run_cfg(body), body)
+
+    @app.post("/api/cluster", dependencies=auth)
+    def cluster_bursts(body: ClusterReq = ClusterReq()):
+        with exclusive():
+            return do_cluster(req_cfg(), body)
+
+    @app.post("/api/ingest", dependencies=auth)
+    def ingest_folder(body: ScanReq):
+        with exclusive():
+            progress_mgr.start("Ingest Pipeline", "Starting full ingest (Scan + Infer + Cluster)",
+                               0, "Initializing...")
+            try:
+                c = run_cfg(body)
+                scan_res = do_scan(c, body, finish=False)
+                infer_res = do_infer(c, InferReq(), finish=False)
+                cluster_res = do_cluster(c, ClusterReq(), finish=False)
+            except Exception as e:
+                progress_mgr.error(str(e))
+                raise
+            progress_mgr.finish("Full ingest pipeline complete!")
+            return {"ok": True, "scan": scan_res, "infer": infer_res, "cluster": cluster_res}
+
+    @app.post("/api/images/{image_id}/reassign", dependencies=auth)
+    def reassign(image_id: int, body: ReassignReq):
+        bucket = _check_category(body.bucket, "bucket")
+        category = _check_category(body.category, "category")
+        effective = bucket or category
+        with get_session(dbp) as s:
+            rec = s.get(M.ImageRecord, image_id)
+            if rec is None:
+                raise HTTPException(404, "image not found")
+            PhotoRepository(s).set_manual_bucket(image_id, effective)
+            return {"ok": True, "id": image_id, "manual_bucket": rec.manual_bucket,
+                    "category": rec.category, "locked": bool(rec.locked)}
+
+    @app.post("/api/images/{image_id}/lock", dependencies=auth)
+    def lock_image(image_id: int, body: LockReq = LockReq()):
+        with get_session(dbp) as s:
+            rec = s.get(M.ImageRecord, image_id)
+            if rec is None:
+                raise HTTPException(404, "image not found")
+            repo = PhotoRepository(s)
+            if hasattr(repo, "set_locked"):
+                repo.set_locked(image_id, body.locked)
+            else:
+                rec.locked = body.locked
+            return {"ok": True, "id": image_id, "locked": bool(rec.locked)}
+
+    @app.post("/api/plan/rebuild", dependencies=auth)
+    def rebuild_plan(body: PlanReq):
+        _check_category(body.only_category, "only_category")
+        root = validate_output_dir(body.output_dir, dbp, body.mode == "in_place")
+        with exclusive():
+            p = build(make_planner(req_cfg()), body, root, persist=True)
+            return {"plan_id": p.plan_id, "total": p.total, "by_category": p.by_category,
+                    "burst_count": p.burst_count, "organize_root": p.organize_root}
+
+    @app.post("/api/plan/diff", dependencies=auth)
+    def plan_diff(body: PlanReq):
+        only = _check_category(body.only_category, "only_category")
+        root = validate_output_dir(body.output_dir, dbp, body.mode == "in_place")
+        with exclusive():
+            p = build(make_planner(req_cfg()), body, root, persist=False)
+        actions = [a for a in p.actions if not only or str(
+            getattr(a.category, "value", a.category)) == only]
+        targets_seen: set[str] = set()
+        collisions, missing, cross, need_bytes, total_bytes = [], 0, 0, 0, 0
+        for a in actions:
+            src, dst = Path(a.source), Path(a.target)
+            try:
+                st = src.stat()
+            except OSError:
+                missing += 1
+                continue
+            total_bytes += st.st_size
+            key = str(dst)
+            if dst.exists() or key in targets_seen:
+                collisions.append(key)
+            targets_seen.add(key)
+            anc = _nearest_existing(dst.parent)
+            crossdev = False
+            try:
+                crossdev = anc.stat().st_dev != st.st_dev
+            except OSError:
+                pass
+            if a.operation in ("move", "hardlink") and crossdev:
+                cross += 1
+            if a.operation == "copy" or (a.operation == "move" and crossdev):
+                need_bytes += st.st_size
+        free = shutil.disk_usage(_nearest_existing(root)).free
+        by_cat: dict[str, int] = {}
+        for a in actions:
+            k = str(getattr(a.category, "value", a.category))
+            by_cat[k] = by_cat.get(k, 0) + 1
+        return {
+            "plan_id": p.plan_id, "total": len(actions), "by_category": by_cat,
+            "operation": body.operation, "mode": body.mode, "organize_root": str(root),
+            "collisions": len(collisions), "collision_samples": collisions[:20],
+            "cross_device": cross, "missing_sources": missing,
+            "bytes_total": total_bytes, "bytes_to_write": need_bytes,
+            "free_bytes": free, "enough_space": need_bytes <= free,
+        }
+
+    @app.post("/api/plan/apply", dependencies=auth, status_code=202)
+    def apply_plan(body: PlanReq):
+        only = _check_category(body.only_category, "only_category")
+        root = validate_output_dir(body.output_dir, dbp, body.mode == "in_place")
+        planner = make_planner(req_cfg())
+        if body.trash and not _accepts(planner.execute_plan, "trash"):
+            raise _not_impl("trash staging")
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+
+        def work(job: dict) -> dict:
+            progress_mgr.start("Apply", "Building plan", 0, "Building plan...")
+            jlog(job, "building plan")
+            p = build(planner, body, root, persist=True)
+            kw: dict = {}
+            if only:
+                if _accepts(planner.execute_plan, "only_category"):
+                    kw["only_category"] = only
+                else:
+                    p.actions = [a for a in p.actions if str(
+                        getattr(a.category, "value", a.category)) == only]
+                    p.total = len(p.actions)
+            if body.trash:
+                kw["trash"] = True
+            total = sum(1 for a in p.actions if not only or str(
+                getattr(a.category, "value", a.category)) == only)
+            if total == 0:
+                progress_mgr.finish("Nothing to apply")
+                jlog(job, "nothing to apply")
+                return {"ok": False, "error": "nothing to apply"}
+            with get_session(dbp) as s:
+                after = s.exec(select(func.max(M.ActionLedger.id))).one() or 0
+            jlog(job, f"applying {total} actions ({body.operation}, plan {p.plan_id})")
+            progress_mgr.start("Apply", f"Applying {total} actions", total, "Applying...")
+            stop = threading.Event()
+            watcher = watch_ledger(job, stop, total, after_id=after)
+            try:
+                rep = planner.execute_plan(p, **kw)
+            finally:
+                stop.set()
+                watcher.join(timeout=5)
+            ok = rep.failures == 0
+            progress_mgr.finish(f"Applied {rep.executed} files, {rep.failures} failed")
+            jlog(job, f"done: {rep.executed} executed, {rep.failures} failed "
+                      f"(txn {rep.transaction_id})", "" if ok else "err")
+            return {"ok": ok, "transaction_id": rep.transaction_id,
+                    "executed": rep.executed, "collisions": rep.collisions,
+                    "failures": rep.failures, "errors": list(rep.errors)[:50]}
+
+        job = spawn("apply", work)
+        return {"ok": True, "job_id": job["id"]}
+
+    @app.post("/api/undo", dependencies=auth, status_code=202)
+    def undo(body: UndoReq):
+        tid = body.transaction_id or latest_undoable()
+        if not tid:
+            return JSONResponse({"ok": False, "error": "no transactions found"},
+                                status_code=200)
+        planner = make_planner(req_cfg())
+        if not body.verify and not _accepts(planner.undo, "verify"):
+            raise _not_impl("undo without verification")
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+
+        def work(job: dict) -> dict:
+            with get_session(dbp) as s:
+                total = s.exec(select(func.count()).select_from(M.ActionLedger).where(
+                    M.ActionLedger.transaction_id == tid,
+                    M.ActionLedger.status == "committed")).one()
+            progress_mgr.start("Undo", f"Undoing {total} actions", total, "Rolling back...")
+            jlog(job, f"undoing transaction {tid} ({total} committed actions)")
+            stop = threading.Event()
+            watcher = watch_ledger(job, stop, total, tid=tid)
+            try:
+                rep = planner.undo(tid, verify=body.verify) if _accepts(planner.undo, "verify") \
+                    else planner.undo(tid)
+            finally:
+                stop.set()
+                watcher.join(timeout=5)
+            ok = rep.failures == 0
+            progress_mgr.finish(f"Reversed {rep.reversed} actions, {rep.failures} failed")
+            jlog(job, f"done: {rep.reversed} reversed, {rep.skipped} skipped, "
+                      f"{rep.failures} failed", "" if ok else "err")
+            return {"ok": ok, "transaction_id": tid, "reversed": rep.reversed,
+                    "skipped": rep.skipped, "failures": rep.failures,
+                    "errors": list(rep.errors)[:50]}
+
+        job = spawn("undo", work)
+        return {"ok": True, "job_id": job["id"], "transaction_id": tid}
+
+    @app.post("/api/learn", dependencies=auth, status_code=202)
+    def learn():
+        """Re-sort uncertain photos using the user's manual choices (background job)."""
+        planner = make_planner(req_cfg())
+        if not hasattr(planner, "learn_from_corrections"):
+            raise _not_impl("learning from corrections")
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+
+        def work(job: dict) -> dict:
+            progress_mgr.start("Learning", "Re-sorting from your choices", 0,
+                               "Reading your corrections...")
+            jlog(job, "learning from your choices")
+            res = dict(planner.learn_from_corrections())
+            moved = int(res.get("moved_out_of_uncertain", 0))
+            progress_mgr.finish(f"Re-sorted {int(res.get('updated', 0))} photos, "
+                                f"{moved} left Needs a look")
+            jlog(job, f"updated {int(res.get('updated', 0))}, moved {moved} out of uncertain")
+            return {"ok": True, **res}
+
+        job = spawn("learn", work)
+        return {"ok": True, "job_id": job["id"]}
+
+    @app.post("/api/repair", dependencies=auth)
+    def repair():
+        planner = make_planner(req_cfg())
+        if not hasattr(planner, "repair_paths"):
+            raise _not_impl("path repair")
+        with exclusive():
+            return {"ok": True, "repaired": int(planner.repair_paths())}
+
+    @app.post("/api/events/cluster", dependencies=auth)
+    def cluster_events_ep(body: EventClusterReq = EventClusterReq()):
+        try:
+            from ..clustering.events import cluster_events
+        except ImportError:
+            raise _not_impl("event clustering")
+        with exclusive(), get_session(dbp) as s:
+            return {"ok": True, "events": int(cluster_events(s, body.gap_hours, body.gps_km))}
+
+    @app.post("/api/events/{event_id}/rename", dependencies=auth)
+    def rename_event(event_id: int, body: RenameReq):
+        with get_session(dbp) as s:
+            ev = s.get(M.EventGroup, event_id)
+            if ev is None:
+                raise HTTPException(404, "event not found")
+            ev.label = body.name.strip() or None
+            return {"ok": True, "id": event_id, "label": ev.label}
+
+    @app.post("/api/people/cluster", dependencies=auth)
+    def cluster_people_ep():
+        try:
+            from ..clustering.people import cluster_people
+        except ImportError:
+            raise _not_impl("people clustering")
+        with exclusive(), get_session(dbp) as s:
+            return {"ok": True, "people": int(cluster_people(s))}
+
+    @app.post("/api/people/{person_id}/rename", dependencies=auth)
+    def rename_person(person_id: int, body: RenameReq):
+        with get_session(dbp) as s:
+            p = s.get(M.PersonCluster, person_id)
+            if p is None:
+                raise HTTPException(404, "person not found")
+            p.name = body.name.strip() or None
+            return {"ok": True, "id": person_id, "name": p.name}
+
+    # ---------------------------------------------------------------- static
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    @app.get("/", response_class=HTMLResponse)
+    def index():
+        html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        return HTMLResponse(html.replace(TOKEN_PLACEHOLDER, app.state.token),
+                            headers={"Cache-Control": "no-store"})
+
+    @app.get("/healthz")
+    def health():
+        return {"ok": True}
+
+    return app
+
+
+_app_singleton: FastAPI | None = None
+_app_lock = threading.Lock()
+
+
+def __getattr__(name: str):
+    """Lazy module-level ``app`` so importing this module has no side effects."""
+    global _app_singleton
+    if name == "app":
+        with _app_lock:
+            if _app_singleton is None:
+                _app_singleton = create_app()
+            return _app_singleton
+    raise AttributeError(name)
+
+
+def run(host: str = "127.0.0.1", port: int = 8080, db_path: str | None = None,
+        reload: bool = False) -> None:
+    """Serve the dashboard (loopback by default) using the app factory."""
+    import uvicorn
+
+    if db_path:
+        os.environ["PCUR_DB_PATH"] = str(db_path)
+    uvicorn.run("photocure.ui.app:create_app", host=host, port=port,
+                reload=reload, factory=True)

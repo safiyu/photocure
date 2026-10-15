@@ -1,0 +1,18 @@
+# AMD GPU access (UNTESTED, needs the amdgpu kernel driver on the host):
+#   docker compose -f docker-compose.yml -f docker-compose.rocm.yml up --build
+# The container installs the ROCm build of PyTorch on first start.
+# Find your group ids with: getent group video render
+# AMD's docs also suggest "ipc: host", "cap_add: [SYS_PTRACE]" and
+# "security_opt: [seccomp:unconfined]", but those are for profilers and debuggers.
+# Add them only if the container reports permission errors.
+services:
+  photocure:
+    environment:
+      PCUR_ACCEL: rocm
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    # Numeric ids work even when the group does not exist inside the image.
+    group_add:
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-109}"

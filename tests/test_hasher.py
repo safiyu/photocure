@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import xxhash
 
-from photo_curator.scanner.hasher import (
+from photocure.scanner.hasher import (
     compute_quick_hash,
     compute_sha256,
     is_same_quick_hash,
@@ -18,7 +18,7 @@ def _known_sha256(data: bytes) -> str:
 
 def test_sha256_matches_stdlib(tmp_path):
     p = tmp_path / "a.bin"
-    data = b"photo-curator" * 1000
+    data = b"photocure" * 1000
     p.write_bytes(data)
     assert compute_sha256(p) == _known_sha256(data)
 

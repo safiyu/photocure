@@ -13,8 +13,11 @@ fastapi>=0.110
 uvicorn[standard]>=0.27
 pydantic-settings>=2.0
 python-multipart>=0.0.9
+pyyaml>=6
 
-# GPU inference (RTX 4060 / CUDA)
+# AI model: the same packages as the "ml" extra (Apple Silicon, NVIDIA or CPU).
+# Optional "faces" extra: insightface plus onnxruntime. The line below is NVIDIA only;
+# on macOS replace onnxruntime-gpu with onnxruntime.
 torch>=2.1
 torchvision>=0.16
 open-clip-torch>=2.20
