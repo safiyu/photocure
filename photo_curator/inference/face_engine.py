@@ -96,9 +96,10 @@ def _ear_from_five_landmarks(lm: list[tuple[float, float]], bgr: np.ndarray) -> 
     # High-frequency energy proxy on each eye crop (0..1).
     detail = 0.0
     h_img, w_img = bgr.shape[:2]
-    for pt in (r, l):
-        cx, cy = int(pt[0] * w_img), int(pt[1] * h_img)
-        rad = max(2, int(0.02 * w_img))
+    for pt in (r, left):
+        cx = int(pt[0] * w_img) if pt[0] <= 1.0 else int(pt[0])
+        cy = int(pt[1] * h_img) if pt[1] <= 1.0 else int(pt[1])
+        rad = max(2, int(0.08 * inter_eye)) if inter_eye > 5 else max(2, int(0.02 * w_img))
         x0, y0 = max(0, cx - rad), max(0, cy - rad)
         x1, y1 = min(w_img, cx + rad), min(h_img, cy + rad)
         if x1 - x0 < 3 or y1 - y0 < 3:
@@ -153,11 +154,10 @@ class FaceEngine:
 
     def _load_insightface(self):
         try:
-            from insightface.app import FaceAnalysis
             providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
             if not (self.bs.cuda_available and self.bs.torch is not None):
                 providers = ["CPUExecutionProvider"]
-            app = FaceAnalysis(name="buffalo_l", providers=providers)
+            app = FaceAnalysis(name="buffalo_l", allowed_modules=["detection"], providers=providers)
             ctx_id = 0 if self.bs.cuda_available else -1
             app.prepare(ctx_id=ctx_id, det_size=(self.cfg.device.face_max_side,
                                                  self.cfg.device.face_max_side))
@@ -204,6 +204,7 @@ class FaceEngine:
         return results
 
     def _detect_one(self, bgr: np.ndarray) -> list[FaceInfo]:
+        self._ensure_loaded()
         h, w = bgr.shape[:2]
         if self.bs.face_backend == "insightface" and self._insightface is not None:
             return self._detect_insightface(bgr, w, h)

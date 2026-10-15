@@ -36,9 +36,8 @@ cli = app  # alias for the console-script entry point (photo_curator.cli:cli)
 console = Console()
 
 
-@contextmanager
-def _config(db: Path, refresh: bool = True):
-    """Yield a config bound to ``db`` (initializing the schema on first use)."""
+def _config(db: Path, refresh: bool = True) -> CuratorConfig:
+    """Return a config bound to ``db`` (initializing the schema on first use)."""
     reset_backend_cache() if refresh else None
     cfg = CuratorConfig.load(db)
     init_db(cfg.db_path)
@@ -328,8 +327,10 @@ def serve(
     reload: bool = typer.Option(False, "--reload"),
 ):
     """Launch the web review dashboard."""
+    import os
     import uvicorn
     cfg = _config(db)
+    os.environ["PCUR_DB_PATH"] = str(cfg.db_path.resolve())
     console.print(f"[cyan]Serving review dashboard on http://{host}:{port}/ "
                   f"(db={cfg.db_path})[/cyan]")
     uvicorn.run("photo_curator.ui.app:app", host=host, port=port,

@@ -16,6 +16,8 @@ Endpoints:
 from __future__ import annotations
 
 import os
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -49,6 +51,82 @@ class UndoReq(BaseModel):
     transaction_id: str | None = None
 
 
+class ScanReq(BaseModel):
+    path: str
+    workers: int = 8
+
+
+class InferReq(BaseModel):
+    device: str = "auto"
+    batch_size: int = 32
+
+
+class ClusterReq(BaseModel):
+    window_seconds: int = 30
+    similarity_threshold: float = 0.88
+
+
+class ProgressManager:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.state = {
+            "active": False,
+            "task": "",
+            "step": "",
+            "done": 0,
+            "total": 0,
+            "percent": 0,
+            "message": "",
+            "detail": "",
+            "error": None,
+        }
+
+    def start(self, task: str, step: str = "", total: int = 0, message: str = ""):
+        with self._lock:
+            self.state = {
+                "active": True,
+                "task": task,
+                "step": step or task,
+                "done": 0,
+                "total": total,
+                "percent": 0,
+                "message": message,
+                "detail": f"0 / {total}" if total > 0 else "",
+                "error": None,
+            }
+
+    def update(self, done: int, total: int, message: str = "", detail: str = ""):
+        with self._lock:
+            if not self.state["active"]:
+                return
+            pct = int(done / max(total, 1) * 100) if total > 0 else 0
+            self.state["done"] = done
+            self.state["total"] = total
+            self.state["percent"] = min(pct, 100)
+            if message:
+                self.state["message"] = message
+            if detail:
+                self.state["detail"] = detail
+            elif total > 0:
+                self.state["detail"] = f"{done} / {total}"
+
+    def finish(self, message: str = "Completed successfully"):
+        with self._lock:
+            self.state["active"] = False
+            self.state["percent"] = 100
+            self.state["message"] = message
+
+    def error(self, err_msg: str):
+        with self._lock:
+            self.state["active"] = False
+            self.state["error"] = err_msg
+            self.state["message"] = f"Error: {err_msg}"
+
+    def get(self) -> dict:
+        with self._lock:
+            return dict(self.state)
+
+
 def create_app(db_path: str | None = None) -> FastAPI:
     dbp = Path(db_path or os.environ.get("PCUR_DB_PATH", "photo_curator.db"))
     init_db(dbp)
@@ -60,12 +138,155 @@ def create_app(db_path: str | None = None) -> FastAPI:
         allow_headers=["*"])
     app.state.db = dbp
     app.state.cfg = cfg
+    progress_mgr = ProgressManager()
+    app.state.progress = progress_mgr
 
     # ------------------------------------------------------------------ api
     @app.get("/api/stats")
     def stats():
         with get_session(dbp) as s:
             return PhotoRepository(s).stats()
+
+    @app.get("/api/progress")
+    def get_progress():
+        return progress_mgr.get()
+
+    @app.post("/api/scan")
+    def scan_folder(body: ScanReq):
+        target = Path(body.path).expanduser().resolve()
+        if not target.exists() or not target.is_dir():
+            raise HTTPException(400, f"Directory does not exist: {body.path}")
+
+        progress_mgr.start("Scanning", f"Scanning directory: {target.name}", 0, "Discovering image files…")
+        from ..scanner.file_scanner import FileScanner
+        cfg.scan_workers = body.workers
+        scanner = FileScanner(cfg)
+
+        def on_prog(done, total, curr):
+            fn = Path(curr).name
+            progress_mgr.update(done, total, f"Indexing: {fn}", detail=f"{done} / {total}")
+
+        try:
+            res = scanner.scan_directory(target, db_path=dbp, on_progress=on_prog, show_progress=False)
+            progress_mgr.finish(f"Scan complete: {res.scanned} files seen, {res.new} new indexed in {res.duration_s:.1f}s")
+            return {
+                "ok": True,
+                "path": str(target),
+                "scanned": res.scanned,
+                "new": res.new,
+                "duplicates": res.duplicates,
+                "skipped_known": res.skipped_known,
+                "errors": res.errors,
+                "duration_s": round(res.duration_s, 2),
+            }
+        except Exception as e:
+            progress_mgr.error(str(e))
+            raise
+
+    @app.post("/api/infer")
+    def infer_pending(body: InferReq = InferReq()):
+        progress_mgr.start("AI Inference", "Running quality + faces + CLIP semantics…", 0, "Initializing AI models…")
+        from ..inference.backends import detect_backend
+        from ..inference.pipeline import InferencePipeline
+        cfg.device.device = body.device
+        if body.batch_size:
+            cfg.device.face_batch_size = body.batch_size
+            cfg.device.clip_batch_size = max(body.batch_size, 1)
+        bs = detect_backend(cfg)
+        pipeline = InferencePipeline(cfg, backend=bs)
+
+        def on_prog(done, total, curr):
+            fn = Path(curr).name if not curr.startswith("Phase") else curr
+            progress_mgr.update(done, total, fn, detail=f"{done} / {total}" if total > 0 else "")
+
+        try:
+            res = pipeline.run(db_path=dbp, on_progress=on_prog, show_progress=False)
+            progress_mgr.finish(f"Inference complete: {res.processed} processed, {res.faces_total} faces in {res.duration_s:.1f}s")
+            return {
+                "ok": True,
+                "processed": res.processed,
+                "faces_total": res.faces_total,
+                "quality_computed": res.quality_computed,
+                "semantic_computed": res.semantic_computed,
+                "failures": res.failures,
+                "duration_s": round(res.duration_s, 2),
+            }
+        except Exception as e:
+            progress_mgr.error(str(e))
+            raise
+
+    @app.post("/api/cluster")
+    def cluster_bursts(body: ClusterReq = ClusterReq()):
+        progress_mgr.start("Burst Clustering", "Detecting bursts and selecting best shots…", 0, "Grouping photos by timestamp & similarity…")
+        from ..clustering.burst_detector import BurstDetector
+        from ..clustering.best_shot_selector import BestShotSelector, _candidate_from_record
+        from ..db.models import BurstGroup
+        _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+        cfg.burst.window_seconds = body.window_seconds
+        cfg.burst.similarity_threshold = body.similarity_threshold
+
+        progress_mgr.start("Clustering", "Burst detection and best-shot selection…", 1, "Analyzing timestamps and visual similarity…")
+        try:
+            with get_session(dbp) as s:
+                repo = PhotoRepository(s)
+                records = repo.all_images()
+                for r in records:
+                    r.burst_id = None
+                    r.is_best_shot = False
+                    r.is_alternate = False
+                for b in repo.all_bursts():
+                    repo.s.delete(b)
+                s.flush()
+                detector = BurstDetector(cfg)
+                results = detector.cluster_records(records)
+                by_id = {r.id: r for r in records}
+                sel = BestShotSelector(cfg)
+                n = 0
+                for res in results:
+                    members = [by_id[m] for m in res.image_ids if m in by_id]
+                    if len(members) < cfg.burst.min_group_size:
+                        continue
+                    best_id = sel.pick_best_shot(
+                        [_candidate_from_record(m) for m in members]).image_id
+                    earliest = min(members, key=lambda m: (m.taken_at is None,
+                                                           m.taken_at or _EPOCH))
+                    stamp = (earliest.taken_at.strftime("%Y%m%d")
+                             if earliest.taken_at else "Unknown")
+                    bg = repo.upsert_burst(BurstGroup(
+                        name=f"Burst_{stamp}_{n:04d}",
+                        image_count=len(members),
+                        best_shot_id=best_id,
+                        start_time=earliest.taken_at,
+                        end_time=max((m.taken_at for m in members), default=earliest.taken_at),
+                    ))
+                    for m in members:
+                        m.burst_id = bg.id
+                        m.is_best_shot = (m.id == best_id)
+                        m.is_alternate = (m.id != best_id)
+                    n += 1
+                progress_mgr.finish(f"Clustering complete: {n} burst groups detected")
+                return {"ok": True, "burst_groups": n}
+        except Exception as e:
+            progress_mgr.error(str(e))
+            raise
+
+    @app.post("/api/ingest")
+    def ingest_folder(body: ScanReq):
+        progress_mgr.start("Ingest Pipeline", "Starting full ingest (Scan + Infer + Cluster)…", 0, "Initializing…")
+        try:
+            scan_res = scan_folder(body)
+            infer_res = infer_pending(InferReq())
+            cluster_res = cluster_bursts(ClusterReq())
+            progress_mgr.finish("Full ingest pipeline complete!")
+            return {
+                "ok": True,
+                "scan": scan_res,
+                "infer": infer_res,
+                "cluster": cluster_res,
+            }
+        except Exception as e:
+            progress_mgr.error(str(e))
+            raise
 
     @app.get("/api/plan")
     def plan():
@@ -264,7 +485,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.get("/api/transactions")
     def transactions():
-        from sqlalchemy import select as _sel
+        from sqlmodel import select as _sel
         from ..db.models import ActionLedger
         with get_session(dbp) as s:
             rows = s.exec(_sel(ActionLedger)).all()
@@ -273,7 +494,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 d = txns.setdefault(r.transaction_id, {
                     "transaction_id": r.transaction_id,
                     "count": 0, "committed": 0, "rolled_back": 0,
-                    "failed": 0, "created_at": r.created_at.isoformat(),
+                    "failed": 0, "created_at": r.created_at.isoformat() if r.created_at else "",
                 })
                 d["count"] += 1
                 d[r.status] = d.get(r.status, 0) + 1

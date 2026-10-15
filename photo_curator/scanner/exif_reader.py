@@ -16,6 +16,7 @@ from pathlib import Path
 
 try:
     from PIL import Image
+    Image.MAX_IMAGE_PIXELS = None
 except ImportError:  # pragma: no cover
     Image = None
 

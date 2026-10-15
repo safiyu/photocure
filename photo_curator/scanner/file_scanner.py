@@ -103,9 +103,11 @@ class FileScanner:
                    extensions: Iterable[str] | None = None) -> Iterable[Path]:
         root = Path(root)
         exts = {e.lower() for e in (extensions or self.cfg.extensions)}
-        # Skip hidden/system dirs to avoid .git, __MACOSX, @eaDir etc.
+        # Skip hidden/system/build dirs to avoid .git, __MACOSX, build, dist, _gzip etc.
         skip_dirs = {".git", "__MACOSX", ".cache", ".thumbnail", ".thumbnails",
-                     "@eaDir", "$recycle.bin", "system volume information"}
+                     "@eaDir", "$recycle.bin", "system volume information",
+                     "build", "dist", "node_modules", "_gzip", "ui-gzip",
+                     ".venv", "venv", "__pycache__", ".tox", "target"}
         for dirpath, dirnames, filenames in _os_walk(root, skip_dirs):
             dirnames[:] = [d for d in dirnames if d.lower() not in skip_dirs
                            and not d.startswith(".")]
@@ -192,8 +194,11 @@ class FileScanner:
                 quick-hash collision -- see :meth:`_resolve_dedup`) and assigns
                 the row.
                 """
-                if wr.error or wr.exif is None:
-                    log.warning("scan error %s: %s", wr.path, wr.error)
+                if wr.error or wr.exif is None or not wr.exif.width or not wr.exif.height:
+                    if wr.exif and (not wr.exif.width or not wr.exif.height):
+                        log.debug("skip non-image / unidentifiable file %s: %s", wr.path, wr.exif.error)
+                    else:
+                        log.warning("scan error %s: %s", wr.path, wr.error)
                     return None
                 exif = wr.exif
                 rec = ImageRecord(

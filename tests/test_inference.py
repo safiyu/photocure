@@ -64,6 +64,20 @@ def test_eye_aspect_ratio_degenerate_returns_zero():
     assert eye_aspect_ratio([(0, 0), (1, 0)]) == 0.0
 
 
+def test_ear_from_five_landmarks():
+    from photo_curator.inference.face_engine import _ear_from_five_landmarks
+    # Normalized coords [0, 1]
+    lm_norm = [(0.3, 0.4), (0.7, 0.4), (0.5, 0.6), (0.4, 0.8), (0.6, 0.8)]
+    bgr = np.zeros((100, 100, 3), dtype=np.uint8)
+    score_norm = _ear_from_five_landmarks(lm_norm, bgr)
+    assert 0.05 <= score_norm <= 0.35
+
+    # Absolute pixel coords (e.g. from InsightFace SCRFD)
+    lm_pixels = [(30.0, 40.0), (70.0, 40.0), (50.0, 60.0), (40.0, 80.0), (60.0, 80.0)]
+    score_pix = _ear_from_five_landmarks(lm_pixels, bgr)
+    assert 0.05 <= score_pix <= 0.35
+
+
 # ---------------------------------------------------------------------------
 # Stub backends (deterministic, default for the suite)
 # ---------------------------------------------------------------------------

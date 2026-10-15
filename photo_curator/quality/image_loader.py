@@ -15,6 +15,10 @@ import cv2
 import numpy as np
 from PIL import Image
 
+# Allow decoding large camera photos & panoramas (e.g. 200MP phone photos)
+# without triggering Pillow's DecompressionBombError.
+Image.MAX_IMAGE_PIXELS = None
+
 try:
     import pillow_heif
     pillow_heif.register_heif_opener()

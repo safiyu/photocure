@@ -113,6 +113,10 @@ class InferencePipeline:
             if not todo:
                 return result
 
+            total_steps = len(todo) * 2
+            if on_progress:
+                on_progress(0, total_steps, f"Loading face detection models for {len(todo)} images…")
+
             face_max = self.cfg.device.face_max_side
             # Memory-bounded streaming (review rec 2): never hold the whole
             # library in RAM. Records are processed in ``infer_chunk_size``
@@ -120,13 +124,23 @@ class InferencePipeline:
             # model, persisted, and its decoded frames dropped before the next
             # chunk. Peak decoded memory is therefore ~O(chunk), not
             # ~O(library), which is what keeps a 100k+ image sweep viable.
-            chunk_size = max(1, int(self.cfg.device.infer_chunk_size))
+            chunk_size = min(64, max(1, int(self.cfg.device.infer_chunk_size)))
             chunks = [todo[i:i + chunk_size]
                       for i in range(0, len(todo), chunk_size)]
 
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _decode_single(rec: ImageRecord) -> tuple[ImageRecord, np.ndarray | None, Exception | None]:
+                try:
+                    img = load_image(rec.path, max_side=face_max,
+                                     orientation=rec.orientation)
+                    return rec, img.bgr, None
+                except Exception as e:
+                    return rec, None, e
+
             def _decode(chunk_recs: list[ImageRecord],
                         mark_failed: bool) -> list[_LoadedFrame]:
-                """Decode a chunk of records to BGR frames.
+                """Decode a chunk of records to BGR frames in parallel.
 
                 Failed decodes are logged; when ``mark_failed`` is set they are
                 also counted once and the record flipped to "failed". Phase A
@@ -136,18 +150,23 @@ class InferencePipeline:
                 because records that failed in Phase A are never re-decoded).
                 """
                 frames: list[_LoadedFrame] = []
-                for rec in chunk_recs:
-                    try:
-                        img = load_image(rec.path, max_side=face_max,
-                                         orientation=rec.orientation)
-                        frames.append(_LoadedFrame(image_id=rec.id, bgr=img.bgr))
-                    except Exception as e:
-                        log.warning("decode failed for %s: %s", rec.path, e)
+                max_w = min(8, max(1, len(chunk_recs)))
+                with ThreadPoolExecutor(max_workers=max_w) as executor:
+                    results = list(executor.map(_decode_single, chunk_recs))
+
+                failed_any = False
+                for rec, bgr, exc in results:
+                    if bgr is not None:
+                        frames.append(_LoadedFrame(image_id=rec.id, bgr=bgr))
+                    else:
+                        log.warning("decode failed for %s: %s", rec.path, exc)
                         if mark_failed:
                             rec.infer_status = "failed"
-                            repo.s.flush()
                             result.failures += 1
                             result.errors.append(f"{rec.path}: decode failure")
+                            failed_any = True
+                if failed_any:
+                    repo.s.flush()
                 return frames
 
             tasks: dict = {}
@@ -174,13 +193,20 @@ class InferencePipeline:
             # chunk's pixels. The face model is loaded once for the whole phase
             # (not per chunk), so there is no per-chunk model load overhead.
             face_engine = FaceEngine(self.cfg, backend=self.bs)
+            phase_a_done = 0
             try:
                 for chunk in chunks:
                     rec_by_id = {r.id: r for r in chunk}
                     frames = _decode(chunk, mark_failed=True)
-                    faces_batch = face_engine.detect_faces_batch(
-                        [f.bgr for f in frames])
-                    for fr, faces in zip(frames, faces_batch):
+                    decoded_ids = {fr.image_id for fr in frames}
+                    for rec in chunk:
+                        if rec.id not in decoded_ids:
+                            phase_a_done += 1
+                            if on_progress:
+                                on_progress(phase_a_done, total_steps,
+                                            f"Phase 1/2 (Faces & Quality): Skipped unreadable {Path(rec.path).name}")
+                    for fr in frames:
+                        faces = face_engine.detect_faces_batch([fr.bgr])[0]
                         result.faces_total += len(faces)
                         if show_progress:
                             progress.advance(tasks["faces"])
@@ -199,13 +225,17 @@ class InferencePipeline:
                             # Tentatively inferred; Phase B (CLIP) finalizes it
                             # and flips it to "failed" if semantic persist breaks.
                             rec.infer_status = "inferred"
-                            repo.s.flush()
                         except Exception as e:
                             log.warning("persist failed for %s: %s", rec.path, e)
                             rec.infer_status = "failed"
                             repo.s.flush()
                             result.failures += 1
                             result.errors.append(f"{rec.path}: {e}")
+                        phase_a_done += 1
+                        if on_progress:
+                            on_progress(phase_a_done, total_steps,
+                                        f"Phase 1/2 (Faces & Quality): {Path(rec.path).name}")
+                    repo.s.flush()
                     frames.clear()  # release this chunk's decoded pixels
             finally:
                 face_engine.release()
@@ -222,12 +252,28 @@ class InferencePipeline:
             # JPEG/HEIC is far cheaper than reloading the model, and it keeps
             # peak memory bounded to a single chunk. Only records Phase A left
             # "inferred" are re-decoded, so Phase-A failures are not re-counted.
+            if on_progress:
+                on_progress(len(todo), total_steps, f"Loading CLIP semantic model for {len(todo)} images…")
             sem_engine = SemanticEngine(self.cfg, backend=self.bs)
+            phase_b_done = 0
             try:
                 for chunk in chunks:
                     rec_by_id = {r.id: r for r in chunk}
                     ok_recs = [r for r in chunk if r.infer_status == "inferred"]
+                    skipped_ids = {r.id for r in chunk if r.infer_status != "inferred"}
+                    for sid in skipped_ids:
+                        phase_b_done += 1
+                        if on_progress:
+                            on_progress(len(todo) + phase_b_done, total_steps,
+                                        f"Phase 2/2 (CLIP Semantics): Skipped {Path(rec_by_id[sid].path).name}")
                     frames = _decode(ok_recs, mark_failed=True)
+                    decoded_ids = {fr.image_id for fr in frames}
+                    for rec in ok_recs:
+                        if rec.id not in decoded_ids:
+                            phase_b_done += 1
+                            if on_progress:
+                                on_progress(len(todo) + phase_b_done, total_steps,
+                                            f"Phase 2/2 (CLIP Semantics): Skipped unreadable {Path(rec.path).name}")
                     sems_batch = (
                         sem_engine.classify_and_embed([f.bgr for f in frames])
                         if frames else []
@@ -257,9 +303,10 @@ class InferencePipeline:
                             result.quality_computed += 1
                             result.semantic_computed += 1
                             result.processed += 1
+                            phase_b_done += 1
                             if on_progress:
-                                on_progress(result.processed, len(todo),
-                                            rec.path)
+                                on_progress(len(todo) + phase_b_done, total_steps,
+                                            f"Phase 2/2 (CLIP Semantics): {Path(rec.path).name}")
                         except Exception as e:
                             log.warning("semantic persist failed for %s: %s",
                                         rec.path, e)
@@ -267,6 +314,7 @@ class InferencePipeline:
                             repo.s.flush()
                             result.failures += 1
                             result.errors.append(f"{rec.path}: {e}")
+                    repo.s.flush()
                     frames.clear()  # release this chunk's decoded pixels
             finally:
                 sem_engine.release()
@@ -276,6 +324,9 @@ class InferencePipeline:
                         self.bs.torch.cuda.empty_cache()
                     except Exception:
                         pass
+
+            if on_progress:
+                on_progress(total_steps, total_steps, f"Inference complete: {result.processed} processed")
 
             if show_progress and progress is not None:
                 progress.stop()
