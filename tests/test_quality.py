@@ -4,16 +4,15 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from photo_curator.config import QualityThresholds
-from photo_curator.quality.blur_detector import (
+from photocure.config import QualityThresholds
+from photocure.quality.blur_detector import (
     BlurDetector,
-    compute_edge_frequency,
     compute_laplacian_variance,
 )
-from photo_curator.quality.brightness_detector import (
+from photocure.quality.brightness_detector import (
     compute_luminance_metrics,
 )
-from photo_curator.quality.engine import QualityEngine
+from photocure.quality.engine import QualityEngine
 
 
 def _sharp_image(size=(400, 400), seed=0) -> np.ndarray:
@@ -50,20 +49,38 @@ def test_blur_detector_flags_blurry_frame():
     assert 0.0 <= sharp_res["sharpness_norm"] <= 1.0
 
 
-def test_blur_is_resolution_independent():
-    """The 400px and 1600px versions of the same scene must score similarly,
-    because the metric is computed on a fixed center-crop patch."""
-    small = _sharp_image(size=(400, 400), seed=4)
-    big = cv2.resize(small, (1600, 1600), interpolation=cv2.INTER_CUBIC)
-    v_small = compute_laplacian_variance(small)
-    v_big = compute_laplacian_variance(big)
-    # Same scene: variance should be within an order of magnitude.
-    assert 0.1 * v_small < v_big < 10 * v_small
+def test_blur_patch_never_upscales_wide_frames():
+    """A sharp panorama scores like its untouched center square (no upscale)."""
+    from photocure.quality.blur_detector import _center_crop_patch
+    sharp = _sharp_image(size=(400, 400))
+    pano = np.concatenate([sharp, sharp, sharp], axis=1)   # 400 x 1200
+    patch = _center_crop_patch(pano, 1024)
+    assert patch.shape[:2] == (400, 400)
+    center = pano[:, 400:800]
+    assert compute_laplacian_variance(pano) == compute_laplacian_variance(center)
 
 
-def test_edge_frequency_in_range():
-    f = compute_edge_frequency(_sharp_image(seed=2))
-    assert 0.0 <= f <= 1.0
+def test_blur_patch_downscales_big_frames_to_cap():
+    from photocure.quality.blur_detector import _center_crop_patch
+    big = np.zeros((2000, 3000, 3), dtype=np.uint8)
+    assert _center_crop_patch(big, 1024).shape[:2] == (1024, 1024)
+
+
+def test_sharp_wide_frame_is_not_flagged_blurry():
+    t = QualityThresholds()
+    pano = np.concatenate([_sharp_image(size=(400, 400))] * 3, axis=1)
+    assert BlurDetector(t).evaluate(pano)["is_blurry"] is False
+
+
+def test_blur_detector_result_has_no_constant_edge_metric():
+    assert "edge_frequency" not in BlurDetector().evaluate(_sharp_image())
+
+
+def test_quality_engine_reports_low_contrast_flag():
+    flat = np.full((200, 200, 3), 128, dtype=np.uint8)
+    q = QualityEngine().score(flat)
+    assert q["is_low_contrast"] is True
+    assert QualityEngine().score(_sharp_image())["is_low_contrast"] is False
 
 
 def test_brightness_detects_dark_frame():
@@ -109,3 +126,26 @@ def test_composite_engine_penalizes_bad_frames():
     assert dark["needs_review"] is True
     assert 0.0 <= good["quality_score"] <= 1.0
     assert 0.0 <= dark["quality_score"] <= 1.0
+
+
+def test_smooth_but_sharp_scene_is_not_blurry():
+    """A smooth gradient with one crisp edge has low Laplacian variance but is sharp."""
+    import cv2
+
+    img = np.zeros((900, 1200, 3), np.uint8)
+    for y in range(900):
+        img[y, :] = (200 - y // 8, 160 - y // 12, 110)
+    cv2.fillPoly(img, [np.array([[0, 600], [300, 330], [650, 560], [900, 300], [1200, 600]])], (95, 105, 80))
+    res = BlurDetector().evaluate(img)
+    assert res["laplacian_variance"] < 50
+    assert res["blur_retained"] < 0.58
+    assert res["is_blurry"] is False
+
+
+def test_blurred_scene_is_still_blurry():
+    import cv2
+
+    img = np.zeros((900, 1200, 3), np.uint8)
+    cv2.fillPoly(img, [np.array([[0, 600], [300, 330], [650, 560], [900, 300], [1200, 600]])], (250, 250, 250))
+    res = BlurDetector().evaluate(cv2.GaussianBlur(img, (0, 0), 6))
+    assert res["is_blurry"] is True and res["blur_retained"] >= 0.58

@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Photocure</title>
+  <meta name="pcur-token" content="__PCUR_TOKEN__">
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem("pcur-theme"); } catch (e) {}
+      if (!t) t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      document.documentElement.dataset.theme = t;
+    })();
+  </script>
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="stylesheet" href="/static/style.css?v=2.2.0">
+</head>
+<body>
+  <!-- icon sprite -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v3h16v-3"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 24 24"><path d="M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 5.2a3 3 0 0 1 0 5.6M18 14.3c1.8.8 3 2.6 3 4.7"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 7h11l-3-3M17 17H6l3 3"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><path d="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h11v11H9zM5 15V4h11"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+    <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5m0 0-5 5m5-5 5 5"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4 10-10"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 4 2c-.9.6-1.5 1-1.5 2M12 17h.01"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M9 9.5h.01"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19zM12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  </svg>
+
+  <a class="skip" href="#main">Skip to content</a>
+
+  <div class="shell">
+    <aside class="side" id="side" aria-label="Main navigation">
+      <div class="brand">
+        <img class="logo" src="/static/logo.png" alt="" width="38" height="38">
+        <div><b>Photocure</b><span>Intelligent image curator</span></div>
+      </div>
+
+      <nav>
+        <div class="navgroup">
+          <h2>Get started</h2>
+          <button class="tab navitem active" data-tab="library"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg><span>Import</span><em class="count"></em></button>
+        </div>
+        <div class="navgroup" style="margin-top:18px">
+          <h2>Browse</h2>
+          <button class="tab navitem" data-tab="categories"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span>Library</span><em class="count" data-count="categories"></em></button>
+          <button class="tab navitem" data-tab="bursts"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span>Bursts</span><em class="count" data-count="bursts"></em></button>
+          <button class="tab navitem" data-tab="highlights"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg><span>Highlights</span><em class="count"></em></button>
+          <button class="tab navitem" data-tab="events"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg><span>Events</span><em class="count"></em></button>
+          <button class="tab navitem" data-tab="people"><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg><span>People</span><em class="count"></em></button>
+        </div>
+        <div class="navgroup" style="margin-top:18px">
+          <h2>Review</h2>
+          <button class="tab navitem" data-tab="uncertain"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><span>Needs a look</span><em class="count" data-count="uncertain"></em></button>
+          <button class="tab navitem" data-tab="junk"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Junk review</span><em class="count" data-count="junk"></em></button>
+        </div>
+        <div class="navgroup" style="margin-top:18px">
+          <h2>Finish</h2>
+          <button class="tab navitem" data-tab="actions"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg><span>Apply and undo</span><em class="count" data-count="actions"></em></button>
+        </div>
+      </nav>
+
+      <div class="side-foot">
+        <button class="devchip" id="device-chip" data-goto="settings" title="Open Settings" type="button"><i class="dot"></i><span id="device-chip-text">Checking device</span></button>
+        <button class="tab navitem" data-tab="settings"><svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg><span>Settings</span><em class="count"></em></button>
+        <div class="foot-icons">
+          <button class="icon-btn" id="theme-toggle" title="Switch between light and dark" aria-label="Switch between light and dark"><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg></button>
+          <button class="icon-btn" id="btn-help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
+        </div>
+      </div>
+    </aside>
+
+    <div class="content">
+      <header class="topbar">
+        <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open menu"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
+        <div class="grow">
+          <h1 id="page-title">Import</h1>
+          <div class="sub" id="page-sub"></div>
+        </div>
+        <div id="topbar-progress" class="pill" hidden role="status">
+          <span class="spinner" id="topbar-spinner"></span>
+          <span id="topbar-status-icon" hidden></span>
+          <span id="topbar-progress-text">Working</span>
+          <div class="topbar-track"><div id="topbar-fill" class="topbar-fill"></div></div>
+        </div>
+      </header>
+
+      <main id="main">
+        <div id="progress-card" class="progress-card" hidden>
+          <div class="progress-header">
+            <div class="progress-task">
+              <span class="spinner" id="progress-spinner"></span>
+              <span id="progress-status-icon" hidden></span>
+              <span id="progress-title">Working</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="progress-pct" id="progress-pct">0%</span>
+              <button id="btn-dismiss-progress" class="dismiss-btn" title="Dismiss" style="display:none">Dismiss</button>
+            </div>
+          </div>
+          <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+          <div class="progress-sub">
+            <span class="progress-msg" id="progress-msg">Starting</span>
+            <span id="progress-counts"></span>
+          </div>
+        </div>
+
+        <!-- IMPORT -->
+        <section id="tab-library" class="panel active">
+          <div class="banner-host"></div>
+          <div class="comp comp-host" data-target="categories"></div>
+
+          <ol class="steps">
+            <li class="step" id="step-scan">
+              <div class="step-head">
+                <span class="step-num"><span class="n">1</span><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></span>
+                <h3>Find your photos</h3>
+                <span class="state" id="state-scan"></span>
+              </div>
+              <p>Pick the folder that holds your photos. Anything already indexed is skipped.</p>
+              <div class="field">
+                <label for="scan-path">Photo folder</label>
+                <div class="with-btn">
+                  <input id="scan-path" type="text" placeholder="Choose a folder" autocomplete="off" spellcheck="false">
+                  <button class="btn" id="btn-browse-scan" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+                </div>
+              </div>
+              <div class="actions"><button id="btn-scan" data-busy class="btn">Scan folder</button></div>
+            </li>
+            <li class="step" id="step-infer">
+              <div class="step-head">
+                <span class="step-num"><span class="n">2</span><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></span>
+                <h3>Analyze</h3>
+                <span class="state" id="state-infer"></span>
+              </div>
+              <p>Finds faces, checks sharpness and exposure, and labels what each photo shows.</p>
+              <div class="field">
+                <label for="infer-device">Run on</label>
+                <select id="infer-device">
+                  <option value="auto">Automatic</option>
+                  <option value="cpu">CPU only</option>
+                  <option value="cuda">NVIDIA GPU</option>
+                  <option value="mps">Apple GPU</option>
+                </select>
+                <a class="link" href="#settings" data-goto="settings">Devices and workers in Settings</a>
+              </div>
+              <div class="actions"><button id="btn-infer" data-busy class="btn">Analyze photos</button></div>
+            </li>
+            <li class="step" id="step-cluster">
+              <div class="step-head">
+                <span class="step-num"><span class="n">3</span><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></span>
+                <h3>Group bursts</h3>
+                <span class="state" id="state-cluster"></span>
+              </div>
+              <p>Finds shots taken seconds apart and keeps the best one from each group.</p>
+              <div class="actions"><button id="btn-cluster" data-busy class="btn">Group bursts</button></div>
+            </li>
+          </ol>
+
+          <div class="runall">
+            <button id="btn-ingest-all" data-busy class="btn primary">Run all three steps</button>
+            <span id="library-status" class="muted">Choose a folder, then run all three steps. Nothing is moved until you apply a plan.</span>
+          </div>
+
+          <h2 class="panel-title">Activity</h2>
+          <div id="library-log" class="action-log"><div class="logline">Nothing has run yet.</div></div>
+        </section>
+
+        <!-- LIBRARY -->
+        <section id="tab-categories" class="panel">
+          <div class="comp comp-host" data-target="categories"></div>
+          <div class="toolbar">
+            <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+              <input id="q" type="search" placeholder="Search by file name or path" aria-label="Search photos"></div>
+            <select id="catfilter" aria-label="Category"><option value="">All categories</option></select>
+            <label class="toggle"><input type="checkbox" id="manualonly">Changed by me</label>
+            <label class="toggle"><input type="checkbox" id="neardup">Near duplicates</label>
+            <span class="grow"></span>
+            <label class="density">Size <input type="range" id="density" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
+            <span id="rowcount" class="rowcount"></span>
+          </div>
+          <div id="grid" class="grid"></div>
+          <div id="grid-more" class="loadmore"></div>
+        </section>
+
+        <!-- BURSTS -->
+        <section id="tab-bursts" class="panel">
+          <div class="split">
+            <div id="burstlist" class="burstlist"></div>
+            <div id="burstdetail" class="detail"></div>
+          </div>
+        </section>
+
+        <!-- JUNK -->
+        <section id="tab-junk" class="panel">
+          <div class="toolbar">
+            <select id="junkfilter" aria-label="Junk type">
+              <option value="">All junk</option>
+              <option value="duplicate">Duplicates</option>
+              <option value="near_duplicate">Near duplicates</option>
+              <option value="screenshot">Screenshots</option>
+              <option value="document">Documents</option>
+              <option value="graphic">Graphics</option>
+              <option value="accidental">Accidental</option>
+              <option value="unreadable">Unreadable</option>
+            </select>
+            <span class="grow"></span>
+            <span id="junkcount" class="rowcount"></span>
+          </div>
+          <div class="keys kbhint"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>1</kbd>-<kbd>9</kbd> set category</span><span><kbd>u</kbd> undo</span><span><kbd>l</kbd> lock</span><span><kbd>Space</kbd> open</span></div>
+          <div id="junkgrid" class="grid"></div>
+          <div id="junkgrid-more" class="loadmore"></div>
+        </section>
+
+        <!-- NEEDS A LOOK -->
+        <section id="tab-uncertain" class="panel">
+          <div class="banner-host"></div>
+          <div class="learn">
+            <button id="btn-learn" class="btn primary" type="button">Learn from my choices</button>
+            <span id="learn-help" class="help">Fix a few photos, then let the app re-sort the rest using what you chose.</span>
+            <span class="grow"></span><span id="uncertaincount" class="rowcount"></span>
+          </div>
+          <div class="keys kbhint"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>u</kbd> undo</span><span><kbd>l</kbd> lock</span><span><kbd>Space</kbd> open</span></div>
+          <div id="triage-legend" class="keys"></div>
+          <div id="uncertaingrid" class="grid"></div>
+          <div id="uncertaingrid-more" class="loadmore"></div>
+        </section>
+
+        <!-- HIGHLIGHTS -->
+        <section id="tab-highlights" class="panel">
+          <div class="toolbar">
+            <label class="inline-num">Minimum score <input id="minaes" type="number" step="0.1" placeholder="any"></label>
+            <span class="grow"></span>
+            <span id="highlightcount" class="rowcount"></span>
+          </div>
+          <div id="highlightgrid" class="grid"></div>
+          <div id="highlightgrid-more" class="loadmore"></div>
+        </section>
+
+        <!-- EVENTS -->
+        <section id="tab-events" class="panel">
+          <div class="toolbar">
+            <label class="inline-num">Gap between events <input id="ev-gap" type="number" step="0.5" value="2"> hours</label>
+            <label class="inline-num">Distance <input id="ev-km" type="number" step="0.5" value="1"> km</label>
+            <button id="btn-events" class="btn" data-busy>Find events</button>
+            <span class="grow"></span>
+            <span id="eventcount" class="rowcount"></span>
+          </div>
+          <div class="split">
+            <div id="eventlist" class="burstlist"></div>
+            <div>
+              <div id="eventdetail" class="grid"></div>
+              <div id="eventdetail-more" class="loadmore"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- PEOPLE -->
+        <section id="tab-people" class="panel">
+          <div class="toolbar">
+            <button id="btn-people" class="btn" data-busy>Find people</button>
+            <span class="grow"></span>
+            <span id="peoplecount" class="rowcount"></span>
+          </div>
+          <div class="split">
+            <div id="peoplelist" class="burstlist"></div>
+            <div>
+              <div id="peopledetail" class="grid"></div>
+              <div id="peopledetail-more" class="loadmore"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- APPLY AND UNDO -->
+        <section id="tab-actions" class="panel">
+          <div class="sect">
+            <h2>Organize your files</h2>
+            <p class="lede">Build a plan, preview exactly what will change, then apply it. Every change is recorded and can be undone.</p>
+            <div class="form-grid">
+              <div class="field">
+                <label for="op">What to do with the files</label>
+                <select id="op">
+                  <option value="move">Move them</option>
+                  <option value="copy">Copy them</option>
+                  <option value="hardlink">Hard link them (same disk)</option>
+                  <option value="symlink">Symbolic link them</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="orgmode">Folder layout</label>
+                <select id="orgmode">
+                  <option value="category_first">Sort into category folders</option>
+                  <option value="in_place">Leave originals, add links</option>
+                </select>
+              </div>
+              <div class="field wide">
+                <label for="orgroot">Destination folder</label>
+                <div class="with-btn">
+                  <input id="orgroot" type="text" placeholder="Choose where organized photos go" autocomplete="off" spellcheck="false">
+                  <button class="btn" id="btn-browse-out" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+                </div>
+                <p class="help">Pick a folder outside your photo library so the result is easy to review.</p>
+              </div>
+              <div class="field">
+                <label for="onlycat">Apply to</label>
+                <select id="onlycat"><option value="">Every category</option></select>
+              </div>
+              <div class="field">
+                <span class="lbl">Junk handling</span>
+                <label class="toggle" style="align-self:flex-start"><input type="checkbox" id="trash">Stage junk in a trash folder</label>
+                <p class="help">Staged files can be restored or purged later.</p>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button id="btn-rebuild" data-busy class="btn">Rebuild plan</button>
+              <button id="btn-diff" data-busy class="btn">Preview changes</button>
+              <span class="grow"></span>
+              <button id="btn-apply" data-busy class="btn primary">Review and apply</button>
+            </div>
+          </div>
+
+          <div id="plan-summary" class="plan-summary">No plan yet. Rebuild the plan to see where each photo will go.</div>
+          <div id="diff-panel" class="diffpanel" hidden></div>
+
+          <div class="sect danger">
+            <h2>Undo and verify</h2>
+            <p class="lede">Restore files to where they were, or check that organized files still match the record.</p>
+            <div class="txnbar">
+              <div class="field">
+                <label for="txnselect">Change to undo</label>
+                <select id="txnselect"><option value="">Latest</option></select>
+              </div>
+              <label class="toggle"><input type="checkbox" id="undo-verify" checked>Check file contents first</label>
+            </div>
+            <div class="btn-row">
+              <button id="btn-undo" data-busy class="btn danger">Undo this change</button>
+              <button id="btn-verify" class="btn">Verify files</button>
+              <button id="btn-repair" data-busy class="btn">Repair paths</button>
+            </div>
+          </div>
+
+          <h2 class="panel-title">Activity</h2>
+          <div id="action-log" class="action-log"><div class="logline">Nothing has run yet.</div></div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section id="tab-settings" class="panel">
+          <div class="sect">
+            <h2>Processing device</h2>
+            <p class="lede">Choose what runs the analysis. Automatic picks the fastest device that works on this computer.</p>
+            <div id="active-device" class="active-device" aria-live="polite"></div>
+            <div id="accel-list" class="accel-list" role="radiogroup" aria-label="Processing device"></div>
+            <div class="field gpu-index" id="gpu-index-field" hidden>
+              <label for="gpu-index">Which GPU</label>
+              <select id="gpu-index"></select>
+              <p class="help">Your computer has more than one. Pick the one to use.</p>
+            </div>
+          </div>
+
+          <div class="sect">
+            <h2>Workers</h2>
+            <p class="lede">More workers can speed things up but use more memory and disk bandwidth. Leave a box empty to let the app decide.</p>
+            <div class="form-grid workers">
+              <div class="field">
+                <div class="field-head"><label for="set-scan">Scan workers</label><span class="eff" id="eff-scan"></span></div>
+                <input id="set-scan" type="number" inputmode="numeric" min="0" max="128" step="1" placeholder="Auto">
+                <p class="help">Reads and fingerprints files. Raise it for SSDs or fast network drives. Lower it for spinning disks.</p>
+                <p class="field-error" id="err-scan" hidden></p>
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="set-decode">Analysis decode workers</label><span class="eff" id="eff-decode"></span></div>
+                <input id="set-decode" type="number" inputmode="numeric" min="0" max="128" step="1" placeholder="Auto">
+                <p class="help">Opens and resizes photos ahead of the model. Each worker holds a photo in memory.</p>
+                <p class="field-error" id="err-decode" hidden></p>
+              </div>
+              <div class="field">
+                <div class="field-head"><label for="set-threads">CPU threads</label><span class="eff" id="eff-threads"></span></div>
+                <input id="set-threads" type="number" inputmode="numeric" min="0" max="128" step="1" placeholder="Auto">
+                <p class="help">Used when the analysis runs on the CPU. Fewer threads keep the computer responsive.</p>
+                <p class="field-error" id="err-threads" hidden></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button id="btn-save-settings" class="btn primary" type="button">Save settings</button>
+            <button id="btn-reset-settings" class="btn" type="button">Back to saved</button>
+            <span id="settings-msg" class="help" role="status"></span>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div id="bulkbar" class="bulk" hidden role="region" aria-label="Selected photos">
+    <b id="bulk-count">0 selected</b>
+    <select id="bulk-cat" aria-label="Move selected to category"></select>
+    <button class="btn" id="bulk-lock">Lock</button>
+    <button class="btn" id="bulk-clear">Clear</button>
+  </div>
+
+  <!-- lightbox -->
+  <div id="lightbox" class="lb" hidden role="dialog" aria-modal="true" aria-label="Photo viewer">
+    <button class="lb-close" id="lb-close" aria-label="Close viewer"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+    <figure class="lb-stage">
+      <button class="lb-nav prev" id="lb-prev" aria-label="Previous photo"><svg class="ic" aria-hidden="true"><use href="#i-left"/></svg></button>
+      <img id="lb-img" alt="">
+      <span class="spinner lb-loading" id="lb-loading" hidden></span>
+      <button class="lb-nav next" id="lb-next" aria-label="Next photo"><svg class="ic" aria-hidden="true"><use href="#i-right"/></svg></button>
+    </figure>
+    <aside class="lb-info">
+      <div>
+        <h2 id="lb-title"></h2>
+        <div class="path" id="lb-path"></div>
+      </div>
+      <dl id="lb-meta"></dl>
+      <section id="lb-why" class="why" hidden aria-label="Why this is uncertain">
+        <h3>Why this is uncertain</h3>
+        <p id="lb-why-text"></p>
+        <div id="lb-guesses" class="bars"></div>
+        <p class="help">Choose a category below. Then use Learn from my choices on the Needs a look page.</p>
+      </section>
+      <div class="field">
+        <label for="lb-cat">Category</label>
+        <select id="lb-cat"></select>
+      </div>
+      <div class="lb-actions">
+        <button class="btn sm" id="lb-lock"><svg class="ic sm" aria-hidden="true"><use href="#i-lock"/></svg><span>Lock</span></button>
+        <button class="btn sm" id="lb-similar"><svg class="ic sm" aria-hidden="true"><use href="#i-copy"/></svg>Find similar</button>
+        <button class="btn sm" id="lb-clear">Back to AI choice</button>
+      </div>
+      <div class="lb-count" id="lb-count"></div>
+      <div class="keys"><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> browse</span><span><kbd>l</kbd> lock</span><span><kbd>Esc</kbd> close</span></div>
+    </aside>
+  </div>
+
+  <!-- similar images -->
+  <div id="similar-panel" class="similar" hidden>
+    <div class="similar-head"><h2 id="similar-title">Similar photos</h2>
+      <button id="similar-close" class="btn">Close</button></div>
+    <div id="similar-grid" class="grid"></div>
+  </div>
+
+  <!-- folder picker -->
+  <div id="picker" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+      <header>
+        <h2 id="picker-title">Choose a folder</h2>
+        <button class="icon-btn" id="picker-close" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="picker-bar">
+        <button class="icon-btn" id="picker-up" title="Up one level" aria-label="Up one level"><svg class="ic" aria-hidden="true"><use href="#i-up"/></svg></button>
+        <input id="picker-path" type="text" aria-label="Current folder" spellcheck="false" autocomplete="off">
+        <button class="btn" id="picker-new"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg>New folder</button>
+      </div>
+      <div class="picker-body">
+        <ul class="picker-roots" id="picker-roots" aria-label="Places"></ul>
+        <ul class="picker-list" id="picker-list" aria-label="Folders"></ul>
+      </div>
+      <footer>
+        <div class="grow" id="picker-info"></div>
+        <button class="btn" id="picker-cancel">Cancel</button>
+        <button class="btn primary" id="picker-ok">Use this folder</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- shortcuts -->
+  <div id="help" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+      <header>
+        <h2 id="help-title">Keyboard shortcuts</h2>
+        <button class="icon-btn" id="help-close" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="modal-body">
+        <table class="helptable">
+          <tr><td colspan="2"><h3>Review screens</h3></td></tr>
+          <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Move to the next or previous photo</td></tr>
+          <tr><td><kbd>1</kbd>-<kbd>9</kbd></td><td>Set the category of the highlighted photo</td></tr>
+          <tr><td><kbd>u</kbd></td><td>Undo the last category change</td></tr>
+          <tr><td><kbd>l</kbd></td><td>Lock or unlock the photo so re-analysis never changes it</td></tr>
+          <tr><td><kbd>Space</kbd></td><td>Open the highlighted photo</td></tr>
+          <tr><td colspan="2"><h3>Photo viewer</h3></td></tr>
+          <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>Previous or next photo</td></tr>
+          <tr><td><kbd>Esc</kbd></td><td>Close the viewer</td></tr>
+          <tr><td colspan="2"><h3>Selecting</h3></td></tr>
+          <tr><td>Click the tick</td><td>Select a photo. Hold Shift to select a range.</td></tr>
+          <tr><td><kbd>?</kbd></td><td>Show this list</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="/static/app.js?v=2.2.0"></script>
+</body>
+</html>

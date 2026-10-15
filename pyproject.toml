@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "photo-curator"
+name = "photocure"
 version = "0.1.0"
-description = "AI Photo Curator & Categorizer - offline, GPU-accelerated, transactionally reversible photo library curation engine."
+description = "Intelligent image curator. Offline, GPU-accelerated, transactionally reversible photo library curation engine."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -25,9 +25,22 @@ dependencies = [
     "rich>=13.0",
     "exifread>=3.0",
     "python-multipart>=0.0.9",
+    "pyyaml>=6",
 ]
 
 [project.optional-dependencies]
+# AI model for recognising photos. Works on Apple Silicon (MPS), NVIDIA and plain CPU.
+ml = [
+    "torch>=2.1",
+    "torchvision>=0.16",
+    "open-clip-torch>=2.20",
+]
+# Better face detection. Optional, a basic OpenCV detector is used without it.
+faces = [
+    "insightface>=0.7.3",
+    "onnxruntime>=1.16",
+]
+# NVIDIA only: the ml packages plus CUDA face detection (no onnxruntime-gpu on macOS).
 gpu = [
     "torch>=2.1",
     "torchvision>=0.16",
@@ -35,16 +48,18 @@ gpu = [
     "insightface>=0.7.3",
     "onnxruntime-gpu>=1.16",
 ]
+watch = ["watchdog>=3"]
 dev = ["pytest>=7.0", "httpx>=0.26"]
 
 [project.scripts]
-photo-curator = "photo_curator.cli:cli"
+photocure = "photocure.cli:cli"
+photo-curator = "photocure.cli:cli"  # old command name, kept so existing habits keep working
 
 [tool.setuptools.packages.find]
-include = ["photo_curator*"]
+include = ["photocure*"]
 
 [tool.setuptools.package-data]
-photo_curator = ["ui/static/*"]
+photocure = ["ui/static/*"]
 
 [tool.ruff]
 target-version = "py310"
@@ -76,7 +91,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["photo_curator"]
+known-first-party = ["photocure"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

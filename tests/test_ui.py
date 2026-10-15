@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from fastapi.testclient import TestClient
 
-from photo_curator.ui.app import create_app
+from photocure.ui.app import create_app
 from .conftest import make_image
 
 
@@ -12,6 +12,7 @@ def test_ui_scan_and_ingest(tmp_path):
     db_file = tmp_path / "ui_test.db"
     app = create_app(str(db_file))
     client = TestClient(app)
+    client.headers["X-PCUR-Token"] = app.state.token
 
     # Initial stats
     r_stats = client.get("/api/stats")
@@ -61,3 +62,13 @@ def test_ui_scan_and_ingest(tmp_path):
     assert "percent" in prog_data
     assert "detail" in prog_data
     assert prog_data["active"] is False
+
+
+def test_ui_mutations_require_token(tmp_path):
+    app = create_app(str(tmp_path / "tok.db"))
+    client = TestClient(app)
+    assert client.post("/api/cluster", json={}).status_code == 403
+    r = client.post("/api/cluster", json={}, headers={"X-PCUR-Token": "wrong"})
+    assert r.status_code == 403
+    r = client.post("/api/cluster", json={}, headers={"X-PCUR-Token": app.state.token})
+    assert r.status_code == 200

@@ -1,0 +1,37 @@
+# Usage: PHOTOS_DIR=/path/to/photos OUTPUT_DIR=/path/to/organized docker compose up --build
+# Then open http://localhost:8080 and pick /photos in the folder picker.
+#
+# One image for every machine. On the first start it detects your hardware and installs the
+# matching AI libraries into the data volume (a few GB, once). Follow progress with:
+#   docker compose logs -f
+# The web page appears when that finishes. Later starts reuse the install and are quick.
+#
+# GPU access: add one override file, for example
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+# (docker-compose.rocm.yml for AMD, docker-compose.intel.yml for Intel). Without one the
+# CPU is used.
+services:
+  photocure:
+    build: .
+    image: photocure:latest
+    # Bound to localhost on purpose: the page embeds the session token, so anyone who can
+    # reach the port can change files. Do not publish it on 0.0.0.0.
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      PCUR_DEVICE_DEVICE: auto
+      # Set to cuda, rocm, xpu or cpu to skip detection.
+      PCUR_ACCEL: ${PCUR_ACCEL:-}
+      # Set to 0 to stop installing at start (offline or pre-baked images).
+      PCUR_AUTO_SETUP: ${PCUR_AUTO_SETUP:-1}
+    volumes:
+      # Use :ro instead of :rw if you only want to scan and copy, never move originals.
+      - ${PHOTOS_DIR:-./photos}:/photos:rw
+      - ${OUTPUT_DIR:-./output}:/output:rw
+      - curator-data:/data
+    # Files are written as this user; match your host user if moves fail with permission errors.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    restart: unless-stopped
+
+volumes:
+  curator-data:
