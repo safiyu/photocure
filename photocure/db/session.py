@@ -41,7 +41,7 @@ def get_engine(db_path: Path | str = "photocure.db", echo: bool = False):
     engine = create_engine(
         url,
         echo=echo,
-        connect_args={"check_same_thread": False},
+        connect_args={"check_same_thread": False, "timeout": 30},
         pool_pre_ping=True,
     )
     event.listens_for(engine, "connect")(_apply_pragmas)
