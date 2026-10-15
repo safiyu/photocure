@@ -7,13 +7,17 @@ from collections.abc import Iterator, Sequence
 
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
-from sqlmodel import Session, col, select as sselect
+from sqlmodel import Session, col, delete as sdelete, select as sselect, update as supdate
 
 from ..db.models import (
     ActionLedger,
     BurstGroup,
+    EventGroup,
     FaceDetection,
     ImageRecord,
+    PersonCluster,
+    PlanActionRow,
+    PlanRecord,
     QualityMetric,
     SemanticScore,
     utcnow,
@@ -407,3 +411,35 @@ class PhotoRepository:
         d = Path(cache_dir) / "thumbs"
         d.mkdir(parents=True, exist_ok=True)
         return d / f"{image_id:09d}.jpg"
+
+    # -------------------------------------------------------- clear / reset
+    def clear_library(self, keep_ledger: bool = False) -> dict[str, int]:
+        """Wipe all indexed records, clusters, plans, and optionally ledger entries."""
+        counts: dict[str, int] = {}
+        models = [
+            SemanticScore,
+            FaceDetection,
+            QualityMetric,
+            PlanActionRow,
+            PlanRecord,
+        ]
+        if not keep_ledger:
+            models.append(ActionLedger)
+        models.extend([
+            BurstGroup,
+            PersonCluster,
+            EventGroup,
+            ImageRecord,
+        ])
+
+        if keep_ledger:
+            self.s.exec(supdate(ActionLedger).values(image_id=None))
+
+        for model in models:
+            res = self.s.exec(sdelete(model))
+            counts[model.__tablename__] = int(
+                res.rowcount if res.rowcount is not None and res.rowcount >= 0 else 0
+            )
+
+        self.s.commit()
+        return counts

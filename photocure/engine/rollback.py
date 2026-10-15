@@ -50,7 +50,8 @@ class RollbackEngine:
         self.db_path = db_path or self.cfg.db_path
 
     def rollback_transaction(self, transaction_id: str,
-                             verify: bool = True) -> RollbackReport:
+                             verify: bool = True,
+                             cancel_check: Callable[[], bool] | None = None) -> RollbackReport:
         rep = RollbackReport(transaction_id=transaction_id)
         import time
         t0 = time.monotonic()
@@ -64,6 +65,8 @@ class RollbackEngine:
                 return rep
 
             for entry in entries:  # already reverse-chronological
+                if cancel_check and cancel_check():
+                    break
                 try:
                     ok, note = self._reverse_one(entry, repo, verify)
                     if ok:

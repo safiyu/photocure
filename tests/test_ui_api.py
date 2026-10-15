@@ -73,7 +73,7 @@ MUTATING = [
     ("/api/plan/apply", {"output_dir": "/x"}), ("/api/undo", {}), ("/api/repair", {}),
     ("/api/events/cluster", {}), ("/api/events/1/rename", {"name": "n"}),
     ("/api/people/cluster", {}), ("/api/people/1/rename", {"name": "n"}),
-    ("/api/learn", {}),
+    ("/api/learn", {}), ("/api/stop", {}), ("/api/reset", {}),
 ]
 
 
@@ -484,3 +484,82 @@ def test_progress_concurrent_apply_rejected(env):
     t.join()
     wait_job(env.client, r1.json()["job_id"])
     assert results[0] in (200, 409)
+
+
+# ------------------------------------------------------------------ reset & stop
+def test_reset_library(env):
+    # Verify initial stats show images
+    stats_before = env.client.get("/api/stats").json()
+    assert stats_before["total_images"] == 4
+
+    # Execute reset
+    res = env.client.post("/api/reset", json={})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert data["deleted"]["images"] == 4
+
+    # Verify stats after reset are zeroed out
+    stats_after = env.client.get("/api/stats").json()
+    assert stats_after["total_images"] == 0
+    assert stats_after["pending_inference"] == 0
+    assert stats_after["burst_groups"] == 0
+
+    # Images endpoint returns empty
+    imgs = env.client.get("/api/images").json()
+    assert imgs["total"] == 0
+    assert len(imgs["items"]) == 0
+
+
+def test_stop_endpoint(env):
+    # Call stop when idle
+    r = env.client.post("/api/stop", json={})
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+
+    # Call stop when active
+    env.app.state.progress.start("TestTask", "testing", 100)
+    assert env.app.state.progress.is_stopped() is False
+    r2 = env.client.post("/api/stop", json={})
+    assert r2.status_code == 200
+    assert r2.json()["stopping"] is True
+    assert env.app.state.progress.is_stopped() is True
+    assert env.app.state.progress.get()["stopping"] is True
+
+
+def test_cancellation_during_scan(env, tmp_path):
+    from photocure.scanner.file_scanner import FileScanner
+
+    lib = tmp_path / "stop_scan_photos"
+    lib.mkdir()
+    for i in range(10):
+        make_image(lib / f"img_{i}.jpg", rng_seed=i)
+
+    scanner = FileScanner(env.app.state.cfg)
+    stop_event = threading.Event()
+
+    def on_prog(done, total, curr):
+        if done >= 2:
+            stop_event.set()
+
+    with pytest.raises(InterruptedError):
+        scanner.scan_directory(lib, db_path=env.db, on_progress=on_prog,
+                               cancel_check=stop_event.is_set)
+
+
+def test_cancellation_during_infer(env, tmp_path):
+    from photocure.inference.pipeline import InferencePipeline
+
+    lib = tmp_path / "stop_infer_photos"
+    lib.mkdir()
+    for i in range(5):
+        make_image(lib / f"infer_{i}.jpg", rng_seed=100 + i)
+
+    # Scan them in
+    assert env.client.post("/api/scan", json={"path": str(lib)}).status_code == 200
+
+    pipeline = InferencePipeline(env.app.state.cfg)
+    # Cancel immediately
+    with pytest.raises(InterruptedError):
+        pipeline.run(db_path=env.db, cancel_check=lambda: True)
+

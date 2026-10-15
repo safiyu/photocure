@@ -183,6 +183,7 @@ class InferencePipeline:
             retry_failed: bool = False,
             limit: int = 0,
             reanalyze_stub: bool = True,
+            cancel_check: Callable[[], bool] | None = None,
             ) -> InferResult:
         db = db_path or self.cfg.db_path
         result = InferResult()
@@ -275,12 +276,15 @@ class InferencePipeline:
 
             try:
                 self._phase_a(repo, chunks, result, _decode, _on_oom, on_progress,
-                              progress, tasks, total_steps)
+                              progress, tasks, total_steps, cancel_check=cancel_check)
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Inference cancelled by user")
                 if on_progress:
                     on_progress(len(todo), total_steps,
                                 f"Loading CLIP semantic model for {len(todo)} images…")
                 self._phase_b(repo, chunks, result, _decode, _on_oom, on_progress,
-                              progress, tasks, total_steps, len(todo))
+                              progress, tasks, total_steps, len(todo),
+                              cancel_check=cancel_check)
                 if on_progress:
                     on_progress(total_steps, total_steps,
                                 f"Inference complete: {result.processed} processed")
@@ -293,7 +297,8 @@ class InferencePipeline:
 
     # -------------------------------------------------------------- phase A
     def _phase_a(self, repo, chunks, result, decode, on_oom, on_progress,
-                 progress, tasks, total_steps) -> None:
+                 progress, tasks, total_steps,
+                 cancel_check: Callable[[], bool] | None = None) -> None:
         """Decode -> faces + quality, committed per chunk, then free pixels."""
         dev = self.cfg.device
         face_max = dev.face_max_side
@@ -302,6 +307,8 @@ class InferencePipeline:
         done = 0
         try:
             for chunk in chunks:
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Inference cancelled by user")
                 # Rows already in "faces_done" only need Phase B.
                 a_recs = [r for r in chunk if r.infer_status in ("pending", "failed")]
                 done += len(chunk) - len(a_recs)
@@ -315,6 +322,10 @@ class InferencePipeline:
                             on_progress(done, total_steps,
                                         f"Phase 1/2 (Faces & Quality): Skipped unreadable {Path(rec.path).name}")
                 for start in range(0, len(frames), face_batch):
+                    if cancel_check and cancel_check():
+                        repo.s.commit()
+                        frames.clear()
+                        raise InterruptedError("Inference cancelled by user")
                     batch = frames[start:start + face_batch]
                     faces_per = run_with_retry(
                         lambda fs: face_engine.detect_faces_batch([f.bgr for f in fs]),
@@ -359,7 +370,8 @@ class InferencePipeline:
 
     # -------------------------------------------------------------- phase B
     def _phase_b(self, repo, chunks, result, decode, on_oom, on_progress,
-                 progress, tasks, total_steps, n_todo) -> None:
+                 progress, tasks, total_steps, n_todo,
+                 cancel_check: Callable[[], bool] | None = None) -> None:
         """Re-decode each chunk at CLIP size, embed, classify, score, commit."""
         clip_max = self.cfg.device.clip_max_side
         sem_engine = SemanticEngine(self.cfg, backend=self.bs)
@@ -367,6 +379,8 @@ class InferencePipeline:
         done = 0
         try:
             for chunk in chunks:
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Inference cancelled by user")
                 rec_by_id = {r.id: r for r in chunk}
                 b_recs = [r for r in chunk if r.infer_status == "faces_done"]
                 done += len(chunk) - len(b_recs)  # failed in Phase A
@@ -382,6 +396,10 @@ class InferencePipeline:
                     lambda fs: sem_engine.classify_and_embed([f.bgr for f in fs]),
                     frames, self.bs, on_oom)
                 for fr, sem in zip(frames, sems):
+                    if cancel_check and cancel_check():
+                        repo.s.commit()
+                        frames.clear()
+                        raise InterruptedError("Inference cancelled by user")
                     rec = rec_by_id[fr.image_id]
                     done += 1
                     if progress is not None:
@@ -457,9 +475,11 @@ def run_inference(config: CuratorConfig | None = None,
                   show_progress: bool = True,
                   retry_failed: bool = False,
                   limit: int = 0,
-                  reanalyze_stub: bool = True) -> InferResult:
+                  reanalyze_stub: bool = True,
+                  cancel_check: Callable[[], bool] | None = None) -> InferResult:
     cfg = config or CuratorConfig.load(db_path)
     return InferencePipeline(cfg).run(db_path=db_path, only_paths=only_paths,
                                       show_progress=show_progress,
                                       retry_failed=retry_failed, limit=limit,
-                                      reanalyze_stub=reanalyze_stub)
+                                      reanalyze_stub=reanalyze_stub,
+                                      cancel_check=cancel_check)

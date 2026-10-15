@@ -133,7 +133,8 @@ class FileScanner:
     def iter_files(self, root: Path | str,
                    extensions: Iterable[str] | None = None,
                    errors: list | None = None,
-                   skipped: list | None = None) -> Iterable[Path]:
+                   skipped: list | None = None,
+                   cancel_check: Callable[[], bool] | None = None) -> Iterable[Path]:
         root = Path(root)
         exts = {e.lower() for e in (extensions or self.cfg.extensions)}
         # Skip hidden/system/build dirs to avoid .git, __MACOSX, build, dist, _gzip etc.
@@ -143,9 +144,13 @@ class FileScanner:
                      ".venv", "venv", "__pycache__", ".tox", "target"}
         root_resolved = None
         for dirpath, dirnames, filenames in _os_walk(root, skip_dirs, errors):
+            if cancel_check and cancel_check():
+                raise InterruptedError("Scan cancelled by user")
             dirnames[:] = [d for d in dirnames if d.lower() not in skip_dirs
                            and not d.startswith(".")]
             for fn in filenames:
+                if cancel_check and cancel_check():
+                    raise InterruptedError("Scan cancelled by user")
                 if fn.startswith("."):
                     continue
                 p = Path(dirpath) / fn
@@ -170,27 +175,33 @@ class FileScanner:
                        prune_missing: bool = False,
                        compute_phashes: bool = True,
                        settle_s: float = 0.0,
-                       near_dup_threshold: int = DEFAULT_THRESHOLD) -> ScanResult:
+                       near_dup_threshold: int = DEFAULT_THRESHOLD,
+                       cancel_check: Callable[[], bool] | None = None) -> ScanResult:
         root = Path(root).expanduser().resolve()
         if not root.exists():
             raise FileNotFoundError(f"Target directory does not exist: {root}")
         result = ScanResult()
         files = list(self.iter_files(root, errors=result.walk_errors,
-                                     skipped=result.skipped_files))
+                                     skipped=result.skipped_files,
+                                     cancel_check=cancel_check))
         return self._run(root, files, result, db_path, on_progress, show_progress,
-                         prune_missing, compute_phashes, settle_s, near_dup_threshold)
+                         prune_missing, compute_phashes, settle_s, near_dup_threshold,
+                         cancel_check=cancel_check)
 
     def scan_paths(self, root: Path | str, paths: Iterable[Path | str],
                    db_path: Path | str | None = None,
                    show_progress: bool = False,
                    compute_phashes: bool = True,
                    settle_s: float = 0.0,
-                   near_dup_threshold: int = DEFAULT_THRESHOLD) -> ScanResult:
+                   near_dup_threshold: int = DEFAULT_THRESHOLD,
+                   cancel_check: Callable[[], bool] | None = None) -> ScanResult:
         """Scan only the given files (used by watch mode); never prunes."""
         root = Path(root).expanduser().resolve()
         exts = {e.lower() for e in self.cfg.extensions}
         files: list[Path] = []
         for p in paths:
+            if cancel_check and cancel_check():
+                raise InterruptedError("Scan cancelled by user")
             p = Path(p)
             try:
                 p = p.resolve() if not p.is_symlink() else p.absolute()
@@ -204,7 +215,7 @@ class FileScanner:
                 files.append(p)
         return self._run(root, sorted(set(files)), ScanResult(), db_path, None,
                          show_progress, False, compute_phashes, settle_s,
-                         near_dup_threshold)
+                         near_dup_threshold, cancel_check=cancel_check)
 
     # ------------------------------------------------------------------- run
     def _known_rows(self, session: Session) -> dict[str, _Known]:
@@ -232,7 +243,8 @@ class FileScanner:
     def _run(self, root: Path, files: list[Path], result: ScanResult,
              db_path, on_progress, show_progress: bool, prune_missing: bool,
              compute_phashes: bool, settle_s: float,
-             near_dup_threshold: int) -> ScanResult:
+             near_dup_threshold: int,
+             cancel_check: Callable[[], bool] | None = None) -> ScanResult:
         db = db_path or self.cfg.db_path
         init_db(db)  # idempotent: ensures the schema exists for fresh stores
         t0 = time.monotonic()
@@ -279,7 +291,8 @@ class FileScanner:
 
             if work:
                 self._process(root, work, repo, result, on_progress, show_progress,
-                              compute_phashes, near_dup_threshold, modified_ids)
+                              compute_phashes, near_dup_threshold, modified_ids,
+                              cancel_check=cancel_check)
 
             if prune_missing:
                 self._prune(session, root, {str(p) for p in files}, known, result)
@@ -347,7 +360,8 @@ class FileScanner:
     def _process(self, root: Path, work: list[tuple[Path, int | None]],
                  repo: PhotoRepository, result: ScanResult, on_progress,
                  show_progress: bool, compute_phashes: bool,
-                 near_dup_threshold: int, modified_ids: set[int]) -> None:
+                 near_dup_threshold: int, modified_ids: set[int],
+                 cancel_check: Callable[[], bool] | None = None) -> None:
         session = repo.s
         # Tier-1 fingerprints in the store; a new file needs a full SHA-256
         # only if its quick-hash is in this set or collides within this pass.
@@ -481,6 +495,12 @@ class FileScanner:
                 futures = {pool.submit(worker, p): (p, eid) for p, eid in work}
                 done = 0
                 for fut in cf.as_completed(futures):
+                    if cancel_check and cancel_check():
+                        for f in futures:
+                            f.cancel()
+                        pool.shutdown(wait=False, cancel_futures=True)
+                        flush()
+                        raise InterruptedError("Scan cancelled by user")
                     path, eid = futures[fut]
                     wr = fut.result()
                     rec = build_record(wr, eid)

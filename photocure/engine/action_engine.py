@@ -145,6 +145,7 @@ class ActionEngine:
                 organize_root: Path | None = None,
                 only_category: Iterable[str] | str | None = None,
                 trash: bool = False,
+                cancel_check: Callable[[], bool] | None = None,
                 ) -> ExecutionReport:
         """Apply every planned mutation, recording the ledger as we go.
 
@@ -160,6 +161,8 @@ class ActionEngine:
         with get_session(self.db_path) as session:
             repo = PhotoRepository(session)
             for action in plan:
+                if cancel_check and cancel_check():
+                    break
                 if wanted is not None and _cat_value(action) not in wanted:
                     rep.skipped += 1
                     continue

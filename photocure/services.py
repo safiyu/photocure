@@ -504,7 +504,8 @@ class Planner:
     def execute_plan(self, plan_or_plan_id: Plan | str,
                      only_category=None, trash: bool = False,
                      force: bool = False,
-                     operation: str | None = None) -> ExecutionReport:
+                     operation: str | None = None,
+                     cancel_check: Callable[[], bool] | None = None) -> ExecutionReport:
         """Apply a persisted (or in-memory) plan exactly as built.
 
         ``operation`` is an explicit override only; in-place plans still never
@@ -521,7 +522,8 @@ class Planner:
             a.operation = _effective_op(plan.mode, a.operation)
         engine = ActionEngine(self.cfg, db_path=self.db_path)
         rep = engine.execute(plan.actions, organize_root=Path(plan.organize_root),
-                             only_category=only_category, trash=trash)
+                             only_category=only_category, trash=trash,
+                             cancel_check=cancel_check)
         if rep.executed:
             with get_session(self.db_path) as session:
                 rec = session.exec(select(PlanRecord).where(
@@ -538,7 +540,8 @@ class Planner:
 
     # ---------------------------------------------------------------- undo
     def undo(self, transaction_id: str | None = None,
-             verify: bool = True) -> RollbackReport:
+             verify: bool = True,
+             cancel_check: Callable[[], bool] | None = None) -> RollbackReport:
         tid = transaction_id
         if not tid:
             with get_session(self.db_path) as session:
@@ -547,7 +550,7 @@ class Planner:
             return RollbackReport(transaction_id="",
                                   notes=["no transactions found"])
         return RollbackEngine(self.cfg, db_path=self.db_path).rollback_transaction(
-            tid, verify=verify)
+            tid, verify=verify, cancel_check=cancel_check)
 
     def list_transactions(self) -> list[dict]:
         with get_session(self.db_path) as session:

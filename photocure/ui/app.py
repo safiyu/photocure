@@ -133,17 +133,21 @@ class RenameReq(BaseModel):
 class ProgressManager:
     def __init__(self):
         self._lock = threading.Lock()
+        self._stop_event = threading.Event()
         self.state = {
             "active": False, "task": "", "step": "", "done": 0, "total": 0,
             "percent": 0, "message": "", "detail": "", "error": None,
+            "stopping": False, "stopped": False,
         }
 
     def start(self, task: str, step: str = "", total: int = 0, message: str = ""):
+        self._stop_event.clear()
         with self._lock:
             self.state = {
                 "active": True, "task": task, "step": step or task, "done": 0,
                 "total": total, "percent": 0, "message": message,
                 "detail": f"0 / {total}" if total > 0 else "", "error": None,
+                "stopping": False, "stopped": False,
             }
 
     def update(self, done: int, total: int, message: str = "", detail: str = ""):
@@ -161,17 +165,43 @@ class ProgressManager:
             elif total > 0:
                 self.state["detail"] = f"{done} / {total}"
 
-    def finish(self, message: str = "Completed successfully"):
+    def request_stop(self):
+        self._stop_event.set()
+        with self._lock:
+            if self.state["active"]:
+                self.state["stopping"] = True
+                self.state["message"] = "Stopping..."
+
+    def is_stopped(self) -> bool:
+        return self._stop_event.is_set()
+
+    def finish(self, message: str = "Completed successfully", stopped: bool = False):
         with self._lock:
             self.state["active"] = False
+            self.state["stopping"] = False
+            self.state["stopped"] = stopped
             self.state["percent"] = 100
             self.state["message"] = message
+
+    def stop(self, message: str = "Stopped by user"):
+        self.finish(message, stopped=True)
 
     def error(self, err_msg: str):
         with self._lock:
             self.state["active"] = False
+            self.state["stopping"] = False
+            self.state["stopped"] = False
             self.state["error"] = err_msg
             self.state["message"] = f"Error: {err_msg}"
+
+    def reset(self):
+        self._stop_event.clear()
+        with self._lock:
+            self.state = {
+                "active": False, "task": "", "step": "", "done": 0, "total": 0,
+                "percent": 0, "message": "", "detail": "", "error": None,
+                "stopping": False, "stopped": False,
+            }
 
     def get(self) -> dict:
         with self._lock:
@@ -496,7 +526,16 @@ def create_app(db_path: str | None = None) -> FastAPI:
         def run():
             try:
                 job["result"] = fn(job)
-                job["status"] = "done"
+                if progress_mgr.is_stopped() or job.get("status") == "stopping":
+                    job["status"] = "stopped"
+                    jlog(job, "stopped by user", "warn")
+                    progress_mgr.stop("Process stopped by user")
+                else:
+                    job["status"] = "done"
+            except InterruptedError:
+                job["status"] = "stopped"
+                jlog(job, "stopped by user", "warn")
+                progress_mgr.stop("Process stopped by user")
             except Exception as e:
                 job["error"] = str(e)
                 job["status"] = "error"
@@ -1029,7 +1068,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         try:
             res = scanner.scan_directory(target, db_path=dbp, on_progress=on_prog,
-                                         show_progress=False)
+                                         show_progress=False,
+                                         cancel_check=progress_mgr.is_stopped)
+        except InterruptedError:
+            progress_mgr.stop("Scan stopped by user")
+            return {"ok": False, "stopped": True, "message": "Scan stopped by user"}
         except Exception as e:
             progress_mgr.error(str(e))
             raise
@@ -1054,7 +1097,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         try:
             pipeline = InferencePipeline(c, backend=detect_for(c))
-            res = pipeline.run(db_path=dbp, on_progress=on_prog, show_progress=False)
+            res = pipeline.run(db_path=dbp, on_progress=on_prog, show_progress=False,
+                               cancel_check=progress_mgr.is_stopped)
+        except InterruptedError:
+            progress_mgr.stop("Inference stopped by user")
+            return {"ok": False, "stopped": True, "message": "Inference stopped by user"}
         except Exception as e:
             progress_mgr.error(str(e))
             raise
@@ -1090,6 +1137,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 sel = BestShotSelector(c)
                 n = 0
                 for res in results:
+                    if progress_mgr.is_stopped():
+                        s.commit()
+                        raise InterruptedError("Clustering stopped by user")
                     members = [by_id[m] for m in res.image_ids if m in by_id]
                     if len(members) < c.burst.min_group_size:
                         continue
@@ -1109,6 +1159,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
                         m.is_best_shot = (m.id == best_id)
                         m.is_alternate = (m.id != best_id)
                     n += 1
+        except InterruptedError:
+            progress_mgr.stop("Clustering stopped by user")
+            return {"ok": False, "stopped": True, "message": "Clustering stopped by user"}
         except Exception as e:
             progress_mgr.error(str(e))
             raise
@@ -1139,13 +1192,50 @@ def create_app(db_path: str | None = None) -> FastAPI:
             try:
                 c = run_cfg(body)
                 scan_res = do_scan(c, body, finish=False)
+                if progress_mgr.is_stopped() or (isinstance(scan_res, dict) and scan_res.get("stopped")):
+                    progress_mgr.stop("Ingest stopped by user")
+                    return {"ok": False, "stopped": True, "message": "Ingest stopped by user"}
                 infer_res = do_infer(c, InferReq(), finish=False)
+                if progress_mgr.is_stopped() or (isinstance(infer_res, dict) and infer_res.get("stopped")):
+                    progress_mgr.stop("Ingest stopped by user")
+                    return {"ok": False, "stopped": True, "message": "Ingest stopped by user"}
                 cluster_res = do_cluster(c, ClusterReq(), finish=False)
+                if progress_mgr.is_stopped() or (isinstance(cluster_res, dict) and cluster_res.get("stopped")):
+                    progress_mgr.stop("Ingest stopped by user")
+                    return {"ok": False, "stopped": True, "message": "Ingest stopped by user"}
+            except InterruptedError:
+                progress_mgr.stop("Ingest stopped by user")
+                return {"ok": False, "stopped": True, "message": "Ingest stopped by user"}
             except Exception as e:
                 progress_mgr.error(str(e))
                 raise
             progress_mgr.finish("Full ingest pipeline complete!")
             return {"ok": True, "scan": scan_res, "infer": infer_res, "cluster": cluster_res}
+
+    @app.post("/api/stop", dependencies=auth)
+    def stop_current_task():
+        progress_mgr.request_stop()
+        for j in jobs.values():
+            if j.get("status") == "running":
+                j["status"] = "stopping"
+                jlog(j, "stop requested by user", "warn")
+        return {"ok": True, "stopping": True, "message": "Stop requested"}
+
+    @app.post("/api/reset", dependencies=auth)
+    def reset_library():
+        with exclusive():
+            with get_session(dbp) as s:
+                repo = PhotoRepository(s)
+                counts = repo.clear_library(keep_ledger=False)
+            thumb_dir = cfg.cache_dir / "thumbs"
+            if thumb_dir.exists():
+                for th in thumb_dir.glob(f"{db_fp}_*.jpg"):
+                    try:
+                        th.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+            progress_mgr.reset()
+            return {"ok": True, "deleted": counts}
 
     @app.post("/api/images/{image_id}/reassign", dependencies=auth)
     def reassign(image_id: int, body: ReassignReq):
@@ -1264,15 +1354,20 @@ def create_app(db_path: str | None = None) -> FastAPI:
             progress_mgr.start("Apply", f"Applying {total} actions", total, "Applying...")
             stop = threading.Event()
             watcher = watch_ledger(job, stop, total, after_id=after)
+            kw["cancel_check"] = progress_mgr.is_stopped
             try:
                 rep = planner.execute_plan(p, **kw)
             finally:
                 stop.set()
                 watcher.join(timeout=5)
             ok = rep.failures == 0
-            progress_mgr.finish(f"Applied {rep.executed} files, {rep.failures} failed")
-            jlog(job, f"done: {rep.executed} executed, {rep.failures} failed "
-                      f"(txn {rep.transaction_id})", "" if ok else "err")
+            if progress_mgr.is_stopped():
+                progress_mgr.stop(f"Applied {rep.executed} files (stopped by user)")
+                jlog(job, f"stopped by user: {rep.executed} executed", "warn")
+            else:
+                progress_mgr.finish(f"Applied {rep.executed} files, {rep.failures} failed")
+                jlog(job, f"done: {rep.executed} executed, {rep.failures} failed "
+                          f"(txn {rep.transaction_id})", "" if ok else "err")
             return {"ok": ok, "transaction_id": rep.transaction_id,
                     "executed": rep.executed, "collisions": rep.collisions,
                     "failures": rep.failures, "errors": list(rep.errors)[:50]}
@@ -1301,16 +1396,22 @@ def create_app(db_path: str | None = None) -> FastAPI:
             jlog(job, f"undoing transaction {tid} ({total} committed actions)")
             stop = threading.Event()
             watcher = watch_ledger(job, stop, total, tid=tid)
+            undo_kw: dict = {"cancel_check": progress_mgr.is_stopped}
+            if _accepts(planner.undo, "verify"):
+                undo_kw["verify"] = body.verify
             try:
-                rep = planner.undo(tid, verify=body.verify) if _accepts(planner.undo, "verify") \
-                    else planner.undo(tid)
+                rep = planner.undo(tid, **undo_kw)
             finally:
                 stop.set()
                 watcher.join(timeout=5)
             ok = rep.failures == 0
-            progress_mgr.finish(f"Reversed {rep.reversed} actions, {rep.failures} failed")
-            jlog(job, f"done: {rep.reversed} reversed, {rep.skipped} skipped, "
-                      f"{rep.failures} failed", "" if ok else "err")
+            if progress_mgr.is_stopped():
+                progress_mgr.stop(f"Reversed {rep.reversed} actions (stopped by user)")
+                jlog(job, f"stopped by user: {rep.reversed} reversed", "warn")
+            else:
+                progress_mgr.finish(f"Reversed {rep.reversed} actions, {rep.failures} failed")
+                jlog(job, f"done: {rep.reversed} reversed, {rep.skipped} skipped, "
+                          f"{rep.failures} failed", "" if ok else "err")
             return {"ok": ok, "transaction_id": tid, "reversed": rep.reversed,
                     "skipped": rep.skipped, "failures": rep.failures,
                     "errors": list(rep.errors)[:50]}

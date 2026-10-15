@@ -15,6 +15,7 @@ venv/
 *.db-journal
 *.db-wal
 *.db-shm
+*.settings.json
 .cache/
 
 # Organized output trees

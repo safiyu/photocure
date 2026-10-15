@@ -102,6 +102,7 @@
           <span class="spinner" id="topbar-spinner"></span>
           <span id="topbar-status-icon" hidden></span>
           <span id="topbar-progress-text">Working</span>
+          <button id="btn-stop-topbar" class="stop-btn" title="Stop current process" style="display:none;margin-left:8px">Stop</button>
           <div class="topbar-track"><div id="topbar-fill" class="topbar-fill"></div></div>
         </div>
       </header>
@@ -116,6 +117,7 @@
             </div>
             <div style="display:flex;align-items:center;gap:8px">
               <span class="progress-pct" id="progress-pct">0%</span>
+              <button id="btn-stop-progress" class="stop-btn" title="Stop current process" style="display:none">Stop</button>
               <button id="btn-dismiss-progress" class="dismiss-btn" title="Dismiss" style="display:none">Dismiss</button>
             </div>
           </div>
@@ -180,6 +182,7 @@
 
           <div class="runall">
             <button id="btn-ingest-all" data-busy class="btn primary">Run all three steps</button>
+            <button id="btn-import-reset" data-busy class="btn danger" title="Clear all indexed photos from the database">Reset library</button>
             <span id="library-status" class="muted">Choose a folder, then run all three steps. Nothing is moved until you apply a plan.</span>
           </div>
 
@@ -407,6 +410,15 @@
             <button id="btn-save-settings" class="btn primary" type="button">Save settings</button>
             <button id="btn-reset-settings" class="btn" type="button">Back to saved</button>
             <span id="settings-msg" class="help" role="status"></span>
+          </div>
+
+          <div class="sect danger" style="margin-top:28px">
+            <h2>Reset library</h2>
+            <p class="lede">Clear all indexed photos, metadata, bursts, events, and AI analysis from the database. Original photo files on your disk will NOT be deleted or modified.</p>
+            <div class="btn-row">
+              <button id="btn-reset-library" class="btn danger" type="button" data-busy>Clear indexed library</button>
+              <span id="reset-library-msg" class="help" role="status"></span>
+            </div>
           </div>
         </section>
       </main>

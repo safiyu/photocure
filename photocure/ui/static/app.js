@@ -1022,36 +1022,51 @@
     const card = $("#progress-card");
     const topbar = $("#topbar-progress");
     const show = (el, on) => { if (el) el.hidden = !on; };
-    const done = !p.active && !p.error && p.percent === 100;
+    const done = !p.active && !p.error && !p.stopped && p.percent === 100;
     const bad = !p.active && !!p.error;
-    const visible = p.active || done || bad;
+    const stopped = !p.active && !!p.stopped;
+    const visible = p.active || done || bad || stopped;
     show(card, visible);
     show(topbar, visible);
     if (!visible) return;
     const pct = p.active ? Math.max(num(p.percent), 4) : 100;
-    const cls = p.active ? "active" : (bad ? "error" : "done");
+    const cls = p.active ? "active" : (bad || stopped ? "error" : "done");
     show($("#progress-spinner"), p.active);
     show($("#topbar-spinner"), p.active);
     [$("#progress-status-icon"), $("#topbar-status-icon")].forEach((e) => {
       if (!e) return;
       e.hidden = p.active;
-      e.innerHTML = icon(bad ? "alert" : "check", "sm");
-      e.style.color = bad ? "var(--err)" : "var(--ok)";
+      e.innerHTML = icon(bad || stopped ? "alert" : "check", "sm");
+      e.style.color = bad || stopped ? "var(--err)" : "var(--ok)";
       e.style.display = p.active ? "none" : "inline-flex";
     });
     $("#progress-title").textContent = p.active
       ? `${p.task || "Working"}${p.step ? ": " + p.step : ""}`
-      : `${p.task || "Task"} ${bad ? "failed" : "finished"}`;
-    $("#progress-pct").textContent = bad ? "Error" : `${num(p.percent)}%`;
+      : `${p.task || "Task"} ${bad ? "failed" : (stopped ? "stopped" : "finished")}`;
+    $("#progress-pct").textContent = bad ? "Error" : (stopped ? "Stopped" : `${num(p.percent)}%`);
     $("#progress-fill").className = "progress-fill " + cls;
     $("#progress-fill").style.width = pct + "%";
     $("#progress-msg").textContent = bad ? p.error : (p.message || "Working");
     $("#progress-counts").textContent = p.detail || (p.total > 0 ? `${fmtN(p.done)} of ${fmtN(p.total)}` : "");
-    $("#topbar-progress-text").textContent = `${p.task || "Task"} ${bad ? "failed" : num(p.percent) + "%"}`;
+    $("#topbar-progress-text").textContent = `${p.task || "Task"} ${bad ? "failed" : (stopped ? "stopped" : num(p.percent) + "%")}`;
     $("#topbar-fill").className = "topbar-fill " + (p.active ? "" : cls);
     $("#topbar-fill").style.width = pct + "%";
+
+    const isBusy = p.active || p.busy;
+    [$("#btn-stop-progress"), $("#btn-stop-topbar")].forEach((btn) => {
+      if (!btn) return;
+      btn.style.display = isBusy ? "inline-flex" : "none";
+      if (p.stopping) {
+        btn.disabled = true;
+        btn.textContent = "Stopping...";
+      } else {
+        btn.disabled = false;
+        btn.textContent = "Stop";
+      }
+    });
+
     const dis = $("#btn-dismiss-progress");
-    if (dis) dis.style.display = p.active ? "none" : "inline-block";
+    if (dis) dis.style.display = isBusy ? "none" : "inline-block";
   }
 
   function applyBusy(busy) {
@@ -1464,13 +1479,77 @@
     applyBusy(true);
     libLog(label + "...");
     try {
-      return await fn();
+      const res = await fn();
+      if (res && res.stopped) {
+        libLog(`${label} stopped by user`, "warn");
+        toast(`${label} stopped`, "warn");
+        return null;
+      }
+      return res;
     } catch (e) {
       libLog(`${label} failed: ${e.message}`, "err");
       toast(e.message, "err");
       return null;
     } finally {
       state.taskRunning = false;
+    }
+  }
+
+  async function stopProcess() {
+    const btns = [$("#btn-stop-progress"), $("#btn-stop-topbar")];
+    btns.forEach((b) => {
+      if (b) {
+        b.disabled = true;
+        b.textContent = "Stopping...";
+      }
+    });
+    try {
+      await post("/api/stop");
+      toast("Stop requested", "ok");
+    } catch (e) {
+      toast("Failed to stop: " + e.message, "err");
+      btns.forEach((b) => {
+        if (b) {
+          b.disabled = false;
+          b.textContent = "Stop";
+        }
+      });
+    }
+  }
+
+  async function resetLibrary() {
+    if (!confirm("Are you sure you want to clear all indexed photos, AI analysis, bursts, and plans?\n\nThis will remove everything from the Photocure database.\nYour original photo files on disk will NOT be deleted or modified.")) {
+      return;
+    }
+    const btns = [$("#btn-reset-library"), $("#btn-import-reset")];
+    btns.forEach((b) => {
+      if (b) {
+        b.disabled = true;
+        b.textContent = "Clearing...";
+      }
+    });
+    try {
+      await post("/api/reset");
+      toast("Library cleared successfully", "ok");
+      libLog("Library cleared: all indexed images and metadata removed.", "warn");
+      const pathInput = $("#scan-path");
+      if (pathInput) pathInput.value = "";
+      ["#state-scan", "#state-infer", "#state-cluster"].forEach((sel) => {
+        const el = $(sel);
+        if (el) el.textContent = "";
+      });
+      renderProgress({ active: false, done: 0, total: 0, percent: 0, message: "" });
+      await Promise.all([loadStats(), loadTransactions(), refreshBackend()]);
+      resetVisibleGrids();
+    } catch (e) {
+      toast("Failed to reset library: " + e.message, "err");
+    } finally {
+      btns.forEach((b) => {
+        if (b) {
+          b.disabled = false;
+          b.textContent = b.id === "btn-import-reset" ? "Reset library" : "Clear indexed library";
+        }
+      });
     }
   }
 
@@ -1672,6 +1751,12 @@
     });
     $("#btn-save-settings").onclick = saveSettings;
     $("#btn-reset-settings").onclick = () => { renderSettings(); };
+    $("#btn-stop-progress").onclick = stopProcess;
+    $("#btn-stop-topbar").onclick = stopProcess;
+    const btnResetLib = $("#btn-reset-library");
+    if (btnResetLib) btnResetLib.onclick = resetLibrary;
+    const btnImportReset = $("#btn-import-reset");
+    if (btnImportReset) btnImportReset.onclick = resetLibrary;
     $("#infer-device").addEventListener("change", (e) => { e.target.dataset.user = "1"; });
     await Promise.all([loadStats(), loadTransactions(), refreshSettings(false)]);
     const start = (location.hash || "").slice(1);
