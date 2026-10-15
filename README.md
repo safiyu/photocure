@@ -2,7 +2,7 @@
 
 # Photocure
 
-Intelligent, offline photo library curation engine. It scores image quality, detects faces, classifies photos with OpenCLIP, groups bursts, and organizes everything into a clean folder structure with 100% reversible undo.
+Intelligent, offline photo library curation engine with hardware acceleration for Apple Silicon (Mac GPU / Metal), NVIDIA (CUDA), AMD (ROCm), Intel, and CPU. It scores image quality, detects faces, classifies photos with OpenCLIP, groups bursts, and organizes everything into a clean folder structure with 100% reversible undo.
 
 ---
 
@@ -18,7 +18,11 @@ pip install -e .
 photocure setup
 ```
 
-`photocure setup` detects your hardware (NVIDIA, AMD, Intel, Apple Silicon, or CPU), installs the matching AI libraries, downloads model weights once, verifies the installation, and opens the dashboard.
+`photocure setup` detects your hardware and configures the optimal acceleration:
+- **Apple Silicon (M1/M2/M3/M4):** Native Apple GPU acceleration via Metal Performance Shaders (MPS).
+- **NVIDIA GPU:** CUDA acceleration.
+- **AMD & Intel GPUs:** ROCm and XPU acceleration.
+- **CPU:** Multi-threaded CPU processing.
 
 | Option | What it does |
 |---|---|
@@ -118,3 +122,5 @@ Add the compose file for your GPU:
   ```bash
   docker compose -f docker-compose.yml -f docker-compose.intel.yml up
   ```
+
+- **Apple Silicon (Mac):** Docker Desktop on macOS runs Linux in a VM without Metal GPU pass-through. To use your Mac GPU, run Photocure natively with `photocure start`.
