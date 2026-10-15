@@ -28,7 +28,8 @@ def which_of(*names):
     ((), "Linux", "x86_64", "cpu"),
 ])
 def test_detect_kind(tools, system, machine, expect):
-    assert sc.detect_kind(which_of(*tools), system, machine) == expect
+    assert sc.detect_kind(which_of(*tools), system, machine,
+                          dev_root="/nonexistent", sys_root="/nonexistent") == expect
 
 
 # ---------------------------------------------------------------------- plan

@@ -874,13 +874,12 @@ def doctor(db: Path = typer.Option(DEFAULT_DB, "--db")):
         if kind not in usable:
             fixes.append(f"A {kind.upper()} GPU looks present but is not usable by torch. "
                          "Install a matching build:\n    " + "\n    ".join(_install_steps(kind)))
-    if (not ver["torch"] or not ver["open_clip"] or info.get("semantic_is_stub")) \
+    if info.get("forced_by_env"):
+        fixes.append("The AI model is installed but switched off by PCUR_BACKEND. "
+                     "Run: unset PCUR_BACKEND")
+    elif (not ver["torch"] or not ver["open_clip"] or info.get("semantic_is_stub")) \
             and not any(k not in usable for k in hardware):
-        if info.get("forced_by_env"):
-            fixes.append("The AI model is installed but switched off by PCUR_BACKEND. "
-                         "Run: unset PCUR_BACKEND")
-        else:
-            fixes.append(f"Install the AI model: {ML_INSTALL}")
+        fixes.append(f"Install the AI model: {ML_INSTALL}")
     if not ver["insightface"]:
         fixes.append('Better face detection (optional): pip install "photocure[faces]"')
     if ver["open_clip"] and weights is False:
@@ -955,17 +954,37 @@ def serve(
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8080, "--port", "-p"),
     reload: bool = typer.Option(False, "--reload"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the browser automatically."),
 ):
     """Launch the web review dashboard."""
     import os
     import uvicorn
+
+    from . import setup_cmd as sc
     cfg = _config(db)
     os.environ["PCUR_DB_PATH"] = str(cfg.db_path.resolve())
-    console.print(f"[cyan]Serving review dashboard on http://{host}:{port}/ "
+    free = sc.pick_port(host, port)
+    if free != port:
+        console.print(f"[yellow]Port {port} is busy, using {free}.[/yellow]")
+    if open_browser:
+        sc.open_browser_when_ready(host, free)
+    console.print(f"[cyan]Serving review dashboard on http://{host}:{free}/ "
                   f"(db={cfg.db_path})[/cyan]")
-    uvicorn.run("photocure.ui.app:app", host=host, port=port,
+    uvicorn.run("photocure.ui.app:app", host=host, port=free,
                 reload=reload, factory=False,
                 log_level="info")
+
+
+@app.command(name="start")
+def start(
+    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8080, "--port", "-p"),
+    reload: bool = typer.Option(False, "--reload"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the browser automatically."),
+):
+    """Start the web review dashboard and open the browser (alias for 'serve')."""
+    serve(db=db, host=host, port=port, reload=reload, open_browser=open_browser)
 
 
 @app.command()
@@ -1076,7 +1095,7 @@ def setup(
     else:
         console.print("[green]Ready.[/green] The model is installed and cached.")
 
-    if faces and sc.probe_state().get("insightface"):
+    if faces and sc.probe_state().get("insightface") and not sc.face_weights_cached():
         console.print("Fetching the face detection model")
         if not sc.prefetch_faces():
             console.print("[yellow]Face model download failed. OpenCV will be used for faces.[/yellow]")
@@ -1089,7 +1108,7 @@ def setup(
         console.print(f"[yellow]Port {port} is busy, using {free}.[/yellow]")
     if open_ui:
         sc.open_browser_when_ready(host, free)
-    serve(db=db, host=host, port=free, reload=False)
+    serve(db=db, host=host, port=free, reload=False, open_browser=False)
 
 
 @app.command()

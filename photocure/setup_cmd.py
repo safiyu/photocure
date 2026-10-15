@@ -262,6 +262,13 @@ def prefetch_faces(runner: Runner = subprocess.run, python: str | None = None) -
         return False
 
 
+def face_weights_cached() -> bool:
+    """True if buffalo_l face detection models are already cached on disk."""
+    home = os.environ.get("INSIGHTFACE_HOME") or os.path.expanduser("~/.insightface")
+    model_dir = os.path.join(home, "models", "buffalo_l")
+    return os.path.exists(os.path.join(model_dir, "det_10g.onnx"))
+
+
 # ------------------------------------------------------------------- serving
 def pick_port(host: str, port: int, tries: int = 20) -> int:
     """First free port at or above ``port`` (so a running server does not block setup)."""

@@ -200,3 +200,27 @@ def test_cli_transactions_lists_ledger(tmp_path):
                         "--operation", "copy", "-y"])
     r = runner.invoke(app, ["transactions", "--db", str(w.db)])
     assert r.exit_code == 0 and "committed=1" in r.stdout
+
+
+def test_cli_serve_and_start_options(tmp_path, monkeypatch):
+    import uvicorn
+    from photocure import setup_cmd as sc
+    opened = []
+    served = []
+    monkeypatch.setattr(sc, "open_browser_when_ready", lambda host, port: opened.append((host, port)))
+    monkeypatch.setattr(uvicorn, "run", lambda app, host, port, **kw: served.append((host, port)))
+
+    db = tmp_path / "test.db"
+    r = runner.invoke(app, ["serve", "--db", str(db), "--port", "8099", "--open"])
+    assert r.exit_code == 0
+    assert len(opened) == 1 and opened[0] == ("127.0.0.1", 8099)
+    assert len(served) == 1 and served[0] == ("127.0.0.1", 8099)
+
+    r2 = runner.invoke(app, ["serve", "--db", str(db), "--port", "8099", "--no-open"])
+    assert r2.exit_code == 0
+    assert len(opened) == 1
+    assert len(served) == 2
+
+    r3 = runner.invoke(app, ["start", "--db", str(db), "--port", "8099", "--no-open"])
+    assert r3.exit_code == 0
+    assert len(served) == 3
