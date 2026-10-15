@@ -10,11 +10,6 @@ detects faces, runs zero-shot semantic classification with OpenCLIP, groups
 burst shots, and routes everything into a category-first folder tree - all
 **transactionally reversible** with a 100% undo guarantee.
 
-> **Renamed from Photo Curator.** The command is now `photocure` and the Python package is
-> `photocure`. The old `photo-curator` command still works. An existing `photo_curator.db` in
-> the current folder keeps being used when there is no `photocure.db`, and Docker volumes are
-> migrated on first start. Settings that start with `PCUR_` are unchanged.
-
 No files are ever mutated before a reviewed plan. Every filesystem operation is
 journalized in an action ledger and can be rolled back byte-for-byte.
 
