@@ -88,6 +88,10 @@ class ImageRecord(SQLModel, table=True):
     locked: bool = Field(default=False)
     event_id: int | None = Field(default=None, index=True)
 
+    # XMP sidecar tracking (schema v3, for C2).
+    xmp_written_rating: int | None = Field(default=None)
+    xmp_written_tags: str | None = Field(default=None)
+
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 

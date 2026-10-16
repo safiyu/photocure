@@ -192,6 +192,14 @@ class CuratorConfig(BaseSettings):
     organize_root: Path = Path("Organized")
     unknown_date_dir: str = "Unknown_Date"
 
+    # Server & auth (C1).
+    host: str = "127.0.0.1"
+    port: int = 8080
+    allowed_hosts: str = ""  # PCUR_ALLOWED_HOSTS: comma-separated override list
+    collision_policy: str = "sequence"  # sequence, date_suffix, skip
+    auto_db_backup: bool = True
+    burst_gap_seconds: float = 2.0
+
     @model_validator(mode="after")
     def _resolve_scan_workers(self) -> CuratorConfig:
         # The scanner hands this straight to a thread pool, so never leave 0 in place.

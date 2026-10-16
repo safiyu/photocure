@@ -5,7 +5,12 @@ foreign-key enforcement on every connection.
 """
 from __future__ import annotations
 
+import contextlib
+import os
+import secrets
+import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Iterator
 
@@ -127,3 +132,30 @@ def close_engine(db_path: Path | str = "photocure.db") -> None:
     engine = _engine_cache.pop(url, None)
     if engine is not None:
         engine.dispose()
+
+
+def snapshot_database(db_path: Path | str = "photocure.db", backup_dir: Path | None = None, keep: int = 10) -> Path:
+    """Online SQLite backup with UTC timestamp and rotation (keep N newest)."""
+    src = Path(db_path).resolve()
+    if not src.exists():
+        raise FileNotFoundError(f"Database file not found: {src}")
+    b_dir = backup_dir or (src.parent / "backups")
+    b_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dst = b_dir / f"{src.stem}_{timestamp}.bak.db"
+    with contextlib.closing(sqlite3.connect(str(src), timeout=30.0)) as src_conn:
+        with contextlib.closing(sqlite3.connect(str(dst))) as dst_conn:
+            src_conn.backup(dst_conn, pages=100)
+    backups = sorted(b_dir.glob(f"{src.stem}_*.bak.db"))
+    while len(backups) > keep:
+        oldest = backups.pop(0)
+        try:
+            oldest.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return dst
+
+
+def generate_otc() -> str:
+    """Generate a 32-byte URL-safe one-time code."""
+    return secrets.token_urlsafe(32)

@@ -1112,6 +1112,83 @@ def setup(
 
 
 @app.command()
+def stop(
+    port: int = typer.Option(8080, "--port", "-p", envvar="PCUR_PORT"),
+    force: bool = typer.Option(False, "--force", help="Send SIGKILL after 5 seconds."),
+):
+    """Stop a running Photocure server on the given port."""
+    import os
+    import signal
+    import subprocess
+    import time
+
+    pid_dir = Path(os.environ.get("XDG_RUNTIME_DIR", Path.home() / ".cache/photocure/run"))
+    pid_dir.mkdir(parents=True, exist_ok=True)
+    pid_file = pid_dir / f"{port}.pid"
+
+    if not pid_file.exists():
+        console.print(f"[yellow]No active Photocure server found on port {port}.[/yellow]")
+        raise typer.Exit(0)
+
+    try:
+        pid = int(pid_file.read_text().strip())
+    except (ValueError, OSError):
+        console.print(f"[red]Invalid PID file: {pid_file}[/red]")
+        raise typer.Exit(1)
+
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        console.print(f"[yellow]Process {pid} not found.[/yellow]")
+        pid_file.unlink(missing_ok=True)
+        raise typer.Exit(0)
+
+    # Verify it's photocure via cmdline.
+    try:
+        if platform.system() == "Linux":
+            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode().replace("\0", " ")
+        else:
+            result = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=2)
+            cmdline = result.stdout.strip()
+        if "photocure" not in cmdline:
+            console.print(f"[red]PID {pid} is not a photocure process. Aborting.[/red]")
+            raise typer.Exit(1)
+    except (OSError, subprocess.TimeoutExpired):
+        console.print(f"[red]Cannot verify PID {pid} is photocure. Aborting.[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[cyan]Terminating Photocure (PID {pid})...[/cyan]")
+    os.kill(pid, signal.SIGTERM)
+
+    for _ in range(10):  # 5 seconds with 0.5 Hz poll.
+        time.sleep(0.5)
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            console.print(f"[green]Process stopped.[/green]")
+            pid_file.unlink(missing_ok=True)
+            raise typer.Exit(0)
+
+    if force:
+        console.print(f"[yellow]Process did not stop. Sending SIGKILL...[/yellow]")
+        os.kill(pid, signal.SIGKILL)
+        time.sleep(0.5)
+        pid_file.unlink(missing_ok=True)
+        console.print(f"[green]Process killed.[/green]")
+    else:
+        console.print(f"[red]Process did not stop. Try --force.[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def kill(
+    port: int = typer.Option(8080, "--port", "-p", envvar="PCUR_PORT"),
+):
+    """Kill a running Photocure server on the given port (alias: stop --force)."""
+    stop(port=port, force=True)
+
+
+@app.command()
 def version():
     """Show the version."""
     console.print(f"photocure {__version__}")

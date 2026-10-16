@@ -36,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -44,10 +44,11 @@ from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from ..auth import AuthManager, build_allowed_hosts
 from ..config import CuratorConfig, default_db_path
 from ..db import models as M
 from ..db.repository import PhotoRepository
-from ..db.session import get_session, init_db
+from ..db.session import get_session, init_db, snapshot_database
 from ..quality.image_loader import load_image, to_thumbnail_jpg
 from ..rules.organizer import OrganizeMode
 from ..rules.taxonomy import CategoryType
@@ -62,6 +63,8 @@ JUNK_VALUES = tuple(c.value for c in CategoryType if c.is_junk)
 
 # Only one long-running task at a time across the whole process.
 _BUSY = threading.Lock()
+# Ledger-write lock: held during ActionEngine.execute() / RollbackEngine.undo()
+_LEDGER_WRITING = threading.Lock()
 
 _BLOCKED_DIRS = (
     "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/boot", "/dev",
@@ -455,7 +458,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
     app = FastAPI(title="Photocure Review", version="0.1.0")
     app.state.db = dbp
     app.state.cfg = cfg
-    app.state.token = secrets.token_urlsafe(24)
+    auth_mgr = AuthManager(cfg.cache_dir)
+    app.state.auth_mgr = auth_mgr
+    app.state.allowed_hosts = build_allowed_hosts(cfg.host, cfg.port, cfg.allowed_hosts)
     progress_mgr = ProgressManager()
     app.state.progress = progress_mgr
     jobs: dict[str, dict] = {}
@@ -497,11 +502,26 @@ def create_app(db_path: str | None = None) -> FastAPI:
             st = bk.detect_backend(c)
         return st
 
-    def require_token(x_pcur_token: str | None = Header(default=None)):
-        if not x_pcur_token or not secrets.compare_digest(x_pcur_token, app.state.token):
-            raise HTTPException(403, "missing or invalid token")
+    async def require_auth(request: Request, x_pcur_token: str | None = Header(default=None)) -> None:
+        """Require valid session cookie or X-PCUR-Token header."""
+        # Check Host header against allowlist.
+        host_header = request.headers.get("host", "")
+        if host_header and host_header not in app.state.allowed_hosts:
+            raise HTTPException(400, "invalid host header")
+        # Check auth token.
+        token = x_pcur_token or request.cookies.get("pcur_session")
+        if not token or not app.state.auth_mgr.validate_token(token):
+            raise HTTPException(401, "missing or invalid token")
+        # Check CSRF on mutating requests.
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            origin = request.headers.get("origin") or request.headers.get("referer", "")
+            if origin:
+                allowed_origins = {f"http://{h}" if ":" not in h else f"http://{h}"
+                                 for h in app.state.allowed_hosts}
+                if not any(origin.startswith(o) for o in allowed_origins):
+                    raise HTTPException(403, "csrf violation")
 
-    auth = [Depends(require_token)]
+    auth = [Depends(require_auth)]
 
     @contextmanager
     def exclusive():
@@ -637,6 +657,21 @@ def create_app(db_path: str | None = None) -> FastAPI:
         info.setdefault("hint", 'pip install torch torchvision open-clip-torch')
         info.setdefault("stub_rows", 0)
         return info
+
+    @app.post("/auth/exchange")
+    async def exchange_otc(request: Request):
+        """Exchange a one-time code for a persistent session token."""
+        try:
+            body = await request.json()
+            code = body.get("code")
+        except Exception:
+            raise HTTPException(400, "invalid request body")
+        token = app.state.auth_mgr.validate_and_consume_otc(code)
+        if not token:
+            raise HTTPException(401, "invalid or expired code")
+        response = Response(status_code=204)
+        response.set_cookie("pcur_session", token, httponly=True, samesite="strict", path="/")
+        return response
 
     @app.get("/api/config")
     def get_config():
