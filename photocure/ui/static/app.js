@@ -73,7 +73,12 @@
         resolve(value);
       };
       const onKey = (e) => {
-        if (e.key === "Escape") { e.preventDefault(); finish(false); return; }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();  // otherwise the global handler sees a closed dialog and closes the viewer too
+          finish(false);
+          return;
+        }
         if (e.key !== "Tab") return;
         const ring = [cancel, ok];
         const i = ring.indexOf(document.activeElement);
@@ -158,7 +163,11 @@
   }
 
   const eff = (it) => it.manual_bucket || it.category;
-  const thumbUrl = (id) => "/api/thumbnail/" + num(id);
+  // Tiers: micro for the grid, medium for burst inspection, preview for the lightbox.
+  const thumbUrl = (id, tier) => {
+    const it = state.byId[id];
+    return "/thumbnail/" + num(id) + "?tier=" + (tier || "micro") + (it && it.fp ? "&v=" + it.fp : "");
+  };
   const catKey = (c) => String(c || "unrouted").replace(/[^a-z_]/g, "") || "unknown";
   // Most useful first, so the number keys 1-9 cover the categories people assign most.
   const CAT_ORDER = ["people", "food", "scenery", "animal", "screenshot", "document", "graphic",
@@ -205,18 +214,36 @@
   }
 
   // ------------------------------------------------------------------ cards
-  function flagBadges(it) {
+  function flagList(it) {
     const out = [];
-    if (it.locked) out.push('<span class="badge lock">Locked</span>');
-    if (it.is_best_shot) out.push('<span class="badge best">Best shot</span>');
-    if (it.is_duplicate) out.push('<span class="badge warn">Duplicate</span>');
-    if (it.near_dup_of != null) out.push('<span class="badge warn">Near duplicate</span>');
-    if (it.is_alternate) out.push('<span class="badge">Alternate</span>');
-    if (it.has_blinks) out.push('<span class="badge warn">Blink</span>');
-    if (it.is_blurry) out.push('<span class="badge">Blurry</span>');
-    if (it.is_too_dark) out.push('<span class="badge">Dark</span>');
-    if (it.is_overexposed) out.push('<span class="badge">Overexposed</span>');
-    return out.slice(0, 3).join("");
+    const add = (cls, text) => out.push({ cls, text });
+    if (it.locked) add("lock", "Locked");
+    if (num(it.rating) === -1) add("warn", "Rejected");
+    if (it.is_favorite) add("fav", "\u2665 Favourite");
+    if (num(it.rating) > 0) add("", "\u2605" + num(it.rating));
+    if (it.is_best_shot) add("best", "Best shot");
+    if (it.is_duplicate) add("warn", "Duplicate");
+    if (it.near_dup_of != null) add("warn", "Near duplicate");
+    if (it.is_alternate) add("", "Alternate");
+    if (it.has_blinks) add("warn", "Blink");
+    if (it.is_blurry) add("", "Blurry");
+    if (it.is_too_dark) add("", "Dark");
+    if (it.is_overexposed) add("", "Overexposed");
+    return out;
+  }
+
+  // Small DOM builder: text always goes through textContent. "html" is only for trusted constants (icons).
+  function el(tag, props, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props || {})) {
+      if (v == null || v === false) continue;
+      if (k === "class") n.className = v;
+      else if (k === "text") n.textContent = v;
+      else if (k === "html") n.innerHTML = v;
+      else n.setAttribute(k, v === true ? "" : String(v));
+    }
+    kids.flat().forEach((c) => { if (c != null && c !== false) n.append(c); });
+    return n;
   }
 
   function shortReason(it) {
@@ -233,34 +260,36 @@
     return r.text;
   }
 
-  function cardHTML(it) {
+  function cardNode(it) {
     const id = num(it.id);
     const rawCat = eff(it);
     const meta = [];
-    if (it.width && it.height) meta.push(num(it.width) + "×" + num(it.height));
+    if (it.width && it.height) meta.push(num(it.width) + "\u00d7" + num(it.height));
     if (it.taken_at) meta.push(String(it.taken_at).slice(0, 10));
     if (it.score != null) meta.push("match " + num(it.score).toFixed(2));
-    const cls = ["card", it.locked ? "locked" : "", state.picks.has(id) ? "picked" : ""].join(" ");
-    return `<figure class="${cls}" data-id="${id}" tabindex="0">
-      <div class="thumb">
-        <img loading="lazy" src="${thumbUrl(id)}" alt="${esc(it.filename)}" onerror="this.style.opacity=.15">
-        <button class="pick" data-pick="${id}" aria-label="Select ${esc(it.filename)}" aria-pressed="${state.picks.has(id)}">${icon("check")}</button>
-        <div class="hover-actions">
-          <button data-lock="${id}" title="${it.locked ? "Unlock" : "Lock"} (l)" aria-label="${it.locked ? "Unlock" : "Lock"}">${icon("lock", "sm")}</button>
-          <button data-similar="${id}" title="Find similar photos" aria-label="Find similar photos">${icon("copy", "sm")}</button>
-        </div>
-        <div class="flags">${flagBadges(it)}</div>
-      </div>
-      <figcaption class="caption">
-        <div class="fn" title="${esc(it.relative_path || it.filename)}">${esc(it.filename)}</div>
-        ${it.uncertain_reason && !it.manual_bucket ? `<div class="reason" title="${esc(it.uncertain_reason.text)}">${esc(shortReason(it))}</div>` : ""}
-        <div class="meta">${esc(meta.join(", "))}</div>
-        <div class="catline" style="${catStyle(rawCat)}"><i></i>
-          <span class="t">${esc(catLabel(rawCat))}</span>
-          ${it.manual_bucket ? `<span class="tag">edited</span><button class="x" data-clear="${id}" title="Back to the AI choice" aria-label="Back to the AI choice">${icon("x", "sm")}</button>` : ""}
-        </div>
-      </figcaption>
-    </figure>`;
+    const picked = state.picks.has(id);
+    const cls = ["card", it.locked ? "locked" : "", picked ? "picked" : "", num(it.rating) === -1 ? "rejected" : ""]
+      .filter(Boolean).join(" ");
+    const img = el("img", { loading: "lazy", decoding: "async", src: thumbUrl(id), alt: it.filename || "" });
+    img.onerror = () => { img.style.opacity = ".15"; };
+    const lockTitle = (it.locked ? "Unlock" : "Lock") + " (l)";
+    const thumb = el("div", { class: "thumb" }, img,
+      el("button", { class: "pick", "data-pick": id, "aria-label": "Select " + (it.filename || ""),
+        "aria-pressed": String(picked), html: icon("check") }),
+      el("div", { class: "hover-actions" },
+        el("button", { "data-lock": id, title: lockTitle, "aria-label": it.locked ? "Unlock" : "Lock", html: icon("lock", "sm") }),
+        el("button", { "data-similar": id, title: "Find similar photos", "aria-label": "Find similar photos", html: icon("copy", "sm") })),
+      el("div", { class: "flags" }, flagList(it).slice(0, 3).map((f) => el("span", { class: "badge " + f.cls, text: f.text }))));
+    const showReason = it.uncertain_reason && !it.manual_bucket;
+    const cap = el("figcaption", { class: "caption" },
+      el("div", { class: "fn", title: it.relative_path || it.filename, text: it.filename }),
+      showReason ? el("div", { class: "reason", title: it.uncertain_reason.text, text: shortReason(it) }) : null,
+      el("div", { class: "meta", text: meta.join(", ") }),
+      el("div", { class: "catline", style: catStyle(rawCat) }, el("i"), el("span", { class: "t", text: catLabel(rawCat) }),
+        it.manual_bucket ? [el("span", { class: "tag", text: "edited" }),
+          el("button", { class: "x", "data-clear": id, title: "Back to the AI choice",
+            "aria-label": "Back to the AI choice", html: icon("x", "sm") })] : null));
+    return el("figure", { class: cls, "data-id": id, tabindex: 0 }, thumb, cap);
   }
 
   function emptyHTML(e) {
@@ -275,81 +304,70 @@
     return Array.from({ length: n }, () => '<div class="skel"></div>').join("");
   }
 
+  function emptyNode(e) {
+    const d = document.createElement("div");
+    d.innerHTML = emptyHTML(e);  // emptyHTML escapes its text
+    return d;
+  }
+
   function makeGrid(key, cfg) {
-    const g = {
-      key, cfg, items: [], total: null, loading: false, gen: 0,
-      el: $(cfg.el), more: $(cfg.more), countEl: cfg.count ? $(cfg.count) : null,
-    };
-    g.reset = async function () {
-      g.gen++;
-      g.items = [];
-      g.total = null;
-      g.loading = false;
-      g.el.innerHTML = skeletons(12);
-      g.more.innerHTML = "";
-      await g.loadMore();
-    };
-    g.updateMore = function () {
-      const left = g.total == null ? 0 : g.total - g.items.length;
-      g.more.innerHTML = left > 0
-        ? `<button class="btn" data-more="${esc(key)}">Show more (${fmtN(left)} left)</button>` : "";
-      if (g.countEl) {
-        g.countEl.textContent = g.total == null ? "" : `${fmtN(g.items.length)} of ${fmtN(g.total)}`;
-      }
-      if (g.total === 0) {
-        const e = typeof cfg.empty === "function" ? cfg.empty() : (cfg.empty || {});
-        g.el.innerHTML = emptyHTML(Object.assign({ title: "No photos here" }, e));
-      }
-    };
-    g.loadMore = async function () {
-      if (g.loading || (g.total != null && g.items.length >= g.total)) return;
-      g.loading = true;
-      const gen = g.gen;
-      try {
+    if (!window.PCUR_GRID) throw new Error("virtual_grid.mjs did not load");
+    const host = $(cfg.el);
+    const g = { key, cfg, el: host, countEl: cfg.count ? $(cfg.count) : null, stale: false };
+    const moreEl = cfg.more ? $(cfg.more) : null;
+    if (moreEl) moreEl.hidden = true;  // pages load by themselves as you scroll
+    g.vg = new window.PCUR_GRID.VirtualGrid({
+      host,
+      pageSize: PAGE,
+      renderCard: cardNode,
+      renderSkeleton: () => el("div", { class: "skel" }),
+      async fetchPage(offset, limit) {
         const qs = cfg.params();
-        const data = await api(`/api/images?${qs}${qs ? "&" : ""}limit=${PAGE}&offset=${g.items.length}`);
-        if (gen !== g.gen) return;
-        if (g.items.length === 0) g.el.innerHTML = "";
+        const data = await api(`/api/images?${qs}${qs ? "&" : ""}limit=${limit}&offset=${offset}`);
         data.items.forEach((it) => { state.byId[it.id] = it; });
-        g.items = g.items.concat(data.items);
-        g.total = data.total;
-        g.el.insertAdjacentHTML("beforeend", data.items.map(cardHTML).join(""));
-        g.updateMore();
-        g.applySel();
-      } catch (e) {
-        g.el.innerHTML = emptyHTML({ icon: "alert", title: "Could not load photos", text: e.message });
+        return data;
+      },
+      onChange: () => g.sync(),
+      onError(e) {
+        g.vg.showEmpty(emptyNode({ icon: "alert", title: "Could not load photos", text: e.message }));
         toast(e.message, "err");
-      } finally {
-        if (gen === g.gen) g.loading = false;
+      },
+    });
+    g.sync = function () {
+      const total = g.vg.total;
+      if (g.countEl) g.countEl.textContent = total == null ? "" : `${fmtN(total)} photo${total === 1 ? "" : "s"}`;
+      if (total === 0) {
+        const e = typeof cfg.empty === "function" ? cfg.empty() : (cfg.empty || {});
+        g.vg.showEmpty(emptyNode(Object.assign({ title: "No photos here" }, e)));
       }
     };
-    g.cards = () => $$(".card", g.el);
-    g.applySel = function () {
-      if (state.triageGrid !== g) return;
-      g.cards().forEach((c, i) => c.classList.toggle("sel", i === state.triageSel));
-    };
+    Object.defineProperty(g, "total", { get: () => g.vg.total });
+    g.reset = () => g.vg.reset();
+    g.loadMore = async () => {};
+    g.cards = () => $$(".card", host);
+    g.applySel = () => g.vg.applyCursor();
     g.rerender = function (it) {
-      const old = $(`.card[data-id="${num(it.id)}"]`, g.el);
-      if (!old) return;
-      const idx = g.items.findIndex((x) => x.id === it.id);
-      if (idx >= 0) g.items[idx] = it;
+      const idx = g.vg.indexOfId(it.id);
+      if (idx < 0) return;
       if (cfg.matches && !cfg.matches(it)) {
-        old.remove();
-        if (idx >= 0) g.items.splice(idx, 1);
-        if (g.total != null) g.total = Math.max(0, g.total - 1);
-        g.updateMore();
+        const wasCursor = g.vg.cursorId === it.id;
+        g.vg.removeItem(it.id);
+        if (wasCursor) {  // keep the cursor where it was, on whatever slid into its place
+          const next = g.vg.items[idx] || g.vg.items[idx - 1];
+          g.vg.cursorId = next ? next.id : null;
+          g.vg.applyCursor();
+        }
       } else {
-        old.outerHTML = cardHTML(it);
+        g.vg.rerenderItem(it);
       }
-      g.applySel();
     };
-    if ("IntersectionObserver" in window) {
-      new IntersectionObserver((es) => {
-        if (es.some((e) => e.isIntersecting) && g.el.offsetParent !== null) g.loadMore();
-      }, { rootMargin: "500px" }).observe(g.more);
-    }
     grids[key] = g;
     return g;
+  }
+
+  function gridOf(node) {
+    const host = node && node.closest && node.closest(".vgrid");
+    return host ? allGrids().find((g) => g.el === host) || null : null;
   }
 
   const allGrids = () => Object.values(grids);
@@ -359,7 +377,7 @@
   function itemUpdated(it) {
     state.byId[it.id] = it;
     allGrids().forEach((g) => g.rerender(it));
-    if (lb.open && lb.ids[lb.i] === it.id) lbRender();
+    if (lb.open && lbIdAt(lb.i) === it.id) lbRender();
   }
 
   function setupGrids() {
@@ -373,11 +391,24 @@
         if (val("catfilter")) p.set("category", val("catfilter"));
         if (chk("manualonly")) p.set("manual", "true");
         if (chk("neardup")) p.set("near_dup", "true");
+        if (val("f-camera")) p.set("camera", val("f-camera"));
+        const rt = val("f-rating");
+        if (rt.startsWith("min:")) p.set("min_rating", rt.slice(4));
+        else if (rt !== "") p.set("rating", rt);
+        if (val("f-country")) p.set("country", val("f-country"));
+        if (chk("f-fav")) p.set("favorite", "true");
+        scrubParams(p);
+        p.set("sort", "taken");  // oldest first, so the date scrubber means something
         return p.toString();
       },
       matches(it) {
         if (val("catfilter") && eff(it) !== val("catfilter")) return false;
         if (chk("manualonly") && !it.manual_bucket) return false;
+        if (chk("f-fav") && !it.is_favorite) return false;
+        const rt = val("f-rating");
+        if (rt.startsWith("min:") && num(it.rating) < num(rt.slice(4))) return false;
+        if (rt === "0" && num(it.rating) !== 0) return false;
+        if (rt !== "" && !rt.startsWith("min:") && rt !== "0" && num(it.rating) !== num(rt)) return false;
         return true;
       },
       empty: () => (state.overview && state.overview.total === 0
@@ -419,6 +450,75 @@
     });
   }
 
+  // -------------------------------------------------------- facets and scrubber
+  const DAY = 86400000;
+  const scrub = { lo: 0, days: 0 };
+
+  function fillSelect(sel, firstLabel, rows) {
+    const cur = sel.value;
+    sel.replaceChildren(el("option", { value: "", text: firstLabel }),
+      ...rows.map((r) => el("option", { value: r.value, text: r.text })));
+    sel.value = rows.some((r) => r.value === cur) ? cur : "";
+  }
+
+  const countryName = (code) => {
+    try { return new Intl.DisplayNames(["en"], { type: "region" }).of(code) || code; } catch (e) { return code; }
+  };
+
+  function scrubDate(n) { return new Date(scrub.lo + n * DAY).toISOString().slice(0, 10); }
+
+  function scrubLabels() {
+    $("#scrub-from-label").textContent = scrubDate(num($("#scrub-from").value));
+    $("#scrub-to-label").textContent = scrubDate(num($("#scrub-to").value));
+  }
+
+  function scrubParams(p) {
+    const box = $("#scrubber");
+    if (!box || box.hidden) return;
+    const a = num($("#scrub-from").value), b = num($("#scrub-to").value);
+    if (a > 0) p.set("date_from", scrubDate(a));
+    if (b < scrub.days) p.set("date_to", scrubDate(b));
+  }
+
+  function resetScrubber() {
+    $("#scrub-from").value = 0;
+    $("#scrub-to").value = scrub.days;
+    if (!$("#scrubber").hidden) scrubLabels();
+  }
+
+  // Bounds come from the library itself, never from hard-coded years.
+  function applyFacets(f) {
+    fillSelect($("#f-camera"), "All cameras", f.cameras.map((c) => ({ value: c.name, text: `${c.name} (${fmtN(c.count)})` })));
+    fillSelect($("#f-country"), "All countries",
+      f.countries.map((c) => ({ value: c.code, text: `${countryName(c.code)} (${fmtN(c.count)})` })));
+    $("#f-country").hidden = f.countries.length === 0;
+    $("#f-camera").hidden = f.cameras.length === 0;
+    const box = $("#scrubber");
+    if (!f.taken_min || !f.taken_max) { box.hidden = true; return; }
+    const lo = Date.parse(f.taken_min + "T00:00:00Z"), hi = Date.parse(f.taken_max + "T00:00:00Z");
+    const days = Math.max(0, Math.round((hi - lo) / DAY));
+    const changed = lo !== scrub.lo || days !== scrub.days;
+    scrub.lo = lo;
+    scrub.days = days;
+    box.hidden = days === 0;
+    $("#scrub-from").max = $("#scrub-to").max = String(days);
+    if (changed) resetScrubber();
+    if (!box.hidden) scrubLabels();
+  }
+
+  async function loadFacets() {
+    try { applyFacets(await api("/api/facets")); } catch (e) { /* the filters just stay as they were */ }
+  }
+
+  function bindFilters() {
+    let t = 0;
+    const again = () => { clearTimeout(t); t = setTimeout(() => grids.cat.reset(), 200); };
+    ["f-camera", "f-rating", "f-country", "f-fav"].forEach((id) => $("#" + id).addEventListener("change", again));
+    const from = $("#scrub-from"), to = $("#scrub-to");
+    from.addEventListener("input", () => { if (num(from.value) > num(to.value)) to.value = from.value; scrubLabels(); again(); });
+    to.addEventListener("input", () => { if (num(to.value) < num(from.value)) from.value = to.value; scrubLabels(); again(); });
+  }
+
   // ------------------------------------------------------------- selection
   function applyPicks() {
     $$(".card").forEach((c) => {
@@ -435,13 +535,26 @@
 
   function clearPicks() { state.picks.clear(); state.lastPick = null; applyPicks(); }
 
-  function togglePick(id, shift) {
+  async function togglePick(id, shift) {
     const card = $(`.card[data-id="${id}"]`);
-    const box = card ? card.parentElement : null;
+    const g = gridOf(card);
+    const box = g || (card ? card.parentElement : null);
+    if (g) g.vg.setCursor(id);
     if (shift && state.lastPick && box && state.lastPick.box === box) {
-      const ids = $$(".card", box).map((c) => num(c.dataset.id));
-      const a = ids.indexOf(state.lastPick.id), b = ids.indexOf(id);
-      if (a >= 0 && b >= 0) ids.slice(Math.min(a, b), Math.max(a, b) + 1).forEach((i) => state.picks.add(i));
+      let ids = [];
+      if (g) {
+        const a = g.vg.indexOfId(state.lastPick.id), b = g.vg.indexOfId(id);
+        if (a >= 0 && b >= 0) {
+          const lo = Math.min(a, b), hi = Math.max(a, b);
+          await g.vg.ensureLoaded(lo, hi + 1);  // the range may span pages that are not loaded yet
+          ids = g.vg.items.slice(lo, hi + 1).filter(Boolean).map((x) => x.id);
+        }
+      } else {
+        const all = $$(".card", box).map((c) => num(c.dataset.id));
+        const a = all.indexOf(state.lastPick.id), b = all.indexOf(id);
+        if (a >= 0 && b >= 0) ids = all.slice(Math.min(a, b), Math.max(a, b) + 1);
+      }
+      ids.forEach((i) => state.picks.add(i));
     } else if (state.picks.has(id)) {
       state.picks.delete(id);
     } else {
@@ -501,16 +614,17 @@
     const panel = $("#similar-panel");
     const it = state.byId[id];
     $("#similar-title").textContent = "Photos similar to " + (it ? it.filename : "#" + num(id));
-    $("#similar-grid").innerHTML = skeletons(8);
+    const sg = $("#similar-grid");
+    sg.replaceChildren(...Array.from({ length: 8 }, () => el("div", { class: "skel" })));
     panel.hidden = false;
     try {
       const data = await api(`/api/images/${num(id)}/similar?k=24`);
       data.items.forEach((x) => { state.byId[x.id] = x; });
-      $("#similar-grid").innerHTML = data.items.length
-        ? data.items.map(cardHTML).join("")
-        : emptyHTML({ icon: "copy", title: "No similar photos", text: "Analyze the library first, then try again." });
+      sg.replaceChildren(...(data.items.length
+        ? data.items.map(cardNode)
+        : [emptyNode({ icon: "copy", title: "No similar photos", text: "Analyze the library first, then try again." })]));
     } catch (e) {
-      $("#similar-grid").innerHTML = emptyHTML({ icon: "alert", title: "Search failed", text: e.message });
+      sg.replaceChildren(emptyNode({ icon: "alert", title: "Search failed", text: e.message }));
     }
   }
 
@@ -526,7 +640,7 @@
         "[data-pick],[data-clear],[data-lock],[data-similar],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
       if (!t) return;
       try {
-        if (t.dataset.pick) togglePick(num(t.dataset.pick), ev.shiftKey);
+        if (t.dataset.pick) await togglePick(num(t.dataset.pick), ev.shiftKey);
         else if (t.dataset.clear) {
           const id = num(t.dataset.clear);
           const prev = await reassign(id, null);
@@ -543,6 +657,9 @@
         else if (t.hasAttribute("data-clearfilters")) {
           $("#q").value = ""; $("#catfilter").value = "";
           $("#manualonly").checked = false; $("#neardup").checked = false;
+          ["f-camera", "f-rating", "f-country"].forEach((id) => { $("#" + id).value = ""; });
+          $("#f-fav").checked = false;
+          resetScrubber();
           grids.cat.reset();
         } else if (t.hasAttribute("data-copytext")) {
           ev.preventDefault();
@@ -566,14 +683,38 @@
   }
 
   // ------------------------------------------------------------- lightbox
-  const lb = { open: false, ids: [], i: 0, token: 0 };
+  const lb = { open: false, ids: [], i: 0, token: 0, grid: null };
+  const lbCount = () => (lb.grid ? lb.grid.vg.total || 0 : lb.ids.length);
+  const lbIdAt = (i) => (lb.grid ? lb.grid.vg.idAt(i) : lb.ids[i]);
 
   function openLightbox(card) {
-    const box = card.parentElement;
-    lb.ids = $$(".card", box).map((c) => num(c.dataset.id));
-    lb.i = Math.max(0, lb.ids.indexOf(num(card.dataset.id)));
+    const g = gridOf(card);
+    const id = num(card.dataset.id);
+    lb.grid = g;
+    if (g) {
+      lb.ids = [];
+      lb.i = Math.max(0, g.vg.indexOfId(id));
+      g.vg.setCursor(id);
+    } else {  // a plain list of cards (burst view, similar photos)
+      lb.ids = $$(".card", card.parentElement).map((c) => num(c.dataset.id));
+      lb.i = Math.max(0, lb.ids.indexOf(id));
+    }
+    lbShow(card);
+  }
+
+  function openLightboxFor(g, id) {
+    const idx = g.vg.indexOfId(id);
+    if (idx < 0) return;
+    lb.grid = g;
+    lb.ids = [];
+    lb.i = idx;
+    g.vg.setCursor(id);
+    lbShow(null);
+  }
+
+  function lbShow(opener) {
     lb.open = true;
-    lb.opener = card;
+    lb.opener = opener;
     $("#lightbox").hidden = false;
     document.body.style.overflow = "hidden";
     lbRender();
@@ -585,29 +726,38 @@
     lb.open = false;
     $("#lightbox").hidden = true;
     document.body.style.overflow = "";
-    if (lb.opener && document.contains(lb.opener)) lb.opener.focus({ preventScroll: true });
+    if (lb.grid) {  // leave the grid on the photo that was last viewed
+      const id = lbIdAt(lb.i);
+      if (id != null) lb.grid.vg.setCursor(id);
+      lb.grid.vg.scrollToIndex(lb.i);
+    } else if (lb.opener && document.contains(lb.opener)) {
+      lb.opener.focus({ preventScroll: true });
+    }
   }
 
-  function lbStep(d) {
+  async function lbStep(d) {
     const n = lb.i + d;
-    if (n < 0 || n >= lb.ids.length) return;
+    if (n < 0 || n >= lbCount()) return;
+    if (lb.grid) {  // the next photo may sit on a page that has not been fetched yet
+      await lb.grid.vg.ensureLoaded(n, n + 1);
+      if (lb.grid.vg.idAt(n) == null) return;
+    }
     lb.i = n;
     lbRender();
   }
 
   function lbRender() {
-    const id = lb.ids[lb.i];
-    const card = $(`.card[data-id="${id}"]`);
-    const it = state.byId[id] || { id, filename: card ? ($(".fn", card) || {}).textContent : "Photo #" + id, _basic: true };
+    const id = lbIdAt(lb.i);
+    const it = state.byId[id] || { id, filename: "Photo #" + id, _basic: true };
     const img = $("#lb-img");
     const my = ++lb.token;
     img.alt = it.filename || "";
-    img.src = thumbUrl(id);
+    img.src = thumbUrl(id, "micro");  // already cached from the grid: shows instantly
     $("#lb-loading").hidden = false;
     const big = new Image();
     big.onload = () => { if (my === lb.token) { img.src = big.src; $("#lb-loading").hidden = true; } };
     big.onerror = () => { if (my === lb.token) $("#lb-loading").hidden = true; };
-    big.src = "/api/preview/" + num(id);
+    big.src = thumbUrl(id, "preview");
 
     $("#lb-title").textContent = it.filename || "";
     $("#lb-path").textContent = it.relative_path || it.path || "";
@@ -620,7 +770,9 @@
     if (it.aesthetic != null) add("Appeal", num(it.aesthetic).toFixed(2));
     if (it.face_count) add("Faces", it.face_count);
     if (it.rating != null) add("Rating", "★".repeat(Math.max(0, Math.min(5, num(it.rating)))) || num(it.rating));
-    flagBadges(it).replace(/<[^>]+>/g, "|").split("|").filter(Boolean).forEach((f, k) => { if (k === 0) add("Notes", f); });
+    const notes = flagList(it).map((f) => f.text);
+    if (notes.length) add("Notes", notes.join(", "));
+    if (it.city || it.country_code) add("Place", [it.city, it.region, it.country_code].filter(Boolean).join(", "));
     $("#lb-meta").innerHTML = rows.join("");
 
     renderWhy(it);
@@ -634,10 +786,11 @@
     $("#lb-clear").disabled = !full || !it.manual_bucket;
     $("#lb-lock span").textContent = it.locked ? "Unlock" : "Lock";
     $("#lb-prev").disabled = lb.i === 0;
-    $("#lb-next").disabled = lb.i >= lb.ids.length - 1;
-    $("#lb-count").textContent = `${lb.i + 1} of ${lb.ids.length}`;
-    const nb = lb.ids[lb.i + 1];
-    if (nb) new Image().src = "/api/preview/" + num(nb);
+    $("#lb-next").disabled = lb.i >= lbCount() - 1;
+    $("#lb-count").textContent = `${fmtN(lb.i + 1)} of ${fmtN(lbCount())}`;
+    const nb = lbIdAt(lb.i + 1);
+    if (nb != null) new Image().src = thumbUrl(nb, "preview");
+    updateLbRating(it);
   }
 
   function renderWhy(it) {
@@ -666,7 +819,7 @@
       if (e.target.id === "lightbox" || e.target.classList.contains("lb-stage")) closeLightbox();
     });
     $("#lb-cat").onchange = async (e) => {
-      const id = lb.ids[lb.i];
+      const id = lbIdAt(lb.i);
       try {
         const prev = await reassign(id, e.target.value);
         state.undo.push({ id, prev });
@@ -674,10 +827,20 @@
         loadStats();
       } catch (err) { toast(err.message, "err"); }
     };
-    $("#lb-lock").onclick = () => toggleLock(lb.ids[lb.i]).catch((e) => toast(e.message, "err"));
-    $("#lb-similar").onclick = () => { const id = lb.ids[lb.i]; closeLightbox(); showSimilar(id); };
+    $("#lb-lock").onclick = () => toggleLock(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
+    $$("#lb-rate .star").forEach((b) => {
+      b.onclick = () => {
+        const id = lbIdAt(lb.i);
+        const n = num(b.dataset.star);
+        const same = num((state.byId[id] || {}).rating) === n;  // the current star again clears it
+        rateItem(id, same ? 0 : n).catch((e) => toast(e.message, "err"));
+      };
+    });
+    $("#lb-fav").onclick = () => toggleFavorite(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
+    $("#lb-reject").onclick = () => toggleReject(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
+    $("#lb-similar").onclick = () => { const id = lbIdAt(lb.i); closeLightbox(); showSimilar(id); };
     $("#lb-clear").onclick = async () => {
-      const id = lb.ids[lb.i];
+      const id = lbIdAt(lb.i);
       try { const prev = await reassign(id, null); state.undo.push({ id, prev }); toast("Back to the AI choice", "ok"); }
       catch (e) { toast(e.message, "err"); }
     };
@@ -794,32 +957,37 @@
       (rest.length ? `<span class="muted">Use the viewer or Move to for ${esc(rest.map(catLabel).join(", "))}</span>` : "");
   }
 
-  function activeTriageGrid() {
-    if (state.tab === "uncertain") return grids.uncertain;
-    if (state.tab === "junk") return grids.junk;
-    return null;
+  function activeGrid() {
+    const key = { categories: "cat", highlights: "highlights", events: "event", junk: "junk", uncertain: "uncertain" }[state.tab];
+    return key ? grids[key] || null : null;
   }
 
-  function moveSel(g, delta) {
-    const cs = g.cards();
-    if (!cs.length) return;
-    state.triageGrid = g;
-    state.triageSel = Math.min(cs.length - 1, Math.max(0, state.triageSel + delta));
-    g.applySel();
-    cs[state.triageSel].scrollIntoView({ block: "nearest" });
-    if (state.triageSel >= cs.length - 3) g.loadMore();
-  }
+  const isTriage = (g) => g === grids.uncertain || g === grids.junk;
+  const MODALS = ["#picker", "#help"];
+  const SELF_MANAGED = ["#confirm-modal", "#auth-modal", "#restart-overlay"];  // they handle their own keys
+  const open = (sel) => { const e = $(sel); return !!(e && !e.hidden); };
+  const anyModal = () => MODALS.some(open);
 
-  const anyModal = () => !$("#picker").hidden || !$("#help").hidden;
+  // Rating, reject, favourite and lock for one photo. In the triage tabs 1-9 mean categories instead.
+  async function shortcut(k, id, triage) {
+    if (id == null) return false;
+    if (/^[1-5]$/.test(k) && !triage) { await rateItem(id, Number(k)); return true; }
+    if (k === "0") { await rateItem(id, 0); return true; }
+    if (k === "x") { await toggleReject(id); return true; }
+    if (k === "f") { await toggleFavorite(id); return true; }
+    if (k === "l") { await toggleLock(id); return true; }
+    return false;
+  }
 
   async function onKey(ev) {
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    if (SELF_MANAGED.some(open)) return;
     const tag = (ev.target.tagName || "").toLowerCase();
     const typing = tag === "input" || tag === "select" || tag === "textarea";
 
     if (ev.key === "Escape") {
-      if (!$("#picker").hidden) closePicker();
-      else if (!$("#help").hidden) $("#help").hidden = true;
+      if (open("#picker")) closePicker();
+      else if (open("#help")) $("#help").hidden = true;
       else if (lb.open) closeLightbox();
       else if (!$("#similar-panel").hidden) $("#similar-panel").hidden = true;
       else if (state.picks.size) clearPicks();
@@ -828,51 +996,99 @@
     }
     if (typing || anyModal()) return;
     if (ev.key === "?") { $("#help").hidden = false; ev.preventDefault(); return; }
-
-    if (lb.open) {
-      if (ev.key === "ArrowLeft") lbStep(-1);
-      else if (ev.key === "ArrowRight") lbStep(1);
-      else if (ev.key.toLowerCase() === "l") toggleLock(lb.ids[lb.i]).catch((e) => toast(e.message, "err"));
-      else return;
-      ev.preventDefault();
-      return;
-    }
-
-    const g = activeTriageGrid();
-    if (!g) return;
-    state.triageGrid = g;
     const k = ev.key.toLowerCase();
+
     try {
-      if (k === "j") moveSel(g, 1);
-      else if (k === "k") moveSel(g, -1);
-      else if (k === " " || k === "enter") {
-        const card = g.cards()[state.triageSel];
-        if (!card) return;
-        openLightbox(card);
-      } else if (/^[1-9]$/.test(k)) {
-        const card = g.cards()[state.triageSel];
+      if (lb.open) {
+        if (k === "arrowleft") await lbStep(-1);
+        else if (k === "arrowright") await lbStep(1);
+        else if (!(await shortcut(k, lbIdAt(lb.i), false))) return;
+        ev.preventDefault();
+        return;
+      }
+
+      const g = activeGrid();
+      if (!g) return;
+      const triage = isTriage(g);
+      if (triage) state.triageGrid = g;
+      const cols = Math.max(1, g.vg.cols);
+      const step = { arrowright: 1, arrowleft: -1, arrowdown: cols, arrowup: -cols }[k]
+        ?? (triage ? { j: 1, k: -1 }[k] : undefined);
+      if (step !== undefined) {  // unrendered photos are scrolled into view first
+        await g.vg.moveCursor(step);
+        ev.preventDefault();
+        return;
+      }
+      const id = g.vg.cursorId;
+      if (k === " " || k === "enter") {
+        if (ev.target.closest && ev.target.closest(".card, button, a, [role='button']")) return;  // they handle it
+        if (id == null) return;
+        openLightboxFor(g, id);
+      } else if (triage && /^[1-9]$/.test(k)) {
         const cat = triageCats()[Number(k) - 1];
-        if (!card || !cat) return;
-        const id = num(card.dataset.id);
+        if (id == null || !cat) return;
         const prev = await reassign(id, cat);
         state.undo.push({ id, prev });
         toast(`Moved to ${catLabel(cat)}`, "ok");
-        const left = g.cards().length;
-        if (state.triageSel >= left) state.triageSel = left - 1;
-        g.applySel();
         loadStats();
-      } else if (k === "u") {
+      } else if (triage && k === "u") {
         const last = state.undo.pop();
         if (!last) { toast("Nothing to undo", "err"); return; }
         await reassign(last.id, last.prev);
         toast("Change undone", "ok");
         await g.reset();
-      } else if (k === "l") {
-        const card = g.cards()[state.triageSel];
-        if (card) await toggleLock(num(card.dataset.id));
-      } else return;
+      } else if (!(await shortcut(k, id, triage))) {
+        return;
+      }
       ev.preventDefault();
     } catch (e) { toast(e.message, "err"); }
+  }
+
+  // ------------------------------------------------------ ratings and favourites
+  async function ratingRequest(id, kind, body, describe) {
+    const url = `/api/images/${num(id)}/${kind}`;
+    try {
+      const r = await post(url, body);
+      itemUpdated(r.item);
+      return r.item;
+    } catch (e) {
+      if (!(e.status === 409 && e.body && e.body.needs_confirmation)) throw e;
+      // Another program changed this photo's sidecar. Ask before overwriting it.
+      const yes = await showConfirmDialog({
+        title: "Overwrite the sidecar?",
+        message: `This photo's sidecar was modified outside Photocure. Overwrite it with ${describe}?`,
+        confirmText: "Overwrite", variant: "warning" });
+      if (!yes) return null;
+      const r = await post(url, Object.assign({}, body, { overwrite: true }));
+      itemUpdated(r.item);
+      return r.item;
+    }
+  }
+
+  async function rateItem(id, n) {
+    const it = await ratingRequest(id, "rating", { rating: n },
+      n ? `a rating of ${n} star${n === 1 ? "" : "s"}` : "no rating");
+    if (it) toast(n ? `Rated ${n} star${n === 1 ? "" : "s"}` : "Rating cleared", "ok");
+  }
+
+  async function toggleReject(id) {
+    const un = num((state.byId[id] || {}).rating) === -1;
+    const it = await ratingRequest(id, "reject", { reject: !un }, un ? "no rating" : "a reject");
+    if (it) toast(un ? "No longer rejected" : "Rejected. Nothing was deleted.", "ok");
+  }
+
+  async function toggleFavorite(id) {
+    const r = await post(`/api/images/${num(id)}/favorite`, {});
+    itemUpdated(r.item);
+    toast(r.item.is_favorite ? "Added to favourites" : "Removed from favourites", "ok");
+  }
+
+  function updateLbRating(it) {
+    const rating = num(it.rating);
+    $$("#lb-rate .star").forEach((b) => b.classList.toggle("on", num(b.dataset.star) <= rating));
+    $("#lb-fav").setAttribute("aria-pressed", String(!!it.is_favorite));
+    $("#lb-reject").setAttribute("aria-pressed", String(rating === -1));
+    $$("#lb-rate button").forEach((b) => { b.disabled = !!it._basic; });
   }
 
   // ------------------------------------------------------------------ bursts
@@ -1012,9 +1228,8 @@
     $("#eventcount").textContent = fmtN(data.count) + " events";
     if (!data.items.length) {
       listEl.innerHTML = "";
-      grids.event.el.innerHTML = emptyHTML({ icon: "cal", title: "No events yet",
-        text: "Choose the gap and distance above, then find events. Photos need dates to be grouped." });
-      grids.event.more.innerHTML = "";
+      grids.event.vg.showEmpty(emptyNode({ icon: "cal", title: "No events yet",
+        text: "Choose the gap and distance above, then find events. Photos need dates to be grouped." }));
       return;
     }
     const selected = data.items.some((c) => c.id === state.eventId) ? state.eventId : data.items[0].id;
@@ -1585,6 +1800,7 @@
       renderComp(ov);
       renderCounts(ov);
     } catch (e) { /* ignore */ }
+    loadFacets();
   }
 
   // ------------------------------------------------------------------- tabs
@@ -1597,7 +1813,6 @@
 
   function showTab(name, keepPicks) {
     state.tab = name;
-    state.triageSel = -1;
     state.triageGrid = null;
     if (!keepPicks) clearPicks();
     $$(".tab").forEach((t) => {
@@ -1843,6 +2058,7 @@
     }
     fillCatFilters();
     setupGrids();
+    bindFilters();
     bindDelegates();
     bindLightbox();
     bindPicker();
@@ -1868,6 +2084,7 @@
     const setDens = () => {
       document.documentElement.style.setProperty("--thumb-min", dens.value + "px");
       try { localStorage.setItem("pcur-density", dens.value); } catch (e) { /* ignore */ }
+      allGrids().forEach((g) => g.vg.update());  // card size changed, so the rows are different
     };
     dens.addEventListener("input", setDens);
     setDens();

@@ -48,6 +48,8 @@ gpu = [
     "torchvision>=0.16",
     "open-clip-torch>=2.20",
 ]
+# Place names (city, region, country) from GPS, looked up offline. Pulls in scipy.
+geo = ["reverse_geocoder>=1.5.1"]
 watch = ["watchdog>=3"]
 dev = ["pytest>=7.0", "httpx>=0.26"]
 
@@ -96,4 +98,7 @@ known-first-party = ["photocure"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-markers = ["real_venv_detection: do not pin in_venv() for this test"]
+markers = [
+    "real_venv_detection: do not pin in_venv() for this test",
+    "browser: drives a real Chrome through node (skipped when node or Chrome is missing)",
+]

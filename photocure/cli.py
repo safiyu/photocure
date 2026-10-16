@@ -962,7 +962,7 @@ def serve(
     if free != port:
         console.print(f"[yellow]Port {port} is busy, using {free}.[/yellow]")
     os.environ["PCUR_HOST"], os.environ["PCUR_PORT"] = host, str(free)
-    if token:
+    if isinstance(token, str) and token:  # a direct call that omits it leaves Typer's option object here
         os.environ["PCUR_AUTH_TOKEN"] = token
     auth = AuthManager(cfg.cache_dir)  # creates and stores the token when none exists
     otc = new_otc()
@@ -1109,7 +1109,7 @@ def setup(
     free = sc.pick_port(host, port)
     if free != port:
         console.print(f"[yellow]Port {port} is busy, using {free}.[/yellow]")
-    serve(db=db, host=host, port=free, reload=False, open_browser=open_ui)
+    serve(db=db, host=host, port=free, reload=False, open_browser=open_ui, token=None)
 
 
 @app.command()
@@ -1212,6 +1212,21 @@ def db_restore(
             contextlib.closing(sqlite3.connect(str(db))) as dst:
         src.backup(dst)
     console.print(f"[green]Restored {db} from {snapshot}.[/green]")
+
+
+@app.command()
+def geocode(db: Path = typer.Option(DEFAULT_DB, "--db"),
+            batch: int = typer.Option(500, "--batch", min=1, help="Positions looked up at a time.")):
+    """Fill in place names (city, region, country) for photos that have GPS. Works offline."""
+    from .scanner import geo
+    if not geo.available():
+        cmd = pip_install_cmd('"photocure[geo]"')
+        console.print(f"[yellow]Place names need the geo extra:[/yellow] {escape(cmd)}")
+        raise typer.Exit(1)
+    cfg = _config(db)
+    with get_session(cfg.db_path) as s:
+        n = geo.geocode_pending(s, batch)
+    console.print(f"Found a place for [bold]{n}[/bold] photo{'' if n == 1 else 's'}.")
 
 
 bench_app = typer.Typer(help="Calibration and timing. Quote only the numbers these print.", no_args_is_help=True)

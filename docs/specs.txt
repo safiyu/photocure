@@ -572,6 +572,37 @@ Every agent or engineer working from this plan must strictly adhere to these fun
 * [ ] **Facet Query Test**: Endpoints return accurate facet counts with null ratings; malicious SQL strings in filters are treated as literal text.
 * [ ] **DOM Card Scale Test**: Manual validation with 5,000 photos: active DOM card count remains $\le 100$ at all times during rapid scrolling.
 
+### Status after C4 (what was built, and where it differs from the text above)
+
+**5.1 Formats and orientation**
+- No manual HEIC byte-offset parser existed in the repository, so there was nothing to delete. Pillow reads HEIC through `pillow_heif`, registered once in `photocure/heif.py`.
+- Real bug found and fixed: `ExifReader` could not open a HEIC unless the image loader had been imported first, so a scan process silently dated HEIC photos by file modification time. Both modules now import `photocure/heif.py`.
+- `apply_exif_orientation(image, orientation)` in `photocure/quality/image_loader.py` is the one orientation helper (Pillow image or BGR array). Real bug found and fixed: the old array code had orientations 5 and 7 swapped, so analysis and face boxes disagreed with the thumbnail for those photos. A test now compares all eight values against Pillow's `exif_transpose`.
+- RAW thumbnails: `rawpy.extract_thumb()` (JPEG written through Pillow, BITMAP via `Image.fromarray`), with a half-size develop when the preview is smaller than the tier. A preview that carries its own orientation tag is described by that tag; otherwise the RAW file's orientation applies. **There is no real RAW file in the test fixtures**, so this path is tested against a fake `rawpy`, not a real camera file.
+- NOTICE now covers pillow-heif and its bundled libheif codecs, rawpy and LibRaw, lxml, ExifRead, reverse_geocoder and GeoNames. The pillow-heif binary wheels are licensed GPLv2 as a combination (per their own notice). Photocure's `.deb` does not ship them (pip installs them into the user's venv); the Docker image does.
+
+**5.2 Thumbnails**
+- `GET /thumbnail/{id}?tier=micro|medium|preview&v=` (WebP, 220/800/1600 px, never upscaled, immutable caching, atomic writes, cache name `{db_fp}_{id}_{fp}.webp` under `thumbs/<tier>/`). `v` is validated and is only a cache-buster. It still needs authentication.
+- The old `/api/thumbnail/{id}` and `/api/preview/{id}` JPEG routes were removed; items carry `fp` so the browser can build the cache-busting URL. The grid uses micro, the burst view medium, the viewer micro then preview.
+
+**5.3 Virtual grid**
+- `virtual_grid.mjs` exports `computeWindow` (as specified, plus a clamp so scrolling past the end shows the last rows instead of an inverted range, found by a test), pure helpers, and `VirtualGrid`. It also sets `window.PCUR_GRID` because `app.js` is a classic script.
+- Items load in pages of 200 on demand; "Show more" is gone. Selection and the keyboard cursor are stored by `image_id`. Card size and caption height come from `--thumb-min` and `--vg-caption-h`. Grid cards are built with DOM calls and `textContent`; the rest of `app.js` still builds some panels with `innerHTML` and escaped text (known debt).
+- Verified in real Chrome on 5,000 photos (`tests/browser/`, run by pytest when Node 22+ and Chrome are present): at most 100 cards in the DOM through steady and random scrolling, cards recycled not rebuilt, pages fetched on demand, arrow keys into unrendered rows, layout after a resize. The "at most 100" holds at the app's 1480 px maximum width (at most 6 columns); a layout with more than 6 columns would need a smaller overscan, which the code already applies above 10 columns.
+
+**5.4 Facets and filters**
+- `GET /api/facets`; filters `camera`, `rating` (0 means unrated, null included), `min_rating`, `country`, `favorite`, `date_from`, `date_to`, `sort=taken`. All values are bound parameters; injection strings are tested as literal text. Date filters are UTC calendar days because `taken_at` is stored as UTC.
+- The library grid now sorts oldest first (`sort=taken`) so the scrubber means something. The scrubber is two sliders whose bounds come from the facets.
+- `migrate()` now also creates any index the models declare that an existing database lacks (columns were already added; their indexes were not). The four indexes in the spec exist.
+
+**5.5 Geocoding**: `photocure[geo]` (reverse_geocoder 1.5.1, an old sdist-only package that pulls scipy). Looked up in batches of 500 with `mode=1`, at the end of a scan, and by `photocure geocode` for existing libraries. A photo whose file changes is looked up again. The About card attribution belongs to C5.
+
+**5.6 Ratings**
+- `POST /api/images/{id}/rating|reject|favorite`. 0 clears (stored as null), -1 is a reject. Favourites live only in the database.
+- Sidecar writes go through `SidecarQueue` (debounced, one write per photo after the last change, flushed at shutdown) and `sync_sidecar` from C2. This is where the C2 flow finally runs: over a sidecar changed elsewhere the API answers 409 `needs_confirmation` and changes nothing until the client repeats the request with `overwrite`; the UI asks with `showConfirmDialog`. `write_sidecars=false` keeps ratings in the database only.
+- Real bug found and fixed: a request arriving between the background write of a sidecar and the commit of its record saw the new file next to the old record and wrongly asked to overwrite. The request path and the writer now share a lock; a test holds the writer mid-flush.
+- Shortcuts: arrows move the cursor in every list; `1`-`5`, `0`, `x`, `f`, `l` act on the highlighted photo or the open viewer. **In Needs a look and Junk review `1`-`9` still pick a category** (rating there would collide); `j`/`k`/`u` stay as before. They are ignored while typing or while any dialog is open (the confirm dialog now stops its own Escape so it no longer closes the viewer behind it).
+
 ---
 
 ## 6. C5: Artistic & Modern UI Revamp with Self-Hosted Typography
@@ -781,6 +812,10 @@ Each commit group's final commit is tagged `cN-done` (annotated) on `develop`. R
 - C3: blink thresholds (`face.*`) and `burst.face_sharp_ref` are untuned starting values. The real landmarker was checked only on an open-eyed portrait (score 0.03); no closed-eye photo was available, so recall on real blinks is unmeasured. Calibrate with `photocure bench blinks` on your own labelled photos.
 - C3: crops for RAW files come from a full decode today; the embedded-preview shortcut in §4.3 arrives with the RAW work in C4 §5.1.
 - C3: `photocure bench pipeline` prints timings for your machine only. No speed or accuracy figure from this plan's development runs may be quoted.
+- C4: the browser scenarios passed 18 of 18 in five consecutive runs after the fixes above. One run earlier failed the resize scenario ("column count change" never happened) and did not recur; the scenario now prints the layout state if it ever does.
+- C4: no real RAW or Live-Photo HEIC file is in the fixtures; real camera files from your own library are the next check for RAW previews and orientation.
+- C4: toasts can overlap the viewer's key legend, and the sticky header overlays the top row when scrolled; both cosmetic.
+- C4: `photocure geocode` and the scan hook need `reverse_geocoder`, which installs through the legacy `setup.py` route and pulls scipy; it stays optional.
 - Lint: `ruff` reports about 370 findings that predate this plan. CI gates only on syntax errors and undefined names until that backlog is cleared.
 
 ---

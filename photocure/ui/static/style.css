@@ -241,6 +241,29 @@ kbd {
 
 /* ------------------------------------------------------------------ photo grid */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumb-min), 1fr)); gap: 22px 16px; align-items: start; }
+/* Virtual grid (C4): only the rows near the viewport exist. Sizes come from here and from --thumb-min. */
+:root { --vg-caption-h: 92px; }
+.grid.vgrid { display: block; position: relative; }
+.vg-spacer { position: relative; width: 100%; }
+.vg-window {
+  position: absolute; top: 0; left: 0; right: 0; display: grid; align-items: start;
+  grid-template-columns: repeat(var(--vg-cols, 1), minmax(0, 1fr));
+  gap: var(--vg-row-gap, 22px) var(--vg-col-gap, 16px); will-change: transform;
+}
+.vgrid .card, .vgrid .skel { height: var(--vg-card-h, auto); aspect-ratio: auto; }  /* no overflow clip: it would hide the selection ring */
+.vgrid .caption { height: var(--vg-caption-h); overflow: hidden; }
+.vg-empty[hidden] { display: none; }
+.card.rejected .thumb img { opacity: .4; filter: grayscale(.7); }
+.badge.fav { background: var(--err-soft); color: var(--err); }
+.scrubber { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 4px 0 14px; font-size: 13px; color: var(--mut); }
+.scrubber label { display: flex; align-items: center; gap: 10px; }
+.scrubber input[type=range] { width: min(300px, 40vw); }
+.lb-rate { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.lb-rate .star { border: 0; background: none; font-size: 24px; line-height: 1; cursor: pointer; color: var(--faint); padding: 2px; }
+.lb-rate .star.on { color: var(--warn); }
+.lb-rate .star:focus-visible { outline: 2px solid var(--accent); border-radius: 4px; }
+.lb-rate .btn { margin-left: 6px; }
+.lb-rate .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .card { position: relative; margin: 0; min-width: 0; outline: none; }
 .thumb {
   position: relative; aspect-ratio: 4 / 3; border-radius: var(--r-sm); overflow: hidden;

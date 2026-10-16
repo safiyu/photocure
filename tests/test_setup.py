@@ -390,3 +390,22 @@ def test_no_warning_when_nothing_is_set(cli_env, monkeypatch):
     monkeypatch.delenv("PCUR_DEVICE_DEVICE", raising=False)
     r = CliRunner().invoke(cli_mod.app, ["setup", "-y", "--db", str(cli_env.db)])
     assert r.exit_code == 0 and "Ignoring" not in r.output
+
+
+def test_setup_runs_the_real_serve_without_crashing(monkeypatch, tmp_path):
+    """setup calls serve() as a plain function; every option it does not pass must still work."""
+    import uvicorn
+    monkeypatch.setenv("PCUR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("PCUR_BACKEND", "stub")
+    monkeypatch.delenv("PCUR_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("PCUR_OTC", "")
+    monkeypatch.delenv("PCUR_OTC")
+    served = {}
+    monkeypatch.setattr(sc, "detect_kind", lambda *a, **k: "mps")
+    monkeypatch.setattr(sc, "probe_state", lambda *a, **k: dict(READY))
+    monkeypatch.setattr(sc, "verify_model", lambda *a, **k: {"ok": True, "device": "mps", "model": "m", "seconds": 1.0})
+    monkeypatch.setattr(sc, "open_browser_when_ready", lambda host, port, code=None, **k: served.setdefault("code", code))
+    monkeypatch.setattr(uvicorn, "run", lambda app, host, port, **k: served.setdefault("ran", (host, port)))
+    r = CliRunner().invoke(cli_mod.app, ["setup", "--yes", "--db", str(tmp_path / "x.db"), "--port", "8097"])
+    assert r.exit_code == 0, r.output
+    assert served["ran"] == ("127.0.0.1", 8097) and served["code"] and len(served["code"]) >= 32

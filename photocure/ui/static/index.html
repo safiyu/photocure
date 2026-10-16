@@ -197,9 +197,27 @@
             <select id="catfilter" aria-label="Category"><option value="">All categories</option></select>
             <label class="toggle"><input type="checkbox" id="manualonly">Changed by me</label>
             <label class="toggle"><input type="checkbox" id="neardup">Near duplicates</label>
+            <select id="f-camera" aria-label="Camera" hidden><option value="">All cameras</option></select>
+            <select id="f-rating" aria-label="Rating">
+              <option value="">Any rating</option>
+              <option value="min:5">5 stars</option>
+              <option value="min:4">4 stars or more</option>
+              <option value="min:3">3 stars or more</option>
+              <option value="min:1">Rated</option>
+              <option value="0">Not rated</option>
+              <option value="-1">Rejected</option>
+            </select>
+            <select id="f-country" aria-label="Country" hidden><option value="">All countries</option></select>
+            <label class="toggle"><input type="checkbox" id="f-fav">Favourites</label>
             <span class="grow"></span>
             <label class="density">Size <input type="range" id="density" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="rowcount" class="rowcount"></span>
+          </div>
+          <div class="scrubber" id="scrubber" hidden>
+            <label>From <span id="scrub-from-label"></span>
+              <input type="range" id="scrub-from" min="0" max="0" value="0" aria-label="Earliest date shown"></label>
+            <label>To <span id="scrub-to-label"></span>
+              <input type="range" id="scrub-to" min="0" max="0" value="0" aria-label="Latest date shown"></label>
           </div>
           <div id="grid" class="grid"></div>
           <div id="grid-more" class="loadmore"></div>
@@ -455,6 +473,15 @@
         <div id="lb-guesses" class="bars"></div>
         <p class="help">Choose a category below. Then use Learn from my choices on the Needs a look page.</p>
       </section>
+      <div class="lb-rate" id="lb-rate" role="group" aria-label="Rating">
+        <button type="button" class="star" data-star="1" aria-label="1 star">&#9733;</button>
+        <button type="button" class="star" data-star="2" aria-label="2 stars">&#9733;</button>
+        <button type="button" class="star" data-star="3" aria-label="3 stars">&#9733;</button>
+        <button type="button" class="star" data-star="4" aria-label="4 stars">&#9733;</button>
+        <button type="button" class="star" data-star="5" aria-label="5 stars">&#9733;</button>
+        <button type="button" class="btn sm" id="lb-fav" aria-pressed="false">&#9829; Favourite</button>
+        <button type="button" class="btn sm" id="lb-reject" aria-pressed="false">Reject</button>
+      </div>
       <div class="field">
         <label for="lb-cat">Category</label>
         <select id="lb-cat"></select>
@@ -465,7 +492,7 @@
         <button class="btn sm" id="lb-clear">Back to AI choice</button>
       </div>
       <div class="lb-count" id="lb-count"></div>
-      <div class="keys"><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> browse</span><span><kbd>l</kbd> lock</span><span><kbd>Esc</kbd> close</span></div>
+      <div class="keys"><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> browse</span><span><kbd>1</kbd>-<kbd>5</kbd> rate</span><span><kbd>0</kbd> clear</span><span><kbd>x</kbd> reject</span><span><kbd>f</kbd> favourite</span><span><kbd>l</kbd> lock</span><span><kbd>Esc</kbd> close</span></div>
     </aside>
   </div>
 
@@ -509,12 +536,19 @@
       </header>
       <div class="modal-body">
         <table class="helptable">
-          <tr><td colspan="2"><h3>Review screens</h3></td></tr>
-          <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Move to the next or previous photo</td></tr>
-          <tr><td><kbd>1</kbd>-<kbd>9</kbd></td><td>Set the category of the highlighted photo</td></tr>
-          <tr><td><kbd>u</kbd></td><td>Undo the last category change</td></tr>
+          <tr><td colspan="2"><h3>Moving around</h3></td></tr>
+          <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd> <kbd>&uarr;</kbd> <kbd>&darr;</kbd></td><td>Move the highlight over the photos. It scrolls into view.</td></tr>
+          <tr><td><kbd>Enter</kbd> <kbd>Space</kbd></td><td>Open the highlighted photo</td></tr>
+          <tr><td colspan="2"><h3>Any photo, in a list or in the viewer</h3></td></tr>
+          <tr><td><kbd>1</kbd>-<kbd>5</kbd></td><td>Rate with that many stars</td></tr>
+          <tr><td><kbd>0</kbd></td><td>Clear the rating</td></tr>
+          <tr><td><kbd>x</kbd></td><td>Reject, or un-reject. Nothing is deleted.</td></tr>
+          <tr><td><kbd>f</kbd></td><td>Favourite, or remove from favourites (kept in Photocure only)</td></tr>
           <tr><td><kbd>l</kbd></td><td>Lock or unlock the photo so re-analysis never changes it</td></tr>
-          <tr><td><kbd>Space</kbd></td><td>Open the highlighted photo</td></tr>
+          <tr><td colspan="2"><h3>Needs a look and Junk review</h3></td></tr>
+          <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Next or previous photo</td></tr>
+          <tr><td><kbd>1</kbd>-<kbd>9</kbd></td><td>Set the category of the highlighted photo (instead of rating)</td></tr>
+          <tr><td><kbd>u</kbd></td><td>Undo the last category change</td></tr>
           <tr><td colspan="2"><h3>Photo viewer</h3></td></tr>
           <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>Previous or next photo</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>Close the viewer</td></tr>
@@ -563,6 +597,7 @@
   </div>
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script type="module" src="/static/virtual_grid.mjs"></script>
   <script src="/static/app.js?v=2.2.0"></script>
 </body>
 </html>
