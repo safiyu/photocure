@@ -136,8 +136,11 @@ class FaceEngine:
             self._mp = mp
         except Exception as e:
             self._landmarker_failed = True
-            self._landmarker_error = f"{e.__class__.__name__}: {e}"
-            log.warning("Landmarker failed to initialize (%s: %s)", e.__class__.__name__, e)
+            msg = f"{e.__class__.__name__}: {e}"
+            if "libEGL" in str(e):
+                msg += " (install libegl1 on Linux: sudo apt-get install -y libegl1)"
+            self._landmarker_error = msg
+            log.warning("Landmarker failed to initialize (%s)", self._landmarker_error)
         return self._landmarker
 
     @property

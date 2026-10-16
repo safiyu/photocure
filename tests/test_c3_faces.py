@@ -266,6 +266,8 @@ def test_real_landmarker_when_mediapipe_is_installed():
     img = cv2.imread(str(PORTRAIT))
     faces = e.detect_faces_batch([img])[0]
     e.analyze_faces(img, faces)
+    if e._landmarker_failed and "libEGL" in getattr(e, "_landmarker_error", ""):
+        pytest.skip(f"System lacks libEGL: {e._landmarker_error}")
     assert not e._landmarker_failed, f"Landmarker initialization failed: {getattr(e, '_landmarker_error', 'unknown error')}"
     assert faces[0].eye_closed_score is not None and faces[0].eye_closed_score < 0.4  # eyes open
     e.release()

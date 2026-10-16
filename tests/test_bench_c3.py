@@ -70,6 +70,12 @@ def test_bench_blinks_uses_the_real_models_when_available(tmp_path, monkeypatch)
     reset_backend_cache()
     try:
         import mediapipe  # noqa: F401
+        if r.exit_code != 0:
+            from photocure.inference.face_engine import FaceEngine
+            fe = FaceEngine()
+            fe._load_landmarker()
+            if fe._landmarker_failed and "libEGL" in getattr(fe, "_landmarker_error", ""):
+                pytest.skip(f"System lacks libEGL: {fe._landmarker_error}")
         assert r.exit_code == 0, f"bench blinks failed (code {r.exit_code}): {r.output}"
         assert "Closed-eye threshold sweep" in r.output
     except ImportError:

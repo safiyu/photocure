@@ -46,6 +46,10 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - name: Install system libraries for MediaPipe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1
       - name: Install with the faces extra, then put the headless OpenCV back
         run: |
           python -m pip install --upgrade pip
