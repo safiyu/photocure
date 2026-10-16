@@ -86,6 +86,7 @@
           <button class="icon-btn" id="theme-toggle" title="Switch between light and dark" aria-label="Switch between light and dark"><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg></button>
           <button class="icon-btn" id="btn-help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
         </div>
+        <div class="sidebar-footer"><span class="app-credit">Photocure <span id="sidebar-version"></span> • by Safiyu</span></div>
       </div>
     </aside>
 
@@ -96,6 +97,7 @@
           <h1 id="page-title">Import</h1>
           <div class="sub" id="page-sub"></div>
         </div>
+        <span id="header-version-badge" class="version-pill" role="button" tabindex="0" title="Click to view About Photocure" data-goto="settings"></span>
         <div id="topbar-progress" class="pill" hidden role="status">
           <span class="spinner" id="topbar-spinner"></span>
           <span id="topbar-status-icon" hidden></span>
@@ -424,6 +426,11 @@
             <button id="btn-save-settings" class="btn primary" type="button">Save settings</button>
             <button id="btn-reset-settings" class="btn" type="button">Back to saved</button>
             <span id="settings-msg" class="help" role="status"></span>
+          </div>
+
+          <div class="sect" style="margin-top:28px">
+            <h2>About Photocure</h2>
+            <div id="about-card"></div>
           </div>
 
           <div class="sect" style="margin-top:28px">

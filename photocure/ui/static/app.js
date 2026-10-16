@@ -2038,6 +2038,35 @@
     });
   }
 
+  async function loadAboutInfo() {
+    try {
+      const about = await api("/api/about");
+      const versionBadge = $("#header-version-badge");
+      if (versionBadge) versionBadge.textContent = about.version || "0.0.0";
+      const sidebarVersion = $("#sidebar-version");
+      if (sidebarVersion) sidebarVersion.textContent = about.version || "0.0.0";
+
+      const aboutCard = $("#about-card");
+      if (aboutCard) {
+        const modelsList = (about.models || []).length > 0
+          ? `<div style="margin-top:12px;"><strong>Active models:</strong><ul style="margin:6px 0;padding-left:20px;">${about.models.map(m => `<li>${esc(m.name)}</li>`).join("")}</ul></div>`
+          : "";
+        aboutCard.innerHTML = `
+          <div style="font-size:13px;line-height:1.6;color:var(--mut);">
+            <p style="margin:0 0 8px;">Version: <strong>${esc(about.version || "0.0.0")}</strong></p>
+            <p style="margin:0 0 8px;">By <strong>${esc(about.author || "Unknown")}</strong> • ${esc(about.license || "MIT")}</p>
+            <p style="margin:0 0 8px;">Acceleration: <strong>${esc(about.device || "CPU")}</strong></p>
+            <p style="margin:0 0 8px;">Python: ${esc(about.python || "unknown")}</p>
+            ${modelsList}
+            <p style="margin:10px 0 0;"><a href="/licenses" target="_blank" class="link">View full licenses</a></p>
+          </div>
+        `;
+      }
+    } catch (e) {
+      console.warn("Could not load about info:", e);
+    }
+  }
+
   async function init() {
     applyTheme(document.documentElement.dataset.theme || "light");
     await exchangeFromHash();
@@ -2056,6 +2085,7 @@
         "graphic", "accidental", "duplicate", "uncertain", "unknown"]);
       state.junk = new Set(["screenshot", "document", "graphic", "accidental", "duplicate"]);
     }
+    await loadAboutInfo();
     fillCatFilters();
     setupGrids();
     bindFilters();

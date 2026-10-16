@@ -24,10 +24,12 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
 import logging
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 import uuid
@@ -500,7 +502,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     # Every request: Host allowlist. Everything except the static shell, /healthz and
     # /auth/exchange also needs a valid session; mutating requests need a matching Origin.
-    _OPEN = ("/", "/healthz", "/auth/exchange")
+    _OPEN = ("/", "/healthz", "/auth/exchange", "/api/about", "/licenses")
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -680,6 +682,42 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "thresholds": {"min_confidence": tax.min_confidence,
                            "min_margin": tax.min_margin},
         }
+
+    @app.get("/api/about")
+    def get_about():
+        from photocure import __version__
+        info = backend_info()
+        device = info.get("device", "unknown")
+        models = []
+        try:
+            manifest_path = Path(__file__).parent.parent / "models" / "MANIFEST.json"
+            if manifest_path.exists():
+                with open(manifest_path) as f:
+                    manifest = json.load(f)
+                    models_dir = manifest_path.parent
+                    for m in manifest.get("models", []):
+                        file = m.get("file", "")
+                        if file and (models_dir / file).exists():
+                            models.append({"name": m.get("name", file), "file": file})
+        except Exception:
+            pass
+        return {
+            "version": __version__,
+            "author": "Safiyu",
+            "license": "MIT License",
+            "device": device,
+            "models": models,
+            "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        }
+
+    @app.get("/licenses")
+    def get_licenses():
+        notice_path = Path(__file__).parent.parent.parent / "NOTICE"
+        if notice_path.exists():
+            with open(notice_path) as f:
+                content = f.read()
+            return HTMLResponse(f"<pre>{content}</pre>")
+        return HTMLResponse("<pre>License information not available.</pre>")
 
     def settings_payload() -> dict:
         """Saved settings, what will really run, and every accelerator with its status."""
