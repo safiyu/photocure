@@ -59,12 +59,15 @@ def test_bench_blinks_rejects_a_labels_file_with_no_usable_rows(tmp_path):
     assert runner.invoke(cli_mod.app, ["bench", "blinks", "--labels", str(f)]).exit_code == 1
 
 
-def test_bench_blinks_reports_when_eyes_cannot_be_measured(tmp_path):
-    # Real detector, no landmarker: faces are found but nothing is measured.
-    pytest.importorskip("cv2")
+def test_bench_blinks_uses_the_real_models_when_available(tmp_path, monkeypatch):
+    # Real detector. With MediaPipe the sweep prints; without it nothing is measured.
+    monkeypatch.delenv("PCUR_BACKEND", raising=False)
+    from photocure.inference.backends import reset_backend_cache
+    reset_backend_cache()
     (tmp_path / "p.jpg").write_bytes(PORTRAIT.read_bytes())
     (tmp_path / "l.csv").write_text("path,label\np.jpg,open\n")
     r = runner.invoke(cli_mod.app, ["bench", "blinks", "--labels", str(tmp_path / "l.csv")])
+    reset_backend_cache()
     try:
         import mediapipe  # noqa: F401
         assert r.exit_code == 0 and "Closed-eye threshold sweep" in r.output
