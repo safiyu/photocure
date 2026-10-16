@@ -1,40 +1,15 @@
-#!/bin/bash
+#!/bin/sh
 set -e
-
-APP_DIR="/opt/photocure"
-VENV_DIR="$APP_DIR/venv"
 
 case "$1" in
     configure)
-        echo "Setting up Photocure in $APP_DIR..."
-        
-        # Ensure python3-venv is present
-        if ! python3 -m venv --help >/dev/null 2>&1; then
-            echo "Error: python3-venv is required. Please install python3-venv."
-            exit 1
-        fi
-
-        # Create virtual environment if missing
-        if [ ! -d "$VENV_DIR" ]; then
-            python3 -m venv "$VENV_DIR"
-        fi
-
-        # Install base package into venv
-        echo "Installing base Photocure dependencies into $VENV_DIR..."
-        "$VENV_DIR/bin/python" -m pip install --upgrade --no-cache-dir pip
-        "$VENV_DIR/bin/pip" install --no-cache-dir "$APP_DIR"
-
-        # Make venv writable by local users so they can run photocure setup without root
-        chmod -R a+rwX "$VENV_DIR"
-
-        # Update desktop and icon databases
-        if which update-desktop-database >/dev/null 2>&1; then
+        # The per-user environment is created on first launch by /opt/photocure/bootstrap.py.
+        if command -v update-desktop-database >/dev/null 2>&1; then
             update-desktop-database -q || true
         fi
-        if which gtk-update-icon-cache >/dev/null 2>&1; then
+        if command -v gtk-update-icon-cache >/dev/null 2>&1; then
             gtk-update-icon-cache -q /usr/share/icons/hicolor || true
         fi
-        echo "Photocure installation completed. Run 'photocure setup' or launch from your Application Menu."
         ;;
 esac
 

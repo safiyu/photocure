@@ -14,12 +14,17 @@ services:
   photocure:
     build: .
     image: safiyu/photocure:latest
-    # Bound to localhost on purpose: the page embeds the session token, so anyone who can
-    # reach the port can change files. Do not publish it on 0.0.0.0.
+    # Published on localhost only. Every API call needs the access token, which is generated
+    # on first start, printed in `docker compose logs`, and kept in the data volume
+    # (/data/auth_token). Set PCUR_AUTH_TOKEN below to choose your own. To reach the page
+    # by another name or address (reverse proxy, LAN), publish the port accordingly and list
+    # that host in PCUR_ALLOWED_HOSTS, otherwise requests are rejected with "invalid host header".
     ports:
       - "127.0.0.1:8080:8080"
     environment:
       PCUR_DEVICE_DEVICE: auto
+      PCUR_AUTH_TOKEN: ${PCUR_AUTH_TOKEN:-}
+      PCUR_ALLOWED_HOSTS: ${PCUR_ALLOWED_HOSTS:-}
       # Set to cuda, rocm, xpu or cpu to skip detection.
       PCUR_ACCEL: ${PCUR_ACCEL:-}
       # Set to 0 to stop installing at start (offline or pre-baked images).
