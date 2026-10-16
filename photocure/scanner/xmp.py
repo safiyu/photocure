@@ -176,6 +176,19 @@ def get_on_disk_rating(photo_path: Path | str) -> int | None:
     return info.rating if info else None
 
 
+def get_on_disk_owned_tags(photo_path: Path | str) -> set[str]:
+    """photocure-* tags currently in the sidecar's dc:subject (other tags are not ours)."""
+    sc = _writer_sidecar(Path(photo_path))
+    if sc is None or not sc.exists():
+        return set()
+    try:
+        root = _safe_parse(sc)
+    except Exception:
+        return set()
+    return {li.text for li in root.iter(f"{_RDF}li")
+            if li.text and li.text.startswith(OWNED_TAG_PREFIX)}
+
+
 def update_xmp_sidecar(photo_path: Path | str, *, rating: int | None = None,
                        add_tags: tuple[str, ...] = (), remove_tags: tuple[str, ...] = (),
                        label: str | None = None) -> tuple[bool, str]:
