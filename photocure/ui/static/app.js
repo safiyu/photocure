@@ -45,6 +45,58 @@
     setTimeout(() => el.remove(), cls === "err" ? 6000 : 3200);
   }
 
+  // Accessible confirmation dialog with focus trap and Escape key.
+  async function showConfirmDialog(options) {
+    return new Promise((resolve) => {
+      const opts = options || {};
+      const variant = opts.variant || "primary";  // primary, warning, danger
+      const cancelBtn = opts.cancelText || "Cancel";
+      const confirmBtn = opts.confirmText || "OK";
+      const modal = document.createElement("div");
+      modal.setAttribute("role", "alertdialog");
+      modal.setAttribute("aria-modal", "true");
+      modal.setAttribute("aria-labelledby", "confirm-title");
+      modal.setAttribute("aria-describedby", "confirm-message");
+      modal.className = `confirm-modal confirm-${variant}`;
+      modal.innerHTML = `
+        <div class="confirm-backdrop"></div>
+        <div class="confirm-content">
+          <h2 id="confirm-title">${esc(opts.title || "Confirm")}</h2>
+          <p id="confirm-message">${esc(opts.message || "")}</p>
+          <div class="confirm-buttons">
+            <button class="btn btn-secondary" data-action="cancel">${esc(cancelBtn)}</button>
+            <button class="btn btn-${variant}" data-action="confirm">${esc(confirmBtn)}</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      const backdrop = modal.querySelector(".confirm-backdrop");
+      const cancelButton = modal.querySelector('[data-action="cancel"]');
+      const confirmButton = modal.querySelector('[data-action="confirm"]');
+      const focusableElems = [cancelButton, confirmButton];
+      let focusIdx = variant === "danger" || variant === "warning" ? 0 : 1;  // Default focus on Cancel for danger
+      focusableElems[focusIdx]?.focus();
+      const close = (result) => {
+        modal.remove();
+        resolve(result);
+      };
+      const handleKey = (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          close(false);
+        } else if (e.key === "Tab") {
+          focusIdx = (focusIdx + (e.shiftKey ? -1 : 1)) % focusableElems.length;
+          focusableElems[focusIdx]?.focus();
+          e.preventDefault();
+        }
+      };
+      cancelButton?.addEventListener("click", () => close(false));
+      confirmButton?.addEventListener("click", () => close(true));
+      backdrop?.addEventListener("click", () => close(false));
+      modal.addEventListener("keydown", handleKey);
+    });
+  }
+
   async function api(path, opts) {
     opts = opts || {};
     const headers = Object.assign({}, opts.headers || {});

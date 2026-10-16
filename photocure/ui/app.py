@@ -1077,6 +1077,46 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 raise HTTPException(404, "no undoable transactions")
         return {"transaction_id": tid, "report": planner.verify_transaction(tid)}
 
+    @app.get("/api/transactions/orphaned")
+    def get_orphaned_transactions():
+        """List incomplete transactions from unexpected shutdown."""
+        with get_session(dbp) as s:
+            from sqlmodel import select
+            orphaned = s.exec(
+                select(M.ActionLedger).where(M.ActionLedger.status == "PENDING")
+            ).all()
+            return {
+                "orphaned_count": len(orphaned),
+                "transactions": [
+                    {"transaction_id": row.transaction_id, "action_count": row.action_index}
+                    for row in orphaned
+                ]
+            }
+
+    @app.post("/api/transactions/{tid}/resume", dependencies=auth)
+    def resume_transaction(tid: str):
+        """Resume an incomplete transaction (stub for C1)."""
+        raise HTTPException(501, "transaction resume not yet implemented")
+
+    @app.post("/api/transactions/{tid}/rollback", dependencies=auth)
+    def rollback_transaction(tid: str):
+        """Rollback an incomplete transaction (stub for C1)."""
+        raise HTTPException(501, "transaction rollback not yet implemented")
+
+    @app.post("/api/restart", dependencies=auth)
+    def restart_server(force: bool = Query(False)):
+        """Restart the server (refuse if ledger lock is held unless force=true)."""
+        if _LEDGER_WRITING.locked():
+            if not force:
+                raise HTTPException(409, "A filesystem transaction is actively writing. Restart cannot be forced.")
+        # Spawn daemon restart.
+        def restart_daemon():
+            time.sleep(0.25)
+            import sys
+            os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]])
+        threading.Thread(target=restart_daemon, daemon=True).start()
+        return {"ok": True, "message": "Server restarting..."}
+
     @app.get("/api/jobs/{job_id}")
     def job_status(job_id: str, since: int = Query(0, ge=0)):
         job = jobs.get(job_id)
@@ -1524,11 +1564,33 @@ def create_app(db_path: str | None = None) -> FastAPI:
     # ---------------------------------------------------------------- static
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+    @app.on_event("startup")
+    async def startup_event():
+        """Write PID file and generate OTC on startup."""
+        import os
+        pid_dir = Path(os.environ.get("XDG_RUNTIME_DIR", Path.home() / ".cache/photocure/run"))
+        pid_dir.mkdir(parents=True, exist_ok=True)
+        pid_file = pid_dir / f"{cfg.port}.pid"
+        pid_file.write_text(str(os.getpid()))
+        # Generate OTC for browser authentication.
+        otc = app.state.auth_mgr.generate_otc()
+        app.state.otc = otc
+
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        """Clean up PID file on shutdown."""
+        import os
+        pid_dir = Path(os.environ.get("XDG_RUNTIME_DIR", Path.home() / ".cache/photocure/run"))
+        pid_file = pid_dir / f"{cfg.port}.pid"
+        pid_file.unlink(missing_ok=True)
+
     @app.get("/", response_class=HTMLResponse)
     def index():
         html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-        return HTMLResponse(html.replace(TOKEN_PLACEHOLDER, app.state.token),
-                            headers={"Cache-Control": "no-store"})
+        # Inject OTC into the HTML (the static shell will send it via POST /auth/exchange).
+        otc_placeholder = "__PHOTOCURE_OTC__"
+        html = html.replace(otc_placeholder, app.state.otc or "")
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     @app.get("/healthz")
     def health():
