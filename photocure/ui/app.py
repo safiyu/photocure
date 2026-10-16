@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import logging
 import os
 import secrets
 import shutil
@@ -44,9 +45,10 @@ from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from ..auth import AuthManager, build_allowed_hosts
+from ..auth import COOKIE_NAME, AuthManager, build_allowed_hosts, origin_allowed
 from ..config import CuratorConfig, default_db_path
 from ..db import models as M
+from ..engine.locks import LEDGER_WRITING as _LEDGER_WRITING
 from ..db.repository import PhotoRepository
 from ..db.session import get_session, init_db, snapshot_database
 from ..quality.image_loader import load_image, to_thumbnail_jpg
@@ -63,8 +65,11 @@ JUNK_VALUES = tuple(c.value for c in CategoryType if c.is_junk)
 
 # Only one long-running task at a time across the whole process.
 _BUSY = threading.Lock()
-# Ledger-write lock: held during ActionEngine.execute() / RollbackEngine.undo()
-_LEDGER_WRITING = threading.Lock()
+
+
+def _pid_file(port: int) -> Path:
+    from ..lifecycle import pid_file_path
+    return pid_file_path(port)
 
 _BLOCKED_DIRS = (
     "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/boot", "/dev",
@@ -460,6 +465,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     app.state.cfg = cfg
     auth_mgr = AuthManager(cfg.cache_dir)
     app.state.auth_mgr = auth_mgr
+    app.state.token = auth_mgr.token
     app.state.allowed_hosts = build_allowed_hosts(cfg.host, cfg.port, cfg.allowed_hosts)
     progress_mgr = ProgressManager()
     app.state.progress = progress_mgr
@@ -502,26 +508,27 @@ def create_app(db_path: str | None = None) -> FastAPI:
             st = bk.detect_backend(c)
         return st
 
-    async def require_auth(request: Request, x_pcur_token: str | None = Header(default=None)) -> None:
-        """Require valid session cookie or X-PCUR-Token header."""
-        # Check Host header against allowlist.
-        host_header = request.headers.get("host", "")
-        if host_header and host_header not in app.state.allowed_hosts:
-            raise HTTPException(400, "invalid host header")
-        # Check auth token.
-        token = x_pcur_token or request.cookies.get("pcur_session")
-        if not token or not app.state.auth_mgr.validate_token(token):
-            raise HTTPException(401, "missing or invalid token")
-        # Check CSRF on mutating requests.
-        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
-            origin = request.headers.get("origin") or request.headers.get("referer", "")
-            if origin:
-                allowed_origins = {f"http://{h}" if ":" not in h else f"http://{h}"
-                                 for h in app.state.allowed_hosts}
-                if not any(origin.startswith(o) for o in allowed_origins):
-                    raise HTTPException(403, "csrf violation")
+    # Every request: Host allowlist. Everything except the static shell, /healthz and
+    # /auth/exchange also needs a valid session; mutating requests need a matching Origin.
+    _OPEN = ("/", "/healthz", "/auth/exchange")
 
-    auth = [Depends(require_auth)]
+    @app.middleware("http")
+    async def guard(request: Request, call_next):
+        host = request.headers.get("host", "")
+        if host not in app.state.allowed_hosts:
+            return JSONResponse({"detail": "invalid host header"}, status_code=400)
+        path = request.url.path
+        if path not in _OPEN and not path.startswith("/static/"):
+            token = request.headers.get("x-pcur-token") or request.cookies.get(COOKIE_NAME)
+            if not app.state.auth_mgr.validate(token):
+                return JSONResponse({"detail": "missing or invalid token"}, status_code=401)
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            origin = request.headers.get("origin") or request.headers.get("referer")
+            if origin and not origin_allowed(origin, app.state.allowed_hosts):
+                return JSONResponse({"detail": "cross-origin request rejected"}, status_code=403)
+        return await call_next(request)
+
+    auth: list = []  # enforced app-wide by the guard middleware
 
     @contextmanager
     def exclusive():
@@ -660,18 +667,17 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.post("/auth/exchange")
     async def exchange_otc(request: Request):
-        """Exchange a one-time code for a persistent session token."""
+        """Trade a one-time code (or the persistent token) for the session cookie."""
         try:
-            body = await request.json()
-            code = body.get("code")
+            code = (await request.json()).get("code")
         except Exception:
             raise HTTPException(400, "invalid request body")
-        token = app.state.auth_mgr.validate_and_consume_otc(code)
+        token = app.state.auth_mgr.exchange(code if isinstance(code, str) else None)
         if not token:
             raise HTTPException(401, "invalid or expired code")
-        response = Response(status_code=204)
-        response.set_cookie("pcur_session", token, httponly=True, samesite="strict", path="/")
-        return response
+        resp = Response(status_code=204)
+        resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="strict", path="/")
+        return resp
 
     @app.get("/api/config")
     def get_config():
@@ -1077,42 +1083,59 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 raise HTTPException(404, "no undoable transactions")
         return {"transaction_id": tid, "report": planner.verify_transaction(tid)}
 
+    def orphaned_rows() -> list[dict]:
+        with get_session(dbp) as s:
+            rows = s.exec(select(M.ActionLedger.transaction_id, func.count())
+                          .where(M.ActionLedger.status == "pending")
+                          .group_by(M.ActionLedger.transaction_id)).all()
+        return [{"transaction_id": t, "pending_actions": int(n)} for t, n in rows]
+
     @app.get("/api/transactions/orphaned")
     def get_orphaned_transactions():
-        """List incomplete transactions from unexpected shutdown."""
-        with get_session(dbp) as s:
-            from sqlmodel import select
-            orphaned = s.exec(
-                select(M.ActionLedger).where(M.ActionLedger.status == "PENDING")
-            ).all()
-            return {
-                "orphaned_count": len(orphaned),
-                "transactions": [
-                    {"transaction_id": row.transaction_id, "action_count": row.action_index}
-                    for row in orphaned
-                ]
-            }
+        """Transactions left PENDING by a crash, power loss or kill mid-apply."""
+        tx = orphaned_rows()
+        return {"count": len(tx), "transactions": tx}
 
     @app.post("/api/transactions/{tid}/resume", dependencies=auth)
     def resume_transaction(tid: str):
-        """Resume an incomplete transaction (stub for C1)."""
-        raise HTTPException(501, "transaction resume not yet implemented")
+        """Settle PENDING rows by inspecting the disk: finished work is committed,
+        partial targets are removed and marked failed (sources are never touched)."""
+        from ..engine.rollback import RollbackEngine, RollbackReport
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+        try:
+            rep = RollbackReport(transaction_id=tid)
+            with _LEDGER_WRITING, get_session(dbp) as s:
+                RollbackEngine(req_cfg(), dbp)._reconcile_pending(tid, PhotoRepository(s), rep)
+            return {"ok": True, "transaction_id": tid, "notes": list(rep.notes)}
+        finally:
+            _BUSY.release()
 
     @app.post("/api/transactions/{tid}/rollback", dependencies=auth)
-    def rollback_transaction(tid: str):
-        """Rollback an incomplete transaction (stub for C1)."""
-        raise HTTPException(501, "transaction rollback not yet implemented")
+    def rollback_orphaned(tid: str):
+        from ..engine.rollback import RollbackEngine
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+        try:
+            rep = RollbackEngine(req_cfg(), dbp).rollback_transaction(tid)
+            return {"ok": rep.failures == 0, "transaction_id": tid, "reversed": rep.reversed,
+                    "failures": rep.failures, "errors": list(rep.errors)[:50]}
+        finally:
+            _BUSY.release()
 
     @app.post("/api/restart", dependencies=auth)
     def restart_server(force: bool = Query(False)):
-        """Restart the server (refuse if ledger lock is held unless force=true)."""
         if _LEDGER_WRITING.locked():
-            if not force:
-                raise HTTPException(409, "A filesystem transaction is actively writing. Restart cannot be forced.")
-        # Spawn daemon restart.
+            return JSONResponse({"ok": False, "error": "A filesystem transaction is actively writing. "
+                                 "Server restart cannot be forced during plan execution or undo."},
+                                status_code=409)
+        if _BUSY.locked() and not force:
+            return JSONResponse({"ok": False, "error": "A background task is running. "
+                                 "Restart anyway with force=true."}, status_code=409)
+
         def restart_daemon():
-            time.sleep(0.25)
             import sys
+            time.sleep(0.25)
             os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]])
         threading.Thread(target=restart_daemon, daemon=True).start()
         return {"ok": True, "message": "Server restarting..."}
@@ -1452,6 +1475,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
                           f"(txn {rep.transaction_id})", "" if ok else "err")
             return {"ok": ok, "transaction_id": rep.transaction_id,
                     "executed": rep.executed, "collisions": rep.collisions,
+                    "skipped_collisions": getattr(rep, "skipped_collisions", 0),
+                    "copy_fallbacks": getattr(rep, "copy_fallbacks", 0),
                     "failures": rep.failures, "errors": list(rep.errors)[:50]}
 
         job = spawn("apply", work)
@@ -1573,31 +1598,23 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.on_event("startup")
     async def startup_event():
-        """Write PID file and generate OTC on startup."""
-        import os
-        pid_dir = Path(os.environ.get("XDG_RUNTIME_DIR", Path.home() / ".cache/photocure/run"))
-        pid_dir.mkdir(parents=True, exist_ok=True)
-        pid_file = pid_dir / f"{cfg.port}.pid"
+        pid_file = _pid_file(cfg.port)
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
         pid_file.write_text(str(os.getpid()))
-        # Generate OTC for browser authentication.
-        otc = app.state.auth_mgr.generate_otc()
-        app.state.otc = otc
+        for t in orphaned_rows():
+            logging.getLogger("photocure.ui").warning(
+                "incomplete transaction %s (%d pending actions) from an unexpected shutdown",
+                t["transaction_id"], t["pending_actions"])
 
     @app.on_event("shutdown")
     async def shutdown_event():
-        """Clean up PID file on shutdown."""
-        import os
-        pid_dir = Path(os.environ.get("XDG_RUNTIME_DIR", Path.home() / ".cache/photocure/run"))
-        pid_file = pid_dir / f"{cfg.port}.pid"
-        pid_file.unlink(missing_ok=True)
+        _pid_file(cfg.port).unlink(missing_ok=True)
 
     @app.get("/", response_class=HTMLResponse)
     def index():
         html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-        # Inject OTC into the HTML (the static shell will send it via POST /auth/exchange).
-        otc_placeholder = "__PHOTOCURE_OTC__"
-        html = html.replace(otc_placeholder, app.state.otc or "")
-        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+        return HTMLResponse(html.replace(TOKEN_PLACEHOLDER, ""),
+                            headers={"Cache-Control": "no-store"})
 
     @app.get("/healthz")
     def health():

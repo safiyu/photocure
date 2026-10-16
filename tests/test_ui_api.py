@@ -54,9 +54,9 @@ def plan_body(env, **kw):
 
 
 # ---------------------------------------------------------------- security
-def test_index_injects_token_and_no_cors(env):
+def test_index_leaks_no_credentials_and_no_cors(env):
     html = env.client.get("/").text
-    assert env.app.state.token in html
+    assert env.app.state.token not in html
     assert "__PCUR_TOKEN__" not in html
     r = env.client.get("/api/stats", headers={"Origin": "http://evil.example"})
     assert "access-control-allow-origin" not in r.headers
@@ -80,8 +80,8 @@ MUTATING = [
 @pytest.mark.parametrize(("path", "body"), MUTATING)
 def test_every_mutating_endpoint_needs_token(env, path, body):
     anon = TestClient(env.app)
-    assert anon.post(path, json=body).status_code == 403
-    assert anon.post(path, json=body, headers={"X-PCUR-Token": "nope"}).status_code == 403
+    assert anon.post(path, json=body).status_code == 401
+    assert anon.post(path, json=body, headers={"X-PCUR-Token": "nope"}).status_code == 401
 
 
 def test_import_has_no_side_effects_and_lazy_app(tmp_path, monkeypatch):

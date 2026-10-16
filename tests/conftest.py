@@ -21,6 +21,9 @@ if str(_ROOT) not in sys.path:
 # unless the operator explicitly wants the real engines.
 os.environ.setdefault("PCUR_BACKEND", os.environ.get("PCUR_BACKEND", "stub"))
 os.environ.setdefault("PCUR_DEVICE_DEVICE", "cpu")
+# Starlette's TestClient sends "Host: testserver"; pin a token so no auth_token file is written.
+os.environ.setdefault("PCUR_ALLOWED_HOSTS", "testserver")
+os.environ.setdefault("PCUR_AUTH_TOKEN", "test-token-for-the-suite")
 
 
 @pytest.fixture()

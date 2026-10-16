@@ -180,7 +180,7 @@ def test_learn_501_when_unavailable(env, monkeypatch):
 
 def test_learn_needs_token_and_respects_busy_lock(env, monkeypatch):
     monkeypatch.setattr(Planner, "learn_from_corrections", lambda self: {}, raising=False)
-    assert TestClient(env.app).post("/api/learn").status_code == 403
+    assert TestClient(env.app).post("/api/learn").status_code == 401
     assert ui_app._BUSY.acquire(blocking=False)
     try:
         assert env.client.post("/api/learn").status_code == 409

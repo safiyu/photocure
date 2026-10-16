@@ -1122,9 +1122,8 @@ def stop(
     import subprocess
     import time
 
-    pid_dir = Path(os.environ.get("XDG_RUNTIME_DIR", Path.home() / ".cache/photocure/run"))
-    pid_dir.mkdir(parents=True, exist_ok=True)
-    pid_file = pid_dir / f"{port}.pid"
+    from .lifecycle import pid_file_path
+    pid_file = pid_file_path(port)
 
     if not pid_file.exists():
         console.print(f"[yellow]No active Photocure server found on port {port}.[/yellow]")

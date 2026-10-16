@@ -1,91 +1,81 @@
-"""Authentication & authorization utilities (OTC, session cookies, host allowlist)."""
+"""Authentication helpers: one-time code, persistent token, Host/Origin checks."""
 from __future__ import annotations
 
 import logging
 import os
 import secrets
-from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 log = logging.getLogger("photocure.auth")
 
+COOKIE_NAME = "pcur_session"
+
 
 class AuthManager:
-    """Manages OTC, persistent token, and session state."""
+    """Holds the one-time code (OTC) and the persistent session token."""
 
-    def __init__(self, cache_dir: Path | str = ".cache"):
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.token_path = self.cache_dir.parent / "auth_token"
-        # In-memory OTC tracker (invalidated per-launch).
-        self._otc = None
-        self._session_tokens = {}
+    def __init__(self, cache_dir: Path | str = ".cache", token: str | None = None):
+        self.token_path = Path(cache_dir).resolve().parent / "auth_token"
+        self._env_token = token or os.environ.get("PCUR_AUTH_TOKEN") or None
+        # The CLI generates the OTC and hands it over via the environment, never via HTML.
+        self._otc: str | None = os.environ.pop("PCUR_OTC", None) or None
+        self.token = self._env_token or self._load_or_create()
 
-    def generate_otc(self) -> str:
-        """Create a fresh OTC (32 bytes, URL-safe)."""
-        self._otc = secrets.token_urlsafe(32)
-        return self._otc
-
-    def validate_and_consume_otc(self, code: str) -> str | None:
-        """Validate OTC and return a persistent session token, or None."""
-        if not self._otc or not secrets.compare_digest(code, self._otc):
-            return None
-        self._otc = None  # OTC is single-use.
-        token = self.get_or_create_persistent_token()
-        return token
-
-    def get_or_create_persistent_token(self) -> str:
-        """Return existing persistent token or create one and save."""
-        if self.token_path.exists():
-            try:
-                token = self.token_path.read_text().strip()
-                if token and len(token) >= 32:
-                    return token
-            except OSError:
-                pass
-        token = secrets.token_urlsafe(32)
+    def _load_or_create(self) -> str:
         try:
-            self.token_path.write_text(token)
-            self.token_path.chmod(0o600)
+            tok = self.token_path.read_text().strip()
+            if len(tok) >= 32:
+                return tok
+        except OSError:
+            pass
+        tok = secrets.token_urlsafe(32)
+        try:
+            self.token_path.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(self.token_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(tok)
         except OSError as e:
-            log.warning("Failed to persist token: %s", e)
-        return token
+            log.warning("could not persist auth token: %s", e)
+        return tok
 
-    def validate_token(self, token: str | None) -> bool:
-        """Check if a token is valid (current session or persistent)."""
-        if not token:
-            return False
-        if self._session_tokens.get(token):
-            return True
-        persistent = self.get_or_create_persistent_token()
-        return secrets.compare_digest(token, persistent)
+    def set_otc(self, code: str) -> None:
+        self._otc = code
 
-    def create_session_token(self) -> str:
-        """Create a short-lived session token (stored in memory)."""
-        token = secrets.token_urlsafe(32)
-        self._session_tokens[token] = {"created_at": datetime.now(timezone.utc)}
-        return token
+    def exchange(self, code: str | None) -> str | None:
+        """Return the session token for a valid single-use OTC or the persistent token."""
+        if not code:
+            return None
+        if self._otc and secrets.compare_digest(code, self._otc):
+            self._otc = None
+            return self.token
+        if secrets.compare_digest(code, self.token):
+            return self.token
+        return None
+
+    def validate(self, token: str | None) -> bool:
+        return bool(token) and secrets.compare_digest(token, self.token)
 
 
-def build_allowed_hosts(host: str, port: int, allowed_hosts_str: str = "") -> set[str]:
-    """Build the set of allowed Host header values."""
-    allowed = {
-        "localhost",
-        "127.0.0.1",
-        "[::1]",
-        f"localhost:{port}",
-        f"127.0.0.1:{port}",
-        f"[::1]:{port}",
-    }
-    # Add configured bind address if non-loopback.
-    if host not in ("127.0.0.1", "localhost", "::1", "[::1]"):
-        allowed.add(host)
-        allowed.add(f"{host}:{port}")
-    # Add custom allows from env.
-    if allowed_hosts_str:
-        for h in allowed_hosts_str.split(","):
-            h = h.strip()
-            if h:
-                allowed.add(h)
-                allowed.add(f"{h}:{port}")
+def new_otc() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def build_allowed_hosts(host: str, port: int, extra: str = "") -> set[str]:
+    allowed = {"localhost", "127.0.0.1", "[::1]", "::1",
+               f"localhost:{port}", f"127.0.0.1:{port}", f"[::1]:{port}"}
+    if host and host not in ("0.0.0.0", "::"):
+        allowed |= {host, f"{host}:{port}"}
+    for h in (x.strip() for x in extra.split(",")):
+        if h:
+            allowed |= {h, f"{h}:{port}"}
     return allowed
+
+
+def origin_allowed(origin: str, allowed_hosts: set[str]) -> bool:
+    """True when the Origin/Referer authority is in the Host allowlist."""
+    try:
+        netloc = urlparse(origin).netloc
+    except ValueError:
+        return False
+    return bool(netloc) and netloc in allowed_hosts
