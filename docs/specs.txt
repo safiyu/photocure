@@ -75,7 +75,7 @@ Every agent or engineer working from this plan must strictly adhere to these fun
 5. **No Hard-Coded Numeric Thresholds**: All numeric thresholds (e.g. EAR cutoffs, blur gates, timeouts, batch sizes) are starting defaults marked `(tune)`. They must be loaded from `photocure/config.py`, never hard-coded. Never publish speed or accuracy figures until the benchmark commands in C3 produce empirical numbers on real photo sets.
 6. **XSS Prevention & DOM Node Safety**: **Never use `innerHTML` with text originating from the database, filesystem, or user input.** Always use `textContent` or construct safe DOM nodes via `document.createElement()`.
 7. **Absolute Ledger Integrity**: **Never write to, move, or delete an original photo on disk except through the existing transaction ledger (`ActionEngine`)**, which must preserve full undo capability via `RollbackEngine`.
-8. **Schema Versioning**: SQLite schema changes land through a single `schema_version` table (added in C1 if absent). Each commit group that alters tables bumps the version by 1, registers an idempotent `migrate_to_vN()` step, and the `migrate()` entrypoint applies missing versions in order on startup. No group adds columns via ad-hoc `ALTER TABLE` outside this mechanism.
+8. **Schema Versioning**: The existing mechanism stays: `photocure/db/session.py` `migrate()` adds any column missing from an existing table at startup (idempotent) and records `SCHEMA_VERSION` in `PRAGMA user_version`. Each commit group that changes tables bumps `SCHEMA_VERSION` by 1 (with a comment saying what changed) and adds a test that an older database gains the new columns. No group runs ad-hoc `ALTER TABLE` elsewhere. (Decision: a separate `schema_version` table was dropped because `user_version` already does that job.)
 9. **Per-Group CI Gate**: C1 introduces a minimal GitHub Actions workflow (`.github/workflows/ci.yml`) running `pytest`, `ruff`, and the Node virtual-grid tests (added as no-op skeleton until C4). Every subsequent commit group extends it; the next group does not start until CI on the HEAD of `develop` is green.
 10. **Burst Definition**: A "burst" is a run of photos from the same camera (`exif.camera_model`) whose consecutive `taken_at` deltas are all `<= cfg.burst_gap_seconds` (default 2.0, tune). The burst is bounded by the first delta exceeding the gap or by a camera-model change. Where EXIF `BurstUUID` / `BurstID` is present it takes precedence over the time heuristic. All burst-relative logic (face tracking, blink baseline, best-shot selection) uses this definition.
 
@@ -111,7 +111,7 @@ Every agent or engineer working from this plan must strictly adhere to these fun
     7. API requests accept authentication either via the `pcur_session` cookie or the `X-PCUR-Token` header.
 * **Persistent Token Storage in Data Directory**:
   - Ephemeral tokens invalidate on `os.execv` restart, logging the user out.
-  - Store the persistent session token in `Path(cfg.cache_dir).parent / "auth_token"` (default: `~/.local/share/photocure/auth_token`, mode `0600`).
+  - Store the persistent session token in `Path(cfg.cache_dir).parent / "auth_token"` (mode `0600`) when `cache_dir` is an absolute path. When `cache_dir` is relative (the default `.cache`), use `$XDG_DATA_HOME/photocure/auth_token` (default `~/.local/share/photocure/auth_token`) so a token file is never dropped into whatever directory the user ran `photocure` from. `PCUR_AUTH_TOKEN` overrides the stored token.
   - In Docker, this lands inside the mounted persistent data volume (`/data/auth_token`).
 * **Docker Container Token Generation**:
   - Inside containers, `--host 0.0.0.0` is required. If `PCUR_AUTH_TOKEN` is unset when binding `0.0.0.0`, the container automatically generates a secure token on first launch, prints it prominently to stdout (`console.print("[bold yellow]Initial authentication token:[/bold yellow] ...")`), saves it to `/data/auth_token`, and starts cleanly.
@@ -136,7 +136,7 @@ Every agent or engineer working from this plan must strictly adhere to these fun
 * **Safe CLI Commands**:
   * Implement `photocure stop [--port 8080] [--force]`:
     1. Read PID from `$XDG_RUNTIME_DIR/photocure/<port>.pid`. If not found, output: `"No active Photocure server found on port <port>."` and exit 0.
-    2. Verification: Check `os.kill(pid, 0)`. On Linux, verify `/proc/<pid>/cmdline` contains `"photocure"`. On macOS, verify via `ps -p <pid> -o command=`. On Windows (not a supported deployment target per §1 Supported Platforms), skip the cmdline check and warn. If the PID was recycled by another program, abort immediately without killing.
+    2. Verification: Check `os.kill(pid, 0)`. A bare `"photocure"` substring is not enough (an editor or `tail` that merely mentions the name would match). The command line must run the `photocure` program (or `python -m photocure`) with `serve`, `start` or `setup`. On Linux read `/proc/<pid>/cmdline`. On macOS, verify via `ps -p <pid> -o command=`. On Windows (not a supported deployment target per §1 Supported Platforms), skip the cmdline check and warn. If the PID was recycled by another program, abort immediately without killing and drop the stale PID file.
     3. Termination: Send `SIGTERM`, poll for process termination for up to 5 seconds.
     4. If process is still alive after 5 seconds:
        - If `--force` was passed, send `SIGKILL`.
@@ -156,6 +156,8 @@ Every agent or engineer working from this plan must strictly adhere to these fun
       - If `force=false`: Return HTTP `409 Conflict` prompting the user.
       - If `force=true`: Allow restart.
     * Spawn daemon restart thread: sleep 250 ms, then `os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]])`.
+    * Resume semantics: `POST /api/transactions/{tid}/resume` settles `pending` ledger rows by inspecting the disk (finished work is committed, partial targets removed and marked failed, sources never touched). It does not re-run the remaining plan; the user re-applies for that. `POST /api/transactions/{tid}/rollback` reconciles and then reverses the committed rows.
+    * Ledger status values are lowercase (`pending`, `committed`, `rolled_back`, `failed`).
 * **Startup Orphaned Transaction Recovery**:
   - On server startup (`init_db` / FastAPI startup event), query SQLite ledger for any transactions with status `PENDING` (indicates mid-transaction power loss, system crash, or `photocure kill`).
   - If orphaned transactions exist:
@@ -192,10 +194,13 @@ Every agent or engineer working from this plan must strictly adhere to these fun
   exec "$VENV_CLI" "$@"
   ```
 * **Upgrade Mode (`--upgrade`)**:
-  - Does NOT build `venv.tmp` from scratch (preserving installed PyTorch, CUDA runtime, and cached model weights).
+  - Does NOT rebuild the venv (preserving installed PyTorch, CUDA runtime, and cached model weights).
   - Runs `$USER_VENV/bin/pip install --no-cache-dir --upgrade /opt/photocure/wheels/photocure-*.whl`.
   - Updates `$USER_VENV/.photocure_version` with contents of `/opt/photocure/VERSION`.
   - Continues launch into `photocure serve`.
+* **First-run build (decision)**: the venv is built in place, not in `venv.tmp` and renamed (a renamed venv keeps broken absolute paths in its scripts). Completion is the `.photocure_version` marker, written last. A venv without the marker is treated as unfinished and rebuilt. The wheel is stamped with the package version at build time, otherwise `pip install --upgrade` is a no-op when CI tags a version that `pyproject.toml` does not carry.
+* **Commands that must not provision**: `--version`, `version`, `stop` and `kill` never trigger a network install, with or without an environment (they pass through to the existing venv, or answer from `/opt/photocure/VERSION` and the PID file).
+* **One-time code hand-off**: the bootstrap generates the code, opens the browser at `/#code=<otc>` (the fragment survives the progress page's reload), and passes it to the real server through `PCUR_OTC`. The server reads it once and never embeds it in a page.
 * **Healthcheck Behavior during Initial Bootstrap**:
   - During provisioning, `GET /healthz` returns **HTTP 503 Service Unavailable** (`{"status": "provisioning", "step": current_step}`).
   - The browser progress page checks `/healthz` and specifically **waits for HTTP 200 OK** before reloading, preventing premature reloads while the bootstrap server is still running.
@@ -323,6 +328,8 @@ Every agent or engineer working from this plan must strictly adhere to these fun
     - If the photo has a foreign edit flag (`edited_elsewhere` or `existing_foreign_rating`), prompt via `showConfirmDialog()`:
       *"This photo's sidecar was modified outside Photocure. Overwrite with rating X?"*
     - Upon user confirmation, apply the change to the sidecar and update `xmp_written_rating = new_rating`.
+
+> **Status after C2**: `sync_sidecar()` (`photocure/sidecar_sync.py`) implements the first-run baseline, `edited_elsewhere`, and the explicit-override handshake (`needs_confirmation`, then repeat with `overwrite_foreign=True`) with tests. Nothing calls it yet. Automated tag writes arrive with the blink and best-shot flags in C3, and the star-rating endpoint, shortcuts and the confirm dialog wiring arrive in C4 §5.6.
 
 ### 3.3 Zero-Storage Hardlinks, `EXDEV` Fallback & Inode/Device Ledger Tracking for Safe Undo
 * In `photocure/engine/action_engine.py`:
@@ -760,6 +767,15 @@ Each commit group's final commit is tagged `cN-done` (annotated) on `develop`. R
 3. **Blink Calibration Labels**: Calibration uses the maintainer's fixture folder `tests/fixtures/faces/` for threshold sweeps, skipping gracefully if absent in CI.
 4. **Repository Licensing**: Root `LICENSE` file is **MIT**. Third-party models and libraries are attributed in `NOTICE`. Author credit is **Safiyu** (`Safiyu Vattaparambil`).
 5. **Package Installer Local Icon Realities**: Local `.deb` icon preview in GUI installers is best-effort due to varied installer behavior with local standalone packages. Standard hicolor hierarchy (16px to 512px) and AppStream metadata ensure standard Freedesktop menu discovery upon installation.
+
+---
+
+### Known follow-ups carried between groups
+
+- C1: the confirm dialog's focus trap, Escape and focus-restore behavior has no automated browser test; verify by hand (§2.8 Manual Modal QA). "Reject All Blinks" adopts the dialog in C3.
+- C1: Docker container still runs as the image's `curator` user; PUID/PGID handling and `gosu` are C6 §7.4.
+- C1/C6: `build_deb.sh` now ships wheel, bootstrap and VERSION and no longer runs pip in `postinst`. Icons at all sizes, AppStream, systemd, NOTICE and LICENSE in `/usr/share/doc` remain C6.
+- Lint: `ruff` reports about 370 findings that predate this plan. CI gates only on syntax errors and undefined names until that backlog is cleared.
 
 ---
 

@@ -1075,6 +1075,7 @@
       if (res && res.ok) {
         logLine(`Applied ${fmtN(res.executed)} files (change ${res.transaction_id})`, "ok");
         toast(`Organized ${fmtN(res.executed)} photos. You can undo this from this page.`, "ok");
+        if (res.backup_warning) toast(res.backup_warning, "err");
         if (num(res.copy_fallbacks) > 0) {
           addBanner("copy", "Cross-filesystem link detected; files were copied instead of hardlinked.", [["Dismiss", (ev) => ev.currentTarget.parentNode.remove()]]);
         }

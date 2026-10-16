@@ -126,3 +126,26 @@ def test_unknown_collision_policy_is_rejected():
     from photocure.config import CuratorConfig
     with pytest.raises(ValueError):
         CuratorConfig(collision_policy="sha_dup")
+
+
+def test_older_database_gains_the_new_columns(tmp_path):
+    import sqlite3
+
+    from photocure.db.session import SCHEMA_VERSION, init_db
+    db = tmp_path / "old.db"
+    init_db(db)
+    con = sqlite3.connect(db)
+    for col in ("actual_operation", "target_dev", "target_ino"):
+        con.execute(f"ALTER TABLE action_ledger DROP COLUMN {col}")
+    for col in ("xmp_written_rating", "xmp_written_tags"):
+        con.execute(f"ALTER TABLE images DROP COLUMN {col}")
+    con.execute("PRAGMA user_version=3")
+    con.commit()
+    con.close()
+    init_db(db)  # migrate on startup
+    con = sqlite3.connect(db)
+    ledger = {r[1] for r in con.execute("PRAGMA table_info(action_ledger)")}
+    images = {r[1] for r in con.execute("PRAGMA table_info(images)")}
+    assert {"actual_operation", "target_dev", "target_ino"} <= ledger
+    assert {"xmp_written_rating", "xmp_written_tags"} <= images
+    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 4

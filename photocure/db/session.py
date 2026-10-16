@@ -54,7 +54,7 @@ def get_engine(db_path: Path | str = "photocure.db", echo: bool = False):
     return engine
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4  # 4: xmp_written_* on images; actual_operation/target_dev/target_ino on the ledger
 
 
 def _sql_type(col) -> str:

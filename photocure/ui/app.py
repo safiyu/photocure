@@ -1426,13 +1426,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
             raise HTTPException(409, "another task is already running")
 
         def work(job: dict) -> dict:
-            # Pre-execution backup (C1 §2.5).
+            # Pre-execution backup (C1 §2.5). A failed backup warns but does not block the apply.
+            backup_warning = ""
             if cfg.auto_db_backup:
                 try:
                     snapshot_database(dbp, keep=10)
                     jlog(job, "database snapshot created")
                 except Exception as e:
-                    jlog(job, f"database snapshot failed (non-fatal): {e}", "warn")
+                    backup_warning = f"Could not back up the database first: {e}"
+                    jlog(job, backup_warning, "warn")
             progress_mgr.start("Apply", "Building plan", 0, "Building plan...")
             jlog(job, "building plan")
             p = build(planner, body, root, persist=True)
@@ -1474,6 +1476,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                           f"(txn {rep.transaction_id})", "" if ok else "err")
             return {"ok": ok, "transaction_id": rep.transaction_id,
                     "executed": rep.executed, "collisions": rep.collisions,
+                    "backup_warning": backup_warning,
                     "skipped_collisions": getattr(rep, "skipped_collisions", 0),
                     "copy_fallbacks": getattr(rep, "copy_fallbacks", 0),
                     "failures": rep.failures, "errors": list(rep.errors)[:50]}
