@@ -137,8 +137,8 @@ class FaceEngine:
         except Exception as e:
             self._landmarker_failed = True
             msg = f"{e.__class__.__name__}: {e}"
-            if "libEGL" in str(e):
-                msg += " (install libegl1 on Linux: sudo apt-get install -y libegl1)"
+            if any(k in str(e) for k in ("libEGL", "libGLES", "libGL")):
+                msg += " (install graphics libraries on Linux: sudo apt-get install -y libegl1 libgles2 libgl1)"
             self._landmarker_error = msg
             log.warning("Landmarker failed to initialize (%s)", self._landmarker_error)
         return self._landmarker

@@ -17,6 +17,14 @@ runner = CliRunner()
 PORTRAIT = Path(__file__).parent / "fixtures" / "face_portrait.jpg"
 
 
+@pytest.fixture(autouse=True)
+def _fresh_backend():
+    from photocure.inference.backends import reset_backend_cache
+    reset_backend_cache()
+    yield
+    reset_backend_cache()
+
+
 def test_sweep_counts_and_metrics():
     scored = [("closed", .9), ("closed", .8), ("closed", .4), ("open", .1), ("open", .6), ("open", .2)]
     rows = {r.threshold: r for r in bench.sweep(scored, (0.5, 0.75))}
@@ -74,8 +82,8 @@ def test_bench_blinks_uses_the_real_models_when_available(tmp_path, monkeypatch)
             from photocure.inference.face_engine import FaceEngine
             fe = FaceEngine()
             fe._load_landmarker()
-            if fe._landmarker_failed and "libEGL" in getattr(fe, "_landmarker_error", ""):
-                pytest.skip(f"System lacks libEGL: {fe._landmarker_error}")
+            if fe._landmarker_failed and any(k in getattr(fe, "_landmarker_error", "") for k in ("libEGL", "libGLES", "libGL")):
+                pytest.skip(f"System lacks OpenGL/EGL/GLES libraries: {fe._landmarker_error}")
         assert r.exit_code == 0, f"bench blinks failed (code {r.exit_code}): {r.output}"
         assert "Closed-eye threshold sweep" in r.output
     except ImportError:
