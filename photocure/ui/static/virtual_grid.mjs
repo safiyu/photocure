@@ -93,21 +93,45 @@ export class VirtualGrid {
     this.rowH = 0;
     this.raf = 0;
     host.classList.add("vgrid");
+    if (typeof host.setAttribute === "function") {
+      host.setAttribute("role", "grid");
+      host.setAttribute("aria-label", "Photos");
+    }
     host.replaceChildren();
     this.spacer = document.createElement("div");
     this.spacer.className = "vg-spacer";
+    if (typeof this.spacer.setAttribute === "function") {
+      this.spacer.setAttribute("role", "presentation");
+    }
     this.window = document.createElement("div");
     this.window.className = "vg-window";
+    if (typeof this.window.setAttribute === "function") {
+      this.window.setAttribute("role", "row");
+    }
     this.empty = document.createElement("div");
     this.empty.className = "vg-empty";
     this.empty.hidden = true;
     this.spacer.appendChild(this.window);
     host.append(this.spacer, this.empty);
+    this._onFocusIn = (e) => {
+      const card = e.target && e.target.closest ? e.target.closest(".card") : null;
+      if (card && card.dataset && card.dataset.id) {
+        const id = Number(card.dataset.id);
+        if (id && this.cursorId !== id) {
+          this.cursorId = id;
+          this.applyCursor();
+        }
+      }
+    };
+    if (typeof host.addEventListener === "function") {
+      host.addEventListener("focusin", this._onFocusIn);
+    }
     this._schedule = () => {
       if (this.raf) return;
       this.raf = win.requestAnimationFrame(() => { this.raf = 0; this.update(); });
     };
     win.addEventListener("scroll", this._schedule, { passive: true });
+    win.addEventListener("resize", this._schedule);
     if (typeof ResizeObserver !== "undefined") {
       this.resizer = new ResizeObserver(() => this._schedule());
       this.resizer.observe(host);
@@ -115,7 +139,11 @@ export class VirtualGrid {
   }
 
   destroy() {
+    if (typeof this.host.removeEventListener === "function") {
+      this.host.removeEventListener("focusin", this._onFocusIn);
+    }
     this.win.removeEventListener("scroll", this._schedule);
+    this.win.removeEventListener("resize", this._schedule);
     if (this.resizer) this.resizer.disconnect();
   }
 
@@ -287,7 +315,42 @@ export class VirtualGrid {
   setCursor(id) { this.cursorId = id; this.applyCursor(); }
 
   applyCursor() {
-    this.cards.forEach((el) => el.classList.toggle("sel", this.cursorId != null && Number(el.dataset.id) === this.cursorId));
+    let rovingCard = null;
+    if (this.cards.size > 0) {
+      if (this.cursorId != null) {
+        for (const [, el] of this.cards) {
+          if (Number(el.dataset && el.dataset.id) === this.cursorId) {
+            rovingCard = el;
+            break;
+          }
+        }
+      }
+      if (!rovingCard) {
+        let minIdx = Infinity;
+        for (const idx of this.cards.keys()) {
+          if (idx < minIdx) minIdx = idx;
+        }
+        if (minIdx !== Infinity) rovingCard = this.cards.get(minIdx);
+      }
+    }
+
+    for (const [, el] of this.cards) {
+      const isSel = this.cursorId != null && Number(el.dataset && el.dataset.id) === this.cursorId;
+      if (el.classList && typeof el.classList.toggle === "function") {
+        el.classList.toggle("sel", isSel);
+      }
+      const isRoving = el === rovingCard;
+      if (typeof el.setAttribute === "function") {
+        el.setAttribute("tabindex", isRoving ? "0" : "-1");
+        el.setAttribute("role", "gridcell");
+      }
+      const btns = typeof el.querySelectorAll === "function" ? el.querySelectorAll("button, [role='button'], a") : [];
+      for (const b of btns) {
+        if (typeof b.setAttribute === "function") {
+          b.setAttribute("tabindex", isRoving ? "0" : "-1");
+        }
+      }
+    }
   }
 
   /** Scroll until item `idx` is on screen, loading its page first if needed. */
@@ -312,6 +375,10 @@ export class VirtualGrid {
     this.cursorId = it.id;
     await this.scrollToIndex(next);
     this.applyCursor();
+    const card = this.cards.get(next);
+    if (card && typeof card.focus === "function") {
+      card.focus({ preventScroll: false });
+    }
     return it;
   }
 }

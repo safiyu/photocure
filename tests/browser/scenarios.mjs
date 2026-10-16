@@ -278,6 +278,8 @@ try {
   });
 
   await scenario("the grid lays out cleanly after a resize", async () => {
+    await sleep(250);
+    await settle();
     const layout = () => page.eval(`(() => {
       const cs = [...document.querySelectorAll('#grid .vg-window .card')].map((c) => c.getBoundingClientRect());
       const rows = new Map();
@@ -391,6 +393,140 @@ try {
     await page.waitFor(`document.querySelector('#grid .card[data-id="${b}"] .catline .tag') && document.querySelector('#grid .card[data-id="${c}"] .catline .tag')`, 8000, "both selected photos edited");
     check(await page.eval("document.querySelector('#bulkbar').hidden"), "selection was not cleared");
     check(!(await menuOpen()), "picker is still open");
+  });
+
+  await scenario("lightbox focus restoration and focus trap", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click()");
+    await settle();
+    const firstCard = await page.eval("document.querySelector('#grid .vg-window .card[data-idx=\"0\"]')");
+    check(firstCard, "no first card in grid");
+    await page.eval("document.querySelector('#grid .vg-window .card[data-idx=\"0\"] .thumb').click()");
+    await page.waitFor("!document.querySelector('#lightbox').hidden", 8000, "lightbox opens");
+    for (let i = 0; i < 10; i++) {
+      await press("Tab");
+      const inLb = await page.eval("!!document.querySelector('#lightbox').contains(document.activeElement)");
+      check(inLb, "focus leaked outside lightbox during Tab");
+    }
+    await press("Escape");
+    await page.waitFor("document.querySelector('#lightbox').hidden", 8000, "lightbox closes");
+    await settle();
+    const activeCard = await page.eval("document.activeElement && document.activeElement.classList.contains('card')");
+    check(activeCard, "focus did not return to the originating card");
+    const bodyFocus = await page.eval("document.activeElement === document.body");
+    check(!bodyFocus, "focus dropped to body after closing lightbox");
+  });
+
+  await scenario("in-app prompt dialog replaces window.prompt for new folder and event rename", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click()");
+    await page.waitFor("document.querySelector('.panel.active').id === 'tab-library'", 8000, "library panel");
+    await page.eval("document.querySelector('#btn-browse-scan').click()");
+    await page.waitFor("!document.querySelector('#picker').hidden && !!document.querySelector('#picker-path').value", 8000, "picker open and loaded");
+
+    // Folder creation with validation
+    await page.eval("document.querySelector('#picker-new').click()");
+    await page.waitFor("!document.querySelector('#confirm-modal').hidden", 5000, "confirm modal open");
+    check(await page.eval("!document.querySelector('#confirm-modal-input-wrap').hidden"), "input wrap not visible");
+    await page.eval("document.querySelector('#confirm-modal-input').value = ''");
+    await page.eval("document.querySelector('#confirm-modal-ok').click()");
+    await page.waitFor("!document.querySelector('#confirm-modal-input-error').hidden", 4000, "empty name error");
+    check(!await page.eval("document.querySelector('#confirm-modal').hidden"), "modal closed on invalid name");
+
+    await page.eval("document.querySelector('#confirm-modal-input').value = 'bad/folder'");
+    await page.eval("document.querySelector('#confirm-modal-ok').click()");
+    await page.waitFor("!document.querySelector('#confirm-modal-input-error').hidden", 4000, "unsafe name error");
+
+    await press("Escape");
+    await page.waitFor("document.querySelector('#confirm-modal').hidden", 4000, "modal closed on Escape");
+
+    await press("Escape");
+    await page.waitFor("document.querySelector('#picker').hidden", 4000, "picker closed on Escape");
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click()");
+    await settle();
+  });
+
+  await scenario("persistent reset-filters button appears, disappears, and resets in one round-trip", async () => {
+    check(await page.eval("document.querySelector('#reset-filters').hidden"), "reset-filters not initially hidden");
+    await page.eval("document.querySelector('#f-fav').click()");
+    await page.waitFor("!document.querySelector('#reset-filters').hidden", 5000, "reset-filters shown after filter change");
+    await page.eval("document.querySelector('#reset-filters').click()");
+    await page.waitFor("document.querySelector('#reset-filters').hidden", 5000, "reset-filters hidden after click");
+    check(!await page.eval("document.querySelector('#f-fav').checked"), "fav filter was not cleared");
+  });
+
+  await scenario("native version badge button activates via Enter or Space", async () => {
+    await page.eval("document.querySelector('#header-version-badge').focus()");
+    check(await page.eval("document.activeElement.id === 'header-version-badge'"), "version badge not focused");
+    check(await page.eval("document.querySelector('#header-version-badge').tagName === 'BUTTON'"), "version badge is not button");
+    await press("Enter");
+    await page.waitFor("document.querySelector('.panel.active').id === 'tab-settings'", 8000, "settings panel active after Enter");
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click()");
+    await settle();
+  });
+
+  await scenario("touch swipe navigation in lightbox stage", async () => {
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 8000, "cards rendered");
+    await page.eval("document.querySelector('#grid .vg-window .card[data-idx=\"0\"] .thumb').click()");
+    await page.waitFor("!document.querySelector('#lightbox').hidden", 8000, "lightbox opens");
+    const title0 = await page.eval("document.querySelector('#lb-title').textContent");
+
+    // Touch swipe left steps forward
+    await page.eval(`(() => {
+      const stage = document.querySelector('.lb-stage');
+      const r = stage.getBoundingClientRect();
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      stage.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch' }));
+      stage.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x - 80, clientY: y, pointerType: 'touch' }));
+    })()`);
+    await page.waitFor(`document.querySelector('#lb-title').textContent !== ${JSON.stringify(title0)}`, 8000, "swipe left stepped");
+
+    // Mouse drag is ignored
+    const curTitle = await page.eval("document.querySelector('#lb-title').textContent");
+    await page.eval(`(() => {
+      const stage = document.querySelector('.lb-stage');
+      const r = stage.getBoundingClientRect();
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      stage.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'mouse' }));
+      stage.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x - 80, clientY: y, pointerType: 'mouse' }));
+    })()`);
+    check((await page.eval("document.querySelector('#lb-title').textContent")) === curTitle, "mouse drag stepped photo");
+
+    await press("Escape");
+    await page.waitFor("document.querySelector('#lightbox').hidden", 5000);
+    await settle();
+  });
+
+  await scenario("date presets compute parameters and animate scrubber", async () => {
+    await page.eval("document.querySelector('#scrub-presets .preset-btn[data-preset=\"year\"]').click()");
+    await page.waitFor("document.querySelector('#scrub-presets .preset-btn[data-preset=\"year\"]').classList.contains('active')", 5000, "year active");
+    await page.waitFor("!document.querySelector('#reset-filters').hidden", 5000, "reset-filters visible on preset");
+    await page.eval("document.querySelector('#reset-filters').click()");
+    await page.waitFor("document.querySelector('#reset-filters').hidden", 5000, "filters reset");
+    check(await page.eval("document.querySelector('#scrub-presets .preset-btn[data-preset=\"all\"]').classList.contains('active')"), "preset reset to all");
+  });
+
+  await scenario("roving focus for virtual grid has exactly one tab stop and moves DOM focus", async () => {
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 8000, "cards rendered");
+    const zeros = await page.eval("document.querySelectorAll('#grid .vg-window .card[tabindex=\"0\"]').length");
+    check(zeros === 1, "expected exactly 1 card with tabindex=0, got " + zeros);
+    const negButtons = await page.eval("document.querySelectorAll('#grid .vg-window .card[tabindex=\"-1\"] button:not([tabindex=\"-1\"])').length");
+    check(negButtons === 0, "found tabbable buttons in inactive cards: " + negButtons);
+    await press("ArrowRight");
+    await settle();
+    const focusedCard = await page.eval("document.activeElement.classList.contains('card')");
+    check(focusedCard, "ArrowRight did not move DOM focus to card");
+  });
+
+  await scenario("picker and help modals contain focus and restore to opener", async () => {
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card[tabindex=\"0\"]').length > 0", 8000, "card with tabindex 0 rendered");
+    await page.eval("document.querySelector('#grid .vg-window .card[tabindex=\"0\"]').focus()");
+    await press("?");
+    await page.waitFor("!document.querySelector('#help').hidden", 5000, "help modal open");
+    check(await page.eval("document.activeElement.id === 'help-close'"), "focus started on help-close");
+    for (let i = 0; i < 5; i++) await press("Tab");
+    check(await page.eval("document.querySelector('#help').contains(document.activeElement)"), "focus escaped help modal");
+    await press("Escape");
+    await page.waitFor("document.querySelector('#help').hidden", 5000, "help closed on Escape");
+    check(await page.eval("document.activeElement.classList.contains('card')"), "focus restored to card after closing help");
   });
 
   await scenario("the page raised no script errors", async () => {

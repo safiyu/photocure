@@ -43,7 +43,77 @@
     setTimeout(() => el.remove(), cls === "err" ? 6000 : 3200);
   }
 
-  // Accessible confirmation dialog. All text goes in through textContent.
+  // Shared focus trap helper (WCAG 2.1 AA focus containment).
+  const activeTraps = [];
+
+  function trapFocus(container, onEscape) {
+    const selector = 'button:not([disabled]):not([hidden]), [href], input:not([disabled]):not([hidden]), select:not([disabled]):not([hidden]), textarea:not([disabled]):not([hidden]), [tabindex]:not([tabindex="-1"]):not([hidden])';
+    const getFocusable = () => Array.from(container.querySelectorAll(selector)).filter((el) => {
+      if (el.hidden || el.disabled || el.closest('[hidden]')) return false;
+      if (el.style.display === "none" || el.style.visibility === "hidden") return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 || r.height > 0 || el.getClientRects().length > 0;
+    });
+
+    const onKey = (e) => {
+      if (activeTraps[activeTraps.length - 1] !== trapRecord) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (onEscape) onEscape(e);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = getFocusable();
+      if (!items.length) {
+        e.preventDefault();
+        return;
+      }
+      const idx = items.indexOf(document.activeElement);
+      if (e.shiftKey) {
+        if (idx <= 0) {
+          items[items.length - 1].focus();
+          e.preventDefault();
+        }
+      } else {
+        if (idx === -1 || idx >= items.length - 1) {
+          items[0].focus();
+          e.preventDefault();
+        }
+      }
+    };
+
+    let isTrapping = false;
+    const onDocFocusIn = (e) => {
+      if (isTrapping) return;
+      if (activeTraps[activeTraps.length - 1] !== trapRecord) return;
+      if (!container.contains(e.target)) {
+        const items = getFocusable();
+        if (items.length) {
+          isTrapping = true;
+          try {
+            items[0].focus();
+          } finally {
+            isTrapping = false;
+          }
+        }
+      }
+    };
+
+    const trapRecord = { container, onEscape, getFocusable };
+    activeTraps.push(trapRecord);
+
+    container.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onDocFocusIn);
+    return () => {
+      container.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onDocFocusIn);
+      const idx = activeTraps.indexOf(trapRecord);
+      if (idx !== -1) activeTraps.splice(idx, 1);
+    };
+  }
+
+  // Accessible confirmation and input dialog. All text goes in through textContent.
   function showConfirmDialog(o) {
     o = o || {};
     const modal = $("#confirm-modal"), ok = $("#confirm-modal-ok"), cancel = $("#confirm-modal-cancel");
@@ -58,37 +128,79 @@
     det.replaceChildren();
     if (o.detail instanceof Node) det.appendChild(o.detail);
     else if (o.detail) det.textContent = String(o.detail);
+
+    const inputWrap = $("#confirm-modal-input-wrap");
+    const inputLabel = $("#confirm-modal-input-label");
+    const inputEl = $("#confirm-modal-input");
+    const inputErr = $("#confirm-modal-input-error");
+    const hasInput = !!o.input;
+
+    if (inputWrap) {
+      inputWrap.hidden = !hasInput;
+      if (hasInput) {
+        inputLabel.textContent = o.input.label || "";
+        inputLabel.hidden = !o.input.label;
+        inputEl.value = o.input.value || "";
+        inputEl.placeholder = o.input.placeholder || "";
+        inputErr.hidden = true;
+        inputErr.textContent = "";
+      }
+    }
+
     ok.textContent = o.confirmText || "OK";
     cancel.textContent = o.cancelText || "Cancel";
     ok.className = "btn " + variant;
     const previous = document.activeElement;
     modal.hidden = false;
-    (variant === "primary" ? ok : cancel).focus();
+
     return new Promise((resolve) => {
+      let releaseTrap = null;
       const finish = (value) => {
+        if (releaseTrap) {
+          releaseTrap();
+          releaseTrap = null;
+        }
         modal.hidden = true;
-        modal.removeEventListener("keydown", onKey);
         ok.onclick = cancel.onclick = backdrop.onclick = null;
+        if (inputEl) inputEl.onkeydown = null;
         if (previous && previous.focus) previous.focus();
         resolve(value);
       };
-      const onKey = (e) => {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          e.stopPropagation();  // otherwise the global handler sees a closed dialog and closes the viewer too
-          finish(false);
-          return;
+
+      const trySubmit = () => {
+        if (hasInput) {
+          const val = inputEl.value;
+          if (typeof o.validate === "function") {
+            const err = o.validate(val);
+            if (err) {
+              inputErr.textContent = err;
+              inputErr.hidden = false;
+              inputEl.focus();
+              return;
+            }
+          }
+          finish(val);
+        } else {
+          finish(true);
         }
-        if (e.key !== "Tab") return;
-        const ring = [cancel, ok];
-        const i = ring.indexOf(document.activeElement);
-        ring[(i + (e.shiftKey ? -1 : 1) + ring.length) % ring.length].focus();
-        e.preventDefault();
       };
-      modal.addEventListener("keydown", onKey);
-      ok.onclick = () => finish(true);
-      cancel.onclick = () => finish(false);
-      backdrop.onclick = () => finish(false);
+
+      if (hasInput && inputEl) {
+        inputEl.onkeydown = (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            trySubmit();
+          }
+        };
+      }
+
+      releaseTrap = trapFocus(modal, () => finish(hasInput ? null : false));
+      ok.onclick = trySubmit;
+      cancel.onclick = () => finish(hasInput ? null : false);
+      backdrop.onclick = () => finish(hasInput ? null : false);
+
+      if (hasInput && inputEl) inputEl.focus();
+      else (variant === "primary" ? ok : cancel).focus();
     });
   }
 
@@ -275,10 +387,10 @@
     const lockTitle = (it.locked ? "Unlock" : "Lock") + " (l)";
     const thumb = el("div", { class: "thumb" }, img,
       el("button", { class: "pick", "data-pick": id, "aria-label": "Select " + (it.filename || ""),
-        "aria-pressed": String(picked), html: icon("check") }),
+        "aria-pressed": String(picked), tabindex: -1, html: icon("check") }),
       el("div", { class: "hover-actions" },
-        el("button", { "data-lock": id, title: lockTitle, "aria-label": it.locked ? "Unlock" : "Lock", html: icon("lock", "sm") }),
-        el("button", { "data-similar": id, title: "Find similar photos", "aria-label": "Find similar photos", html: icon("copy", "sm") })),
+        el("button", { "data-lock": id, title: lockTitle, "aria-label": it.locked ? "Unlock" : "Lock", tabindex: -1, html: icon("lock", "sm") }),
+        el("button", { "data-similar": id, title: "Find similar photos", "aria-label": "Find similar photos", tabindex: -1, html: icon("copy", "sm") })),
       el("div", { class: "flags" }, flagList(it).slice(0, 3).map((f) => el("span", { class: "badge " + f.cls, text: f.text }))));
     const showReason = it.uncertain_reason && !it.manual_bucket;
     const cap = el("figcaption", { class: "caption" },
@@ -287,12 +399,12 @@
       el("div", { class: "meta", text: meta.join(", ") }),
       el("div", { class: "catline", style: catStyle(rawCat) },
         el("button", { class: "catpick", type: "button", "data-catpick": id, title: "Change category",
-          "aria-haspopup": "listbox", "aria-label": `Category ${catLabel(rawCat)}, change` },
+          "aria-haspopup": "listbox", "aria-label": `Category ${catLabel(rawCat)}, change`, tabindex: -1 },
         el("i"), el("span", { class: "t", text: catLabel(rawCat) })),
         it.manual_bucket ? [el("span", { class: "tag", text: "edited" }),
           el("button", { class: "x", "data-clear": id, title: "Back to the AI choice",
-            "aria-label": "Back to the AI choice", html: icon("x", "sm") })] : null));
-    return el("figure", { class: cls, "data-id": id, tabindex: 0 }, thumb, cap);
+            "aria-label": "Back to the AI choice", tabindex: -1, html: icon("x", "sm") })] : null));
+    return el("figure", { class: cls, "data-id": id, tabindex: -1, role: "gridcell" }, thumb, cap);
   }
 
   function emptyHTML(e) {
@@ -346,6 +458,7 @@
     };
     Object.defineProperty(g, "total", { get: () => g.vg.total });
     g.reset = () => g.vg.reset();
+    g.update = () => { if (g.vg) g.vg.update(); };
     g.loadMore = async () => {};
     g.cards = () => $$(".card", host);
     g.applySel = () => g.vg.applyCursor();
@@ -475,6 +588,123 @@
     $("#scrub-to-label").textContent = scrubDate(num($("#scrub-to").value));
   }
 
+  let datePreset = "all";
+
+  function hasActiveFilters() {
+    const val = (id) => { const e = $("#" + id); return e ? e.value : ""; };
+    const chk = (id) => { const e = $("#" + id); return !!(e && e.checked); };
+    if (val("q")) return true;
+    if (val("catfilter")) return true;
+    if (chk("manualonly")) return true;
+    if (chk("neardup")) return true;
+    if (val("f-camera")) return true;
+    if (val("f-rating")) return true;
+    if (val("f-country")) return true;
+    if (chk("f-fav")) return true;
+    const box = $("#scrubber");
+    if (box && !box.hidden && scrub.days > 0) {
+      const a = num($("#scrub-from").value), b = num($("#scrub-to").value);
+      if (a > 0 || b < scrub.days) return true;
+    }
+    if (datePreset !== "all" && datePreset !== "custom") return true;
+    return false;
+  }
+
+  function updateResetFiltersButton() {
+    const btn = $("#reset-filters");
+    if (!btn) return;
+    btn.hidden = !hasActiveFilters();
+  }
+
+  function animateThumbs(targetFrom, targetTo, onDone) {
+    const fromEl = $("#scrub-from"), toEl = $("#scrub-to");
+    if (!fromEl || !toEl) { if (onDone) onDone(); return; }
+    const prefersReduced = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (prefersReduced) {
+      fromEl.value = targetFrom;
+      toEl.value = targetTo;
+      scrubLabels();
+      if (onDone) onDone();
+      return;
+    }
+    const startFrom = num(fromEl.value), startTo = num(toEl.value);
+    const startTime = performance.now();
+    const duration = 200;
+    function step(t) {
+      const p = Math.min(1, (t - startTime) / duration);
+      const ease = 1 - (1 - p) * (1 - p);
+      fromEl.value = Math.round(startFrom + (targetFrom - startFrom) * ease);
+      toEl.value = Math.round(startTo + (targetTo - startTo) * ease);
+      scrubLabels();
+      if (p < 1) {
+        requestAnimationFrame(step);
+      } else {
+        fromEl.value = targetFrom;
+        toEl.value = targetTo;
+        scrubLabels();
+        if (onDone) onDone();
+      }
+    }
+    requestAnimationFrame(step);
+  }
+
+  function setDatePreset(p, reQuery = true) {
+    datePreset = p;
+    $$("#scrub-presets .preset-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.preset === p);
+    });
+    if (p === "custom") {
+      updateResetFiltersButton();
+      return;
+    }
+    if (scrub.days <= 0) {
+      updateResetFiltersButton();
+      return;
+    }
+    const now = new Date();
+    let targetFromVal = 0;
+    let targetToVal = scrub.days;
+
+    if (p === "all") {
+      targetFromVal = 0;
+      targetToVal = scrub.days;
+    } else if (p === "year") {
+      const yearStart = new Date(now.getFullYear(), 0, 1).getTime();
+      const targetFromTime = Math.max(scrub.lo, Math.min(scrub.lo + scrub.days * DAY, yearStart));
+      targetFromVal = Math.round((targetFromTime - scrub.lo) / DAY);
+      targetToVal = scrub.days;
+    } else if (p === "90d") {
+      const t90 = now.getTime() - 90 * DAY;
+      const targetFromTime = Math.max(scrub.lo, Math.min(scrub.lo + scrub.days * DAY, t90));
+      targetFromVal = Math.round((targetFromTime - scrub.lo) / DAY);
+      targetToVal = scrub.days;
+    } else if (p === "30d") {
+      const t30 = now.getTime() - 30 * DAY;
+      const targetFromTime = Math.max(scrub.lo, Math.min(scrub.lo + scrub.days * DAY, t30));
+      targetFromVal = Math.round((targetFromTime - scrub.lo) / DAY);
+      targetToVal = scrub.days;
+    }
+
+    animateThumbs(targetFromVal, targetToVal, () => {
+      updateResetFiltersButton();
+      if (reQuery) grids.cat.reset();
+    });
+  }
+
+  function resetAllFilters() {
+    $("#q").value = "";
+    $("#catfilter").value = "";
+    $("#manualonly").checked = false;
+    $("#neardup").checked = false;
+    ["f-camera", "f-rating", "f-country"].forEach((id) => { const el = $("#" + id); if (el) el.value = ""; });
+    $("#f-fav").checked = false;
+    resetScrubber();
+    setDatePreset("all", false);
+    updateResetFiltersButton();
+    if (state.overview) renderComp(state.overview);
+    grids.cat.reset();
+  }
+
   function scrubParams(p) {
     const box = $("#scrubber");
     if (!box || box.hidden) return;
@@ -497,7 +727,7 @@
     $("#f-country").hidden = f.countries.length === 0;
     $("#f-camera").hidden = f.cameras.length === 0;
     const box = $("#scrubber");
-    if (!f.taken_min || !f.taken_max) { box.hidden = true; return; }
+    if (!f.taken_min || !f.taken_max) { box.hidden = true; updateResetFiltersButton(); return; }
     const lo = Date.parse(f.taken_min + "T00:00:00Z"), hi = Date.parse(f.taken_max + "T00:00:00Z");
     const days = Math.max(0, Math.round((hi - lo) / DAY));
     const changed = lo !== scrub.lo || days !== scrub.days;
@@ -505,8 +735,12 @@
     scrub.days = days;
     box.hidden = days === 0;
     $("#scrub-from").max = $("#scrub-to").max = String(days);
-    if (changed) resetScrubber();
+    if (changed) {
+      resetScrubber();
+      setDatePreset("all", false);
+    }
     if (!box.hidden) scrubLabels();
+    updateResetFiltersButton();
   }
 
   async function loadFacets() {
@@ -515,11 +749,47 @@
 
   function bindFilters() {
     let t = 0;
-    const again = () => { clearTimeout(t); t = setTimeout(() => grids.cat.reset(), 200); };
+    const again = () => {
+      clearTimeout(t);
+      updateResetFiltersButton();
+      t = setTimeout(() => grids.cat.reset(), 200);
+    };
     ["f-camera", "f-rating", "f-country", "f-fav"].forEach((id) => $("#" + id).addEventListener("change", again));
     const from = $("#scrub-from"), to = $("#scrub-to");
-    from.addEventListener("input", () => { if (num(from.value) > num(to.value)) to.value = from.value; scrubLabels(); again(); });
-    to.addEventListener("input", () => { if (num(to.value) < num(from.value)) from.value = to.value; scrubLabels(); again(); });
+    from.addEventListener("input", () => {
+      if (num(from.value) > num(to.value)) to.value = from.value;
+      scrubLabels();
+      const a = num(from.value), b = num(to.value);
+      datePreset = (a === 0 && b === scrub.days) ? "all" : "custom";
+      $$("#scrub-presets .preset-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.preset === datePreset);
+      });
+      again();
+    });
+    to.addEventListener("input", () => {
+      if (num(to.value) < num(from.value)) from.value = to.value;
+      scrubLabels();
+      const a = num(from.value), b = num(to.value);
+      datePreset = (a === 0 && b === scrub.days) ? "all" : "custom";
+      $$("#scrub-presets .preset-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.preset === datePreset);
+      });
+      again();
+    });
+    $$("#scrub-presets .preset-btn").forEach((btn) => {
+      btn.onclick = () => {
+        const p = btn.dataset.preset;
+        if (p === "custom") {
+          datePreset = "custom";
+          $$("#scrub-presets .preset-btn").forEach((b) => b.classList.toggle("active", b.dataset.preset === "custom"));
+          updateResetFiltersButton();
+        } else {
+          setDatePreset(p, true);
+        }
+      };
+    });
+    const rf = $("#reset-filters");
+    if (rf) rf.onclick = resetAllFilters;
   }
 
   // ------------------------------------------------------------- selection
@@ -658,7 +928,8 @@
       window.removeEventListener("resize", onAway);
     };
     catPicker = { node, anchor, off };
-    (items.find((b) => b.classList.contains("current")) || items[0]).focus();
+    const toFocus = items.find((b) => b.classList.contains("current")) || items[0];
+    if (toFocus) toFocus.focus({ preventScroll: true });
   }
 
   // ----------------------------------------------------------- card actions
@@ -703,6 +974,7 @@
 
   function setCategoryFilter(cat) {
     $("#catfilter").value = cat || "";
+    updateResetFiltersButton();
     showTab("categories", true);
     grids.cat.reset();
   }
@@ -729,12 +1001,7 @@
           if (g) await g.loadMore();
         } else if (t.dataset.goto) { ev.preventDefault(); showTab(t.dataset.goto); }
         else if (t.hasAttribute("data-clearfilters")) {
-          $("#q").value = ""; $("#catfilter").value = "";
-          $("#manualonly").checked = false; $("#neardup").checked = false;
-          ["f-camera", "f-rating", "f-country"].forEach((id) => { $("#" + id).value = ""; });
-          $("#f-fav").checked = false;
-          resetScrubber();
-          grids.cat.reset();
+          resetAllFilters();
         } else if (t.hasAttribute("data-copytext")) {
           ev.preventDefault();
           await copyText(t.dataset.copytext, t);
@@ -749,6 +1016,14 @@
       } catch (e) { toast(e.message, "err"); }
     });
     document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        const goto = ev.target.closest && ev.target.closest("[data-goto]");
+        if (goto && goto.dataset.goto) {
+          ev.preventDefault();
+          showTab(goto.dataset.goto);
+          return;
+        }
+      }
       if ((ev.key === "Enter" || ev.key === " ") && ev.target.classList && ev.target.classList.contains("card")) {
         ev.preventDefault();
         openLightbox(ev.target);
@@ -783,29 +1058,50 @@
     lb.ids = [];
     lb.i = idx;
     g.vg.setCursor(id);
-    lbShow(null);
+    const card = g.vg.host.querySelector(`.card[data-id="${id}"]`);
+    lbShow(card || document.activeElement);
   }
 
   function lbShow(opener) {
     lb.open = true;
-    lb.opener = opener;
+    lb.opener = opener || document.activeElement;
     $("#lightbox").hidden = false;
     document.body.style.overflow = "hidden";
     lbRender();
+    if (lb.releaseTrap) lb.releaseTrap();
+    lb.releaseTrap = trapFocus($("#lightbox"), closeLightbox);
     $("#lb-close").focus();
   }
 
-  function closeLightbox() {
+  async function closeLightbox() {
     if (!lb.open) return;
     lb.open = false;
+    if (lb.releaseTrap) {
+      lb.releaseTrap();
+      lb.releaseTrap = null;
+    }
     $("#lightbox").hidden = true;
     document.body.style.overflow = "";
     if (lb.grid) {  // leave the grid on the photo that was last viewed
       const id = lbIdAt(lb.i);
       if (id != null) lb.grid.vg.setCursor(id);
-      lb.grid.vg.scrollToIndex(lb.i);
+      await lb.grid.vg.scrollToIndex(lb.i);
+      const card = id != null
+        ? lb.grid.vg.host.querySelector(`.card[data-id="${id}"]`)
+        : lb.grid.vg.cards.get(lb.i);
+      if (card && document.contains(card)) {
+        card.focus({ preventScroll: true });
+      } else if (lb.opener && document.contains(lb.opener)) {
+        lb.opener.focus({ preventScroll: true });
+      } else {
+        const main = $("#main");
+        if (main && main.focus) main.focus();
+      }
     } else if (lb.opener && document.contains(lb.opener)) {
       lb.opener.focus({ preventScroll: true });
+    } else {
+      const main = $("#main");
+      if (main && main.focus) main.focus();
     }
   }
 
@@ -889,7 +1185,43 @@
     $("#lb-close").onclick = closeLightbox;
     $("#lb-prev").onclick = () => lbStep(-1);
     $("#lb-next").onclick = () => lbStep(1);
+
+    const stage = $(".lb-stage");
+    let touchStartX = 0, touchStartY = 0, touchValid = false;
+    let swipedRecently = false;
+    const SWIPE_THRESHOLD_PX = 50;  // (tune) starting default for swipe detection
+
+    if (stage) {
+      stage.addEventListener("pointerdown", (e) => {
+        if (e.pointerType !== "touch") return;
+        if (e.target.closest("button, .lb-rate")) return;
+        touchStartX = e.clientX;
+        touchStartY = e.clientY;
+        touchValid = true;
+      });
+
+      stage.addEventListener("pointerup", (e) => {
+        if (!touchValid || e.pointerType !== "touch") return;
+        touchValid = false;
+        const dx = e.clientX - touchStartX;
+        const dy = e.clientY - touchStartY;
+        const absDx = Math.abs(dx);
+        const absDy = Math.abs(dy);
+        if (absDx >= SWIPE_THRESHOLD_PX && absDx >= 2 * absDy) {
+          swipedRecently = true;
+          setTimeout(() => { swipedRecently = false; }, 120);
+          if (dx < 0) lbStep(1);
+          else lbStep(-1);
+        }
+      });
+
+      stage.addEventListener("pointercancel", (e) => {
+        if (e.pointerType === "touch") touchValid = false;
+      });
+    }
+
     $("#lightbox").addEventListener("click", (e) => {
+      if (swipedRecently) return;
       if (e.target.id === "lightbox" || e.target.classList.contains("lb-stage")) closeLightbox();
     });
     $("#lb-cat").onchange = async (e) => {
@@ -965,18 +1297,32 @@
   }
 
   function openPicker(opts) {
+    pk.opener = document.activeElement;
     pk.onPick = opts.onPick;
     pk.mode = opts.mode || "photos";
     $("#picker-title").textContent = opts.title || "Choose a folder";
     $("#picker-ok").textContent = opts.okLabel || "Use this folder";
     $("#picker").hidden = false;
     document.body.style.overflow = "hidden";
-    pickerLoad(opts.initial || null).then(() => $("#picker-ok").focus());
+    if (pk.releaseTrap) pk.releaseTrap();
+    pk.releaseTrap = trapFocus($("#picker"), closePicker);
+    pickerLoad(opts.initial || null).then(() => {
+      if (!$("#picker").hidden && (!document.activeElement || $("#picker").contains(document.activeElement))) {
+        $("#picker-ok").focus();
+      }
+    });
   }
 
   function closePicker() {
+    if (pk.releaseTrap) {
+      pk.releaseTrap();
+      pk.releaseTrap = null;
+    }
     $("#picker").hidden = true;
     document.body.style.overflow = "";
+    if (pk.opener && document.contains(pk.opener)) {
+      pk.opener.focus({ preventScroll: true });
+    }
   }
 
   function bindPicker() {
@@ -993,10 +1339,27 @@
     });
     $("#picker-new").onclick = async () => {
       if (!pk.data) return;
-      const name = prompt("Name for the new folder:");
-      if (!name) return;
+      const name = await showConfirmDialog({
+        title: "New folder",
+        confirmText: "Create",
+        cancelText: "Cancel",
+        input: {
+          label: "Folder name",
+          placeholder: "e.g. Vacation 2026",
+          value: "",
+        },
+        validate(val) {
+          const v = (val || "").trim();
+          if (!v) return "Folder name cannot be empty.";
+          if (v === "." || v === "..") return "Folder name not allowed.";
+          if (/[/\\:*?"<>|\0]/.test(v)) return "Folder name cannot contain slashes or special characters (/ \\ : * ? \" < > |).";
+          if (v.length > 200) return "Folder name must be 200 characters or fewer.";
+          return null;
+        },
+      });
+      if (name == null) return;
       try {
-        const r = await post("/api/browse/mkdir", { parent: pk.data.path, name });
+        const r = await post("/api/browse/mkdir", { parent: pk.data.path, name: name.trim() });
         await pickerLoad(r.path);
       } catch (e) { toast(e.message, "err"); }
     };
@@ -1042,6 +1405,29 @@
   const open = (sel) => { const e = $(sel); return !!(e && !e.hidden); };
   const anyModal = () => MODALS.some(open);
 
+  let helpOpener = null;
+  let helpReleaseTrap = null;
+
+  function openHelp() {
+    helpOpener = document.activeElement;
+    $("#help").hidden = false;
+    if (helpReleaseTrap) helpReleaseTrap();
+    helpReleaseTrap = trapFocus($("#help"), closeHelp);
+    const btn = $("#help-close");
+    if (btn) btn.focus();
+  }
+
+  function closeHelp() {
+    if (helpReleaseTrap) {
+      helpReleaseTrap();
+      helpReleaseTrap = null;
+    }
+    $("#help").hidden = true;
+    if (helpOpener && document.contains(helpOpener)) {
+      helpOpener.focus({ preventScroll: true });
+    }
+  }
+
   // Rating, reject, favourite and lock for one photo. In the triage tabs 1-9 mean categories instead.
   async function shortcut(k, id, triage) {
     if (id == null) return false;
@@ -1061,7 +1447,7 @@
 
     if (ev.key === "Escape") {
       if (open("#picker")) closePicker();
-      else if (open("#help")) $("#help").hidden = true;
+      else if (open("#help")) closeHelp();
       else if (lb.open) closeLightbox();
       else if (!$("#similar-panel").hidden) $("#similar-panel").hidden = true;
       else if (state.picks.size) clearPicks();
@@ -1069,7 +1455,7 @@
       return;
     }
     if (typing || anyModal()) return;
-    if (ev.key === "?") { $("#help").hidden = false; ev.preventDefault(); return; }
+    if (ev.key === "?") { openHelp(); ev.preventDefault(); return; }
     const k = ev.key.toLowerCase();
 
     try {
@@ -1086,8 +1472,19 @@
       const triage = isTriage(g);
       if (triage) state.triageGrid = g;
       const cols = Math.max(1, g.vg.cols);
-      const step = { arrowright: 1, arrowleft: -1, arrowdown: cols, arrowup: -cols }[k]
-        ?? (triage ? { j: 1, k: -1 }[k] : undefined);
+      const rowsInView = Math.max(1, Math.floor(window.innerHeight / (g.vg.rowH || 200)));
+      const pageStep = cols * rowsInView;
+      const curIdx = g.vg.indexOfId(g.vg.cursorId);
+      let step;
+      if (k === "arrowright") step = 1;
+      else if (k === "arrowleft") step = -1;
+      else if (k === "arrowdown") step = cols;
+      else if (k === "arrowup") step = -cols;
+      else if (k === "pageup") step = -pageStep;
+      else if (k === "pagedown") step = pageStep;
+      else if (k === "home") step = -Math.max(0, curIdx);
+      else if (k === "end") step = (g.vg.total || 0) - 1 - curIdx;
+      else if (triage && (k === "j" || k === "k")) step = k === "j" ? 1 : -1;
       if (step !== undefined) {  // unrendered photos are scrolled into view first
         await g.vg.moveCursor(step);
         ev.preventDefault();
@@ -1323,10 +1720,23 @@
     });
     $$("[data-rename]", listEl).forEach((b) => {
       b.onclick = async () => {
-        const name = prompt("New name:");
-        if (name == null || !name.trim()) return;
+        const row = b.closest(".burstrow");
+        const curName = (row ? ($(".name", row) || {}).textContent : "") || "";
+        const name = await showConfirmDialog({
+          title: "Rename event",
+          confirmText: "Rename",
+          cancelText: "Cancel",
+          input: {
+            label: "Event name",
+            value: curName,
+            placeholder: "e.g. Summer Holiday",
+          },
+        });
+        if (name == null) return;
+        const trimmed = name.trim();
+        if (!trimmed || trimmed === curName) return;
         try {
-          await post(`/api/events/${num(b.dataset.rename)}/rename`, { name });
+          await post(`/api/events/${num(b.dataset.rename)}/rename`, { name: trimmed });
           await loadEvents();
         } catch (e) { toast(e.message, "err"); }
       };
@@ -1520,12 +1930,20 @@
     updateLearn();
   }
 
+  let pollTimer = null;
+  let pollSeq = 0;
   async function pollProgress() {
+    if (pollTimer) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    const seq = ++pollSeq;
     let delay = 3000;
     try {
       const p = await api("/api/progress");
+      if (seq !== pollSeq) return;
       renderProgress(p);
-      applyBusy(!!p.busy || p.active);
+      applyBusy(state.taskRunning || !!p.busy || !!p.active);
       if (p.active || p.busy) delay = 600;
       if (lastActive && !p.active) {
         lastActive = false;
@@ -1536,7 +1954,9 @@
       }
       if (p.active) lastActive = true;
     } catch (e) { /* server restarting; retry */ }
-    setTimeout(pollProgress, delay);
+    if (seq === pollSeq) {
+      pollTimer = setTimeout(pollProgress, delay);
+    }
   }
 
   // ------------------------------------------------------------ backend banner
@@ -1906,7 +2326,10 @@
     const gridTab = { categories: "cat", junk: "junk", uncertain: "uncertain", highlights: "highlights" }[name];
     if (gridTab) {
       const g = grids[gridTab];
-      if (g.total == null || g.stale) { g.stale = false; g.reset(); }
+      if (g) {
+        if (g.total == null || g.stale) { g.stale = false; g.reset(); }
+        else { g.update(); }
+      }
     }
     if (name === "bursts") renderBursts().catch((e) => toast(e.message, "err"));
     if (name === "events") loadEvents().catch((e) => toast(e.message, "err"));
@@ -1935,6 +2358,7 @@
       return null;
     } finally {
       state.taskRunning = false;
+      pollProgress();
     }
   }
 
@@ -2177,9 +2601,9 @@
     });
     $("#theme-toggle").onclick = () =>
       applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
-    $("#btn-help").onclick = () => { $("#help").hidden = false; };
-    $("#help-close").onclick = () => { $("#help").hidden = true; };
-    $("#help").addEventListener("click", (e) => { if (e.target.id === "help") $("#help").hidden = true; });
+    $("#btn-help").onclick = openHelp;
+    $("#help-close").onclick = closeHelp;
+    $("#help").addEventListener("click", (e) => { if (e.target.id === "help") closeHelp(); });
 
     const dens = $("#density");
     let saved = null;
@@ -2194,9 +2618,17 @@
     setDens();
 
     ["catfilter", "manualonly", "neardup"].forEach((id) =>
-      $("#" + id).addEventListener("change", () => { grids.cat.reset(); if (state.overview) renderComp(state.overview); }));
+      $("#" + id).addEventListener("change", () => {
+        updateResetFiltersButton();
+        grids.cat.reset();
+        if (state.overview) renderComp(state.overview);
+      }));
     let qt = null;
-    $("#q").addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => grids.cat.reset(), 250); });
+    $("#q").addEventListener("input", () => {
+      clearTimeout(qt);
+      updateResetFiltersButton();
+      qt = setTimeout(() => grids.cat.reset(), 250);
+    });
     $("#junkfilter").addEventListener("change", () => grids.junk.reset());
     $("#minaes").addEventListener("change", () => grids.highlights.reset());
     $("#similar-close").onclick = () => { $("#similar-panel").hidden = true; };

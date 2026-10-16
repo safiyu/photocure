@@ -9,6 +9,7 @@ export function findChrome() {
     process.env.PCUR_CHROME,
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser",
+    "/opt/brave.com/brave/brave", "/opt/brave.com/brave/brave-browser", "/usr/bin/brave-browser",
   ].filter(Boolean);
   return candidates.find((p) => existsSync(p)) || null;
 }
@@ -34,13 +35,13 @@ export class Browser {
       });
       proc.on("exit", (c) => reject(new Error("Chrome exited early (" + c + ")")));
     });
-    const b = new Browser(proc, dir, wsUrl);
+    const b = new Browser(proc, dir, wsUrl, width, height);
     await b.connect();
     return b;
   }
 
-  constructor(proc, dir, wsUrl) {
-    Object.assign(this, { proc, dir, wsUrl, nextId: 1, pending: new Map(), listeners: [] });
+  constructor(proc, dir, wsUrl, width, height) {
+    Object.assign(this, { proc, dir, wsUrl, width, height, nextId: 1, pending: new Map(), listeners: [] });
   }
 
   async connect() {
@@ -72,6 +73,7 @@ export class Browser {
     const page = new Page(this, sessionId, targetId);
     await page.send("Page.enable");
     await page.send("Runtime.enable");
+    if (this.width && this.height) await page.viewport(this.width, this.height);
     return page;
   }
 

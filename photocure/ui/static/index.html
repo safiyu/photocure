@@ -97,7 +97,7 @@
           <h1 id="page-title">Import</h1>
           <div class="sub" id="page-sub"></div>
         </div>
-        <span id="header-version-badge" class="version-pill" role="button" tabindex="0" title="Click to view About Photocure" data-goto="settings"></span>
+        <button id="header-version-badge" class="version-pill" type="button" title="Click to view About Photocure" data-goto="settings"></button>
         <div id="topbar-progress" class="pill" hidden role="status">
           <span class="spinner" id="topbar-spinner"></span>
           <span id="topbar-status-icon" hidden></span>
@@ -211,11 +211,19 @@
             </select>
             <select id="f-country" aria-label="Country" hidden><option value="">All countries</option></select>
             <label class="toggle"><input type="checkbox" id="f-fav">Favourites</label>
+            <button id="reset-filters" class="btn sm" type="button" hidden>Reset filters</button>
             <span class="grow"></span>
             <label class="density">Size <input type="range" id="density" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="rowcount" class="rowcount"></span>
           </div>
           <div class="scrubber" id="scrubber" hidden>
+            <div class="scrub-presets" id="scrub-presets" role="group" aria-label="Date presets">
+              <button type="button" class="preset-btn active" data-preset="all">All</button>
+              <button type="button" class="preset-btn" data-preset="year">This year</button>
+              <button type="button" class="preset-btn" data-preset="90d">Last 90 days</button>
+              <button type="button" class="preset-btn" data-preset="30d">Last 30 days</button>
+              <button type="button" class="preset-btn" data-preset="custom">Custom</button>
+            </div>
             <label>From <span id="scrub-from-label"></span>
               <input type="range" id="scrub-from" min="0" max="0" value="0" aria-label="Earliest date shown"></label>
             <label>To <span id="scrub-to-label"></span>
@@ -577,6 +585,11 @@
       <h2 id="confirm-modal-title"></h2>
       <p id="confirm-modal-message"></p>
       <div id="confirm-modal-detail" class="confirm-detail"></div>
+      <div id="confirm-modal-input-wrap" class="confirm-input-wrap" hidden>
+        <label id="confirm-modal-input-label" for="confirm-modal-input" class="confirm-input-label"></label>
+        <input id="confirm-modal-input" type="text" autocomplete="off" class="confirm-input">
+        <p id="confirm-modal-input-error" class="field-error" role="alert" hidden></p>
+      </div>
       <div class="confirm-buttons">
         <button type="button" id="confirm-modal-cancel" class="btn"></button>
         <button type="button" id="confirm-modal-ok" class="btn"></button>
