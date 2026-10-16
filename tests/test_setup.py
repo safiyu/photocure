@@ -158,7 +158,6 @@ def cli_env(monkeypatch, tmp_path):
     monkeypatch.setattr(sc, "run_step", lambda step, runner=None: ran.append(step.title) or True)
     monkeypatch.setattr(sc, "verify_model", lambda *a, **k: {"ok": True, "device": "mps", "model": "ViT-B-16", "seconds": 1.0})
     monkeypatch.setattr(sc, "prefetch_faces", lambda *a, **k: True)
-    monkeypatch.setattr(sc, "open_browser_when_ready", lambda *a, **k: served.setdefault("opened", a))
     monkeypatch.setattr(cli_mod, "serve", lambda **kw: served.setdefault("serve", kw))
     return types.SimpleNamespace(ran=ran, served=served, db=tmp_path / "x.db")
 
@@ -169,7 +168,7 @@ def test_setup_installs_verifies_and_opens_the_ui(cli_env):
     assert len(cli_env.ran) == 3
     assert "Ready." in r.output and "mps" in r.output
     assert cli_env.served["serve"]["host"] == "127.0.0.1"
-    assert cli_env.served["opened"][0] == "127.0.0.1"
+    assert cli_env.served["serve"]["open_browser"] is True  # serve opens the browser with the one-time code
 
 
 def test_setup_dry_run_installs_nothing(cli_env):

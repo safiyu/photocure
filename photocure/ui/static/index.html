@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Photocure</title>
-  <meta name="pcur-token" content="__PCUR_TOKEN__">
   <script>
     (function () {
       var t = null;
@@ -382,6 +381,19 @@
           </div>
 
           <div class="sect">
+            <h2>File name collisions</h2>
+            <p class="lede">What to do when a file with the same name is already in the destination. Photocure never overwrites a file.</p>
+            <div class="field">
+              <label for="set-collision">When a name is taken</label>
+              <select id="set-collision">
+                <option value="sequence">Add a number: photo (1).jpg</option>
+                <option value="date_suffix">Add the date taken: photo_20240501.jpg</option>
+                <option value="skip">Leave the file where it is</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="sect">
             <h2>Workers</h2>
             <p class="lede">More workers can speed things up but use more memory and disk bandwidth. Leave a box empty to let the app decide.</p>
             <div class="form-grid workers">
@@ -410,6 +422,12 @@
             <button id="btn-save-settings" class="btn primary" type="button">Save settings</button>
             <button id="btn-reset-settings" class="btn" type="button">Back to saved</button>
             <span id="settings-msg" class="help" role="status"></span>
+          </div>
+
+          <div class="sect" style="margin-top:28px">
+            <h2>Restart server</h2>
+            <p class="lede">Restart Photocure and reload this page. A restart is refused while files are being moved or restored.</p>
+            <div class="btn-row"><button id="btn-restart" class="btn" type="button">Restart Photocure</button></div>
           </div>
 
           <div class="sect danger" style="margin-top:28px">
@@ -521,6 +539,42 @@
           <tr><td><kbd>?</kbd></td><td>Show this list</td></tr>
         </table>
       </div>
+    </div>
+  </div>
+
+  <div id="banners" class="banners" role="region" aria-label="Notices"></div>
+
+  <div id="confirm-modal" class="confirm-modal" role="alertdialog" aria-modal="true"
+       aria-labelledby="confirm-modal-title" aria-describedby="confirm-modal-message" hidden>
+    <div class="confirm-backdrop"></div>
+    <div class="confirm-content">
+      <p id="confirm-modal-subtitle" class="confirm-subtitle" hidden></p>
+      <h2 id="confirm-modal-title"></h2>
+      <p id="confirm-modal-message"></p>
+      <div id="confirm-modal-detail" class="confirm-detail"></div>
+      <div class="confirm-buttons">
+        <button type="button" id="confirm-modal-cancel" class="btn"></button>
+        <button type="button" id="confirm-modal-ok" class="btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="auth-modal" class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" hidden>
+    <div class="confirm-backdrop"></div>
+    <form id="auth-form" class="confirm-content">
+      <h2 id="auth-title">Sign in to Photocure</h2>
+      <p>Paste the one-time code printed in the terminal, or your access token.</p>
+      <input id="auth-input" type="password" autocomplete="off" spellcheck="false" aria-label="Code or token" required>
+      <p id="auth-error" class="field-error" role="alert" hidden></p>
+      <div class="confirm-buttons"><button type="submit" class="btn primary">Continue</button></div>
+    </form>
+  </div>
+
+  <div id="restart-overlay" class="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="restart-text" hidden>
+    <div class="confirm-backdrop"></div>
+    <div class="confirm-content restart-box">
+      <div id="restart-spinner" class="spinner" aria-hidden="true"></div>
+      <p id="restart-text">Restarting Photocure...</p>
     </div>
   </div>
 

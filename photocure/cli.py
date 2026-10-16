@@ -951,23 +951,38 @@ def stats(
 @app.command()
 def serve(
     db: Path = typer.Option(DEFAULT_DB, "--db"),
-    host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    host: str = typer.Option("127.0.0.1", "--host", envvar="PCUR_HOST"),
+    port: int = typer.Option(8080, "--port", "-p", envvar="PCUR_PORT"),
     reload: bool = typer.Option(False, "--reload"),
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the browser automatically."),
+    token: str | None = typer.Option(None, "--token", envvar="PCUR_AUTH_TOKEN",
+                                     help="Access token. Generated and stored when not given."),
 ):
     """Launch the web review dashboard."""
     import os
     import uvicorn
 
     from . import setup_cmd as sc
+    from .auth import AuthManager, new_otc
     cfg = _config(db)
     os.environ["PCUR_DB_PATH"] = str(cfg.db_path.resolve())
     free = sc.pick_port(host, port)
     if free != port:
         console.print(f"[yellow]Port {port} is busy, using {free}.[/yellow]")
+    os.environ["PCUR_HOST"], os.environ["PCUR_PORT"] = host, str(free)
+    if token:
+        os.environ["PCUR_AUTH_TOKEN"] = token
+    auth = AuthManager(cfg.cache_dir)  # creates and stores the token when none exists
+    otc = new_otc()
+    os.environ["PCUR_OTC"] = otc  # read once by the app, never written to disk
+    shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        console.print(f"[bold yellow]Initial authentication token:[/bold yellow] {auth.token}")
     if open_browser:
-        sc.open_browser_when_ready(host, free)
+        sc.open_browser_when_ready(host, free, code=otc)
+    else:
+        console.print(f"Open [cyan]http://{shown}:{free}/#code={otc}[/cyan] (single use), "
+                      "or paste the code into the sign-in box.")
     console.print(f"[cyan]Serving review dashboard on http://{host}:{free}/ "
                   f"(db={cfg.db_path})[/cyan]")
     uvicorn.run("photocure.ui.app:app", host=host, port=free,
@@ -978,13 +993,14 @@ def serve(
 @app.command(name="start")
 def start(
     db: Path = typer.Option(DEFAULT_DB, "--db"),
-    host: str = typer.Option("127.0.0.1", "--host"),
-    port: int = typer.Option(8080, "--port", "-p"),
+    host: str = typer.Option("127.0.0.1", "--host", envvar="PCUR_HOST"),
+    port: int = typer.Option(8080, "--port", "-p", envvar="PCUR_PORT"),
     reload: bool = typer.Option(False, "--reload"),
     open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the browser automatically."),
+    token: str | None = typer.Option(None, "--token", envvar="PCUR_AUTH_TOKEN"),
 ):
     """Start the web review dashboard and open the browser (alias for 'serve')."""
-    serve(db=db, host=host, port=port, reload=reload, open_browser=open_browser)
+    serve(db=db, host=host, port=port, reload=reload, open_browser=open_browser, token=token)
 
 
 @app.command()
@@ -1106,9 +1122,7 @@ def setup(
     free = sc.pick_port(host, port)
     if free != port:
         console.print(f"[yellow]Port {port} is busy, using {free}.[/yellow]")
-    if open_ui:
-        sc.open_browser_when_ready(host, free)
-    serve(db=db, host=host, port=free, reload=False, open_browser=False)
+    serve(db=db, host=host, port=free, reload=False, open_browser=open_ui)
 
 
 @app.command()

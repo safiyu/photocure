@@ -13,6 +13,7 @@ import os
 import shutil
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -76,7 +77,9 @@ def describe_backends(cfg: CuratorConfig) -> dict:
 
 
 # Settings store. Precedence: CLI flag > this settings file > environment > defaults.
-SETTINGS_KEYS = ("device", "device_index", "decode_workers", "torch_threads", "scan_workers")
+SETTINGS_KEYS = ("device", "device_index", "decode_workers", "torch_threads", "scan_workers",
+                 "collision_policy")
+COLLISION_POLICIES = ("sequence", "date_suffix", "skip")
 
 
 def settings_path(db_path: Path | str) -> Path:
@@ -97,6 +100,12 @@ def _validate_settings(data: dict, allow_none: bool = False) -> dict:
             out[key] = None
         elif key == "device":
             out[key] = normalize_device(value)
+        elif key == "collision_policy":
+            v = str(value).strip().lower()
+            if v not in COLLISION_POLICIES:
+                raise ValueError(f"Unknown collision policy '{value}'. "
+                                 f"Choose one of: {', '.join(COLLISION_POLICIES)}.")
+            out[key] = v
         else:
             if isinstance(value, bool):
                 raise ValueError(f"'{key}' must be a whole number.")
@@ -158,6 +167,8 @@ def apply_settings(cfg: CuratorConfig, settings: dict) -> CuratorConfig:
             setattr(new.device, key, checked[key])
     if "scan_workers" in checked:
         new.scan_workers = checked["scan_workers"] or auto_scan_workers()
+    if "collision_policy" in checked:
+        new.collision_policy = checked["collision_policy"]
     return new
 
 
@@ -172,6 +183,7 @@ def effective_settings(db_path: Path | str, cfg: CuratorConfig | None = None,
         "decode_workers": base.device.decode_workers,
         "torch_threads": base.device.torch_threads,
         "scan_workers": 0 if stored.get("scan_workers") == 0 else base.scan_workers,
+        "collision_policy": base.collision_policy,
     }
     return {
         "values": values,
@@ -180,6 +192,7 @@ def effective_settings(db_path: Path | str, cfg: CuratorConfig | None = None,
                     for k in SETTINGS_KEYS},
         "resolved": resolve_workers(base, resolved_device),
         "choices": list(DEVICE_CHOICES),
+        "collision_choices": list(COLLISION_POLICIES),
         "path": str(settings_path(db_path)),
     }
 

@@ -27,7 +27,6 @@ import hashlib
 import inspect
 import logging
 import os
-import secrets
 import shutil
 import threading
 import time
@@ -37,7 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -1420,7 +1419,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def apply_plan(body: PlanReq):
         only = _check_category(body.only_category, "only_category")
         root = validate_output_dir(body.output_dir, dbp, body.mode == "in_place")
-        planner = make_planner(req_cfg())
+        planner = make_planner(run_cfg())
         if body.trash and not _accepts(planner.execute_plan, "trash"):
             raise _not_impl("trash staging")
         if not _BUSY.acquire(blocking=False):

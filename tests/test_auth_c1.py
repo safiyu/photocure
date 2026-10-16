@@ -1,5 +1,4 @@
 """C1 acceptance: route protection, OTC exchange, Host allowlist, CSRF Origin, lifecycle."""
-import os
 import sqlite3
 import threading
 

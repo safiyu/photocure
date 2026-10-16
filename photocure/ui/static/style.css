@@ -611,16 +611,23 @@ body.has-picks .pick { opacity: 1; }
 .btn-row .help.ok { color: var(--ok); }
 .btn-row .help.err { color: var(--err); }
 
-/* Confirmation dialog modal (C1 §2.6) */
-.confirm-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; display: grid; place-items: center; z-index: 10000; }
+/* Modals, banners and restart overlay (C1) */
+.confirm-modal { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10000; }
+.confirm-modal[hidden] { display: none; }
 .confirm-backdrop { position: absolute; inset: 0; background: var(--scrim); }
-.confirm-content { position: relative; z-index: 1; background: var(--sheet); border-radius: var(--r-lg); padding: 24px; max-width: 360px; box-shadow: var(--shadow); }
-.confirm-content h2 { margin: 0 0 8px 0; font-size: 18px; font-weight: 600; color: var(--ink); }
-.confirm-content p { margin: 0 0 16px 0; font-size: 14px; color: var(--mut); }
+.confirm-content { position: relative; z-index: 1; background: var(--sheet); border-radius: var(--r-lg); padding: 24px; width: min(420px, calc(100vw - 32px)); box-shadow: var(--shadow); }
+.confirm-content h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; color: var(--ink); }
+.confirm-content p { margin: 0 0 14px; font-size: 14px; color: var(--mut); }
+.confirm-content input { width: 100%; box-sizing: border-box; margin-bottom: 10px; }
+.confirm-subtitle { font-size: 12px !important; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px !important; }
+.confirm-detail:empty { display: none; }
+.confirm-detail { margin: 0 0 14px; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
 .confirm-buttons { display: flex; gap: 10px; justify-content: flex-end; }
-.confirm-buttons .btn { padding: 8px 16px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--sheet); color: var(--ink); cursor: pointer; font-size: 14px; font-weight: 500; }
-.confirm-buttons .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.confirm-buttons .btn-secondary { background: var(--well); }
-.confirm-buttons .btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-.confirm-buttons .btn-warning { background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
-.confirm-buttons .btn-danger { background: var(--err-soft); color: var(--err); border-color: var(--err); }
+.restart-box { display: flex; align-items: center; gap: 14px; }
+.restart-box p { margin: 0; color: var(--ink); }
+.spinner { width: 22px; height: 22px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; flex: none; }
+@media (prefers-reduced-motion: no-preference) { .spinner { animation: pcur-spin .8s linear infinite; } }
+@keyframes pcur-spin { to { transform: rotate(360deg); } }
+.banners { position: sticky; bottom: 0; display: flex; flex-direction: column; gap: 8px; padding: 0 16px; z-index: 900; }
+.banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border-radius: var(--r-sm); border: 1px solid var(--warn); background: var(--warn-soft); color: var(--ink); font-size: 14px; }
+.banner span { flex: 1 1 260px; }

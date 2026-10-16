@@ -286,7 +286,8 @@ def pick_port(host: str, port: int, tries: int = 20) -> int:
 
 def open_browser_when_ready(host: str, port: int, timeout: float = 180.0,
                             opener: Callable[[str], object] = webbrowser.open,
-                            fetch: Callable[..., object] = urllib.request.urlopen) -> threading.Thread:
+                            fetch: Callable[..., object] = urllib.request.urlopen,
+                            code: str | None = None) -> threading.Thread:
     """Open the browser as soon as the server answers its health check."""
     shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
     url = f"http://{shown}:{port}/"
@@ -296,7 +297,7 @@ def open_browser_when_ready(host: str, port: int, timeout: float = 180.0,
         while time.time() < end:
             try:
                 fetch(url + "healthz", timeout=2)
-                opener(url)
+                opener(url + (f"#code={code}" if code else ""))
                 return
             except Exception:
                 time.sleep(0.5)

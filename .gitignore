@@ -17,6 +17,7 @@ venv/
 *.db-shm
 *.settings.json
 .cache/
+backups/
 
 # Organized output trees
 Organized/

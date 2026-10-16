@@ -2,8 +2,6 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from lxml import etree
 
 from photocure.scanner.xmp import update_xmp_sidecar, get_on_disk_rating

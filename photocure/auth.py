@@ -12,11 +12,24 @@ log = logging.getLogger("photocure.auth")
 COOKIE_NAME = "pcur_session"
 
 
+def token_file_path(cache_dir: Path | str) -> Path:
+    """Next to an absolute cache dir (Docker: /data/auth_token), else the XDG data dir.
+
+    A relative cache dir is relative to wherever the user ran photocure, and the
+    token must not be dropped into an arbitrary working directory.
+    """
+    cache = Path(cache_dir)
+    if cache.is_absolute():
+        return cache.parent / "auth_token"
+    data = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(data) / "photocure" / "auth_token"
+
+
 class AuthManager:
     """Holds the one-time code (OTC) and the persistent session token."""
 
     def __init__(self, cache_dir: Path | str = ".cache", token: str | None = None):
-        self.token_path = Path(cache_dir).resolve().parent / "auth_token"
+        self.token_path = token_file_path(cache_dir)
         self._env_token = token or os.environ.get("PCUR_AUTH_TOKEN") or None
         # The CLI generates the OTC and hands it over via the environment, never via HTML.
         self._otc: str | None = os.environ.pop("PCUR_OTC", None) or None

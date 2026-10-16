@@ -10,7 +10,6 @@
   const fmtN = (n) => num(n).toLocaleString();
   const icon = (n, c) => `<svg class="ic ${c || ""}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 
-  const TOKEN = (document.querySelector('meta[name="pcur-token"]') || {}).content || "";
   const PAGE = 200;
   const state = {
     tab: "library", cats: [], junk: new Set(), byId: {}, busy: false, taskRunning: false,
@@ -45,71 +44,109 @@
     setTimeout(() => el.remove(), cls === "err" ? 6000 : 3200);
   }
 
-  // Accessible confirmation dialog with focus trap and Escape key.
-  async function showConfirmDialog(options) {
+  // Accessible confirmation dialog. All text goes in through textContent.
+  function showConfirmDialog(o) {
+    o = o || {};
+    const modal = $("#confirm-modal"), ok = $("#confirm-modal-ok"), cancel = $("#confirm-modal-cancel");
+    const backdrop = $(".confirm-backdrop", modal);
+    const variant = ["danger", "warning", "primary"].includes(o.variant) ? o.variant : "primary";
+    $("#confirm-modal-title").textContent = o.title || "Please confirm";
+    const sub = $("#confirm-modal-subtitle");
+    sub.textContent = o.subtitle || "";
+    sub.hidden = !o.subtitle;
+    $("#confirm-modal-message").textContent = o.message || "";
+    const det = $("#confirm-modal-detail");
+    det.replaceChildren();
+    if (o.detail instanceof Node) det.appendChild(o.detail);
+    else if (o.detail) det.textContent = String(o.detail);
+    ok.textContent = o.confirmText || "OK";
+    cancel.textContent = o.cancelText || "Cancel";
+    ok.className = "btn " + variant;
+    const previous = document.activeElement;
+    modal.hidden = false;
+    (variant === "primary" ? ok : cancel).focus();
     return new Promise((resolve) => {
-      const opts = options || {};
-      const variant = opts.variant || "primary";  // primary, warning, danger
-      const cancelBtn = opts.cancelText || "Cancel";
-      const confirmBtn = opts.confirmText || "OK";
-      const modal = document.createElement("div");
-      modal.setAttribute("role", "alertdialog");
-      modal.setAttribute("aria-modal", "true");
-      modal.setAttribute("aria-labelledby", "confirm-title");
-      modal.setAttribute("aria-describedby", "confirm-message");
-      modal.className = `confirm-modal confirm-${variant}`;
-      modal.innerHTML = `
-        <div class="confirm-backdrop"></div>
-        <div class="confirm-content">
-          <h2 id="confirm-title">${esc(opts.title || "Confirm")}</h2>
-          <p id="confirm-message">${esc(opts.message || "")}</p>
-          <div class="confirm-buttons">
-            <button class="btn btn-secondary" data-action="cancel">${esc(cancelBtn)}</button>
-            <button class="btn btn-${variant}" data-action="confirm">${esc(confirmBtn)}</button>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(modal);
-      const backdrop = modal.querySelector(".confirm-backdrop");
-      const cancelButton = modal.querySelector('[data-action="cancel"]');
-      const confirmButton = modal.querySelector('[data-action="confirm"]');
-      const focusableElems = [cancelButton, confirmButton];
-      let focusIdx = variant === "danger" || variant === "warning" ? 0 : 1;  // Default focus on Cancel for danger
-      focusableElems[focusIdx]?.focus();
-      const close = (result) => {
-        modal.remove();
-        resolve(result);
+      const finish = (value) => {
+        modal.hidden = true;
+        modal.removeEventListener("keydown", onKey);
+        ok.onclick = cancel.onclick = backdrop.onclick = null;
+        if (previous && previous.focus) previous.focus();
+        resolve(value);
       };
-      const handleKey = (e) => {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          close(false);
-        } else if (e.key === "Tab") {
-          focusIdx = (focusIdx + (e.shiftKey ? -1 : 1)) % focusableElems.length;
-          focusableElems[focusIdx]?.focus();
-          e.preventDefault();
+      const onKey = (e) => {
+        if (e.key === "Escape") { e.preventDefault(); finish(false); return; }
+        if (e.key !== "Tab") return;
+        const ring = [cancel, ok];
+        const i = ring.indexOf(document.activeElement);
+        ring[(i + (e.shiftKey ? -1 : 1) + ring.length) % ring.length].focus();
+        e.preventDefault();
+      };
+      modal.addEventListener("keydown", onKey);
+      ok.onclick = () => finish(true);
+      cancel.onclick = () => finish(false);
+      backdrop.onclick = () => finish(false);
+    });
+  }
+
+  // ---------------------------------------------------------------- auth
+  async function exchangeCode(code) {
+    const r = await fetch("/auth/exchange", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    return r.ok;
+  }
+
+  // A one-time code arrives in the URL fragment; clear it before any network call.
+  async function exchangeFromHash() {
+    const m = /^#code=([A-Za-z0-9_-]+)$/.exec(location.hash);
+    if (!m) return;
+    history.replaceState(null, "", location.pathname + location.search);
+    await exchangeCode(m[1]);
+  }
+
+  let authPromise = null;
+  function requireAuth() {
+    if (authPromise) return authPromise;
+    authPromise = new Promise((resolve) => {
+      const modal = $("#auth-modal"), input = $("#auth-input"), err = $("#auth-error");
+      input.value = "";
+      err.hidden = true;
+      modal.hidden = false;
+      input.focus();
+      $("#auth-form").onsubmit = async (e) => {
+        e.preventDefault();
+        if (await exchangeCode(input.value.trim())) {
+          modal.hidden = true;
+          authPromise = null;
+          resolve();
+        } else {
+          err.textContent = "That code or token was not accepted.";
+          err.hidden = false;
+          input.select();
         }
       };
-      cancelButton?.addEventListener("click", () => close(false));
-      confirmButton?.addEventListener("click", () => close(true));
-      backdrop?.addEventListener("click", () => close(false));
-      modal.addEventListener("keydown", handleKey);
     });
+    return authPromise;
   }
 
   async function api(path, opts) {
     opts = opts || {};
-    const headers = Object.assign({}, opts.headers || {});
-    const needsToken = (opts.method && opts.method !== "GET") || path.startsWith("/api/browse");
-    if (needsToken) headers["X-PCUR-Token"] = TOKEN;
-    const res = await fetch(path, Object.assign({}, opts, { headers }));
+    let res = await fetch(path, opts);
+    if (res.status === 401) {
+      await requireAuth();
+      res = await fetch(path, opts);
+    }
     if (!res.ok) {
-      let detail = res.statusText;
+      let detail = res.statusText, body = null;
       try {
-        const j = await res.json();
-        detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail || j);
+        body = await res.json();
+        detail = typeof body.detail === "string" ? body.detail : (body.error || JSON.stringify(body.detail || body));
       } catch (e) { /* keep status text */ }
-      throw new Error(detail || "HTTP " + res.status);
+      const err = new Error(detail || "HTTP " + res.status);
+      err.status = res.status;
+      err.body = body;
+      throw err;
     }
     return res.json();
   }
@@ -1038,6 +1075,12 @@
       if (res && res.ok) {
         logLine(`Applied ${fmtN(res.executed)} files (change ${res.transaction_id})`, "ok");
         toast(`Organized ${fmtN(res.executed)} photos. You can undo this from this page.`, "ok");
+        if (num(res.copy_fallbacks) > 0) {
+          addBanner("copy", "Cross-filesystem link detected; files were copied instead of hardlinked.", [["Dismiss", (ev) => ev.currentTarget.parentNode.remove()]]);
+        }
+        if (num(res.skipped_collisions) > 0) {
+          addBanner("skip", `${fmtN(res.skipped_collisions)} files were left in place because their names were already taken.`, [["Dismiss", (ev) => ev.currentTarget.parentNode.remove()]]);
+        }
       } else if (res && res.error) {
         logLine(res.error, "err");
         toast(res.error, "err");
@@ -1053,7 +1096,10 @@
 
   async function startUndo() {
     const tid = $("#txnselect").value || null;
-    if (!confirm("Undo this change? Files go back to where they were before.")) return;
+    const okUndo = await showConfirmDialog({
+      title: "Undo this change?", message: "Files go back to where they were before.",
+      confirmText: "Undo", variant: "warning" });
+    if (!okUndo) return;
     try {
       const r = await post("/api/undo", { transaction_id: tid, verify: $("#undo-verify").checked });
       if (!r.job_id) { toast(r.error || "Nothing to undo", "err"); return; }
@@ -1338,6 +1384,7 @@
       $("#eff-" + k).textContent = num(saved[key]) > 0 ? `Using ${fmtN(eff[key])}` : `Auto uses ${fmtN(eff[key])}`;
       input.oninput = () => { input.classList.remove("input-error"); $("#err-" + k).hidden = true; show(); };
     });
+    $("#set-collision").value = saved.collision_policy || "sequence";
     $("#settings-msg").textContent = "";
     $("#settings-msg").className = "help";
   }
@@ -1375,7 +1422,8 @@
       msg.className = "help err";
       return;
     }
-    const body = Object.assign({ device: state.draft.device, device_index: num(state.draft.device_index) }, workers);
+    const body = Object.assign({ device: state.draft.device, device_index: num(state.draft.device_index),
+      collision_policy: $("#set-collision").value }, workers);
     try {
       state.settings = await post("/api/settings", body);
       renderChip();
@@ -1570,9 +1618,11 @@
   }
 
   async function resetLibrary() {
-    if (!confirm("Are you sure you want to clear all indexed photos, AI analysis, bursts, and plans?\n\nThis will remove everything from the Photocure database.\nYour original photo files on disk will NOT be deleted or modified.")) {
-      return;
-    }
+    const okReset = await showConfirmDialog({
+      title: "Clear the indexed library?",
+      message: "This removes every indexed photo, AI analysis, burst and plan from the Photocure database. Your original photo files are not deleted or modified.",
+      confirmText: "Clear library", variant: "danger" });
+    if (!okReset) return;
     const btns = [$("#btn-reset-library"), $("#btn-import-reset")];
     btns.forEach((b) => {
       if (b) {
@@ -1636,8 +1686,95 @@
     refreshBackend();
   }
 
+  // ------------------------------------------------------- lifecycle
+  function showRestartOverlay() {
+    const box = $("#restart-overlay");
+    $("#restart-spinner").hidden = false;
+    $("#restart-text").textContent = "Restarting Photocure...";
+    box.hidden = false;
+    const t0 = Date.now();
+    const timer = setInterval(async () => {
+      // The old process can still answer for a moment, so wait before trusting /healthz.
+      try {
+        const r = await fetch("/healthz", { cache: "no-store" });
+        if (r.ok && Date.now() - t0 > 1000) { clearInterval(timer); window.location.reload(); return; }
+      } catch (e) { /* server is down; keep polling */ }
+      if (Date.now() - t0 > 60000) {
+        clearInterval(timer);
+        $("#restart-spinner").hidden = true;
+        $("#restart-text").textContent = "Server did not restart within 60 seconds. Please run 'photocure start' from your terminal.";
+      }
+    }, 500);
+  }
+
+  async function restartServer() {
+    const go = await showConfirmDialog({
+      title: "Restart Photocure?", message: "The server restarts and this page reloads.",
+      confirmText: "Restart", variant: "warning" });
+    if (!go) return;
+    try {
+      await api("/api/restart?force=false", { method: "POST" });
+    } catch (e) {
+      const msg = (e.body && e.body.error) || e.message;
+      if (e.status !== 409 || !/background task/.test(msg)) { toast(msg, "err"); return; }
+      const force = await showConfirmDialog({
+        title: "Restart anyway?", message: "A scan or analysis is running and will stop.",
+        confirmText: "Restart anyway", variant: "danger" });
+      if (!force) return;
+      try { await api("/api/restart?force=true", { method: "POST" }); }
+      catch (e2) { toast((e2.body && e2.body.error) || e2.message, "err"); return; }
+    }
+    showRestartOverlay();
+  }
+
+  function addBanner(kind, text, actions) {
+    const box = $("#banners");
+    const el = document.createElement("div");
+    el.className = "banner";
+    el.dataset.kind = kind;
+    const span = document.createElement("span");
+    span.textContent = text;
+    el.appendChild(span);
+    (actions || []).forEach(([label, fn]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn";
+      b.textContent = label;
+      b.onclick = fn;
+      el.appendChild(b);
+    });
+    box.appendChild(el);
+    return el;
+  }
+
+  async function checkOrphans() {
+    let r;
+    try { r = await api("/api/transactions/orphaned"); } catch (e) { return; }
+    $$('#banners [data-kind="orphan"]').forEach((n) => n.remove());
+    (r.transactions || []).forEach((t) => {
+      const url = "/api/transactions/" + encodeURIComponent(t.transaction_id);
+      const settle = async (path, label) => {
+        try { await post(url + path); toast(label, "ok"); } catch (e) { toast(e.message, "err"); }
+        checkOrphans();
+      };
+      addBanner("orphan",
+        `Incomplete transaction from unexpected shutdown detected (${t.transaction_id}). Resume to finish, or Undo to roll back.`,
+        [["Resume", () => settle("/resume", "Transaction settled")],
+         ["Undo", async () => {
+           const yes = await showConfirmDialog({
+             title: "Roll back this transaction?", message: "Files moved so far go back to where they were.",
+             confirmText: "Roll back", variant: "warning" });
+           if (yes) settle("/rollback", "Transaction rolled back");
+         }]]);
+    });
+  }
+
   async function init() {
     applyTheme(document.documentElement.dataset.theme || "light");
+    await exchangeFromHash();
+    checkOrphans();
+    const btnRestart = $("#btn-restart");
+    if (btnRestart) btnRestart.onclick = restartServer;
     try {
       const cfg = await api("/api/config");
       state.cats = sortCats(cfg.categories.map((c) => c.value));
