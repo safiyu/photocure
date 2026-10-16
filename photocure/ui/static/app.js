@@ -10,12 +10,11 @@
   const fmtN = (n) => num(n).toLocaleString();
   const icon = (n, c) => `<svg class="ic ${c || ""}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 
-  const TOKEN = (document.querySelector('meta[name="pcur-token"]') || {}).content || "";
   const PAGE = 200;
   const state = {
     tab: "library", cats: [], junk: new Set(), byId: {}, busy: false, taskRunning: false,
     triageSel: -1, triageGrid: null, undo: [], picks: new Set(), lastPick: null,
-    overview: null, eventId: null, personId: null,
+    overview: null, eventId: null,
     backend: null, thresholds: null, manualCount: 0,
     settings: null, draft: { device: "auto", device_index: 0 },
   };
@@ -26,7 +25,6 @@
     bursts: ["Bursts", "Shots taken seconds apart. The best one of each group is kept."],
     highlights: ["Highlights", "Your most appealing photos first."],
     events: ["Events", "Photos grouped by when and where they were taken."],
-    people: ["People", "Faces grouped by the person they belong to."],
     junk: ["Junk review", "Screenshots, documents, duplicates and accidents. Move anything that does not belong."],
     uncertain: ["Needs a look", "The analysis was not sure about these. Choose a category for each."],
     settings: ["Settings", "Choose what runs the analysis and how many workers it uses."],
@@ -45,19 +43,114 @@
     setTimeout(() => el.remove(), cls === "err" ? 6000 : 3200);
   }
 
+  // Accessible confirmation dialog. All text goes in through textContent.
+  function showConfirmDialog(o) {
+    o = o || {};
+    const modal = $("#confirm-modal"), ok = $("#confirm-modal-ok"), cancel = $("#confirm-modal-cancel");
+    const backdrop = $(".confirm-backdrop", modal);
+    const variant = ["danger", "warning", "primary"].includes(o.variant) ? o.variant : "primary";
+    $("#confirm-modal-title").textContent = o.title || "Please confirm";
+    const sub = $("#confirm-modal-subtitle");
+    sub.textContent = o.subtitle || "";
+    sub.hidden = !o.subtitle;
+    $("#confirm-modal-message").textContent = o.message || "";
+    const det = $("#confirm-modal-detail");
+    det.replaceChildren();
+    if (o.detail instanceof Node) det.appendChild(o.detail);
+    else if (o.detail) det.textContent = String(o.detail);
+    ok.textContent = o.confirmText || "OK";
+    cancel.textContent = o.cancelText || "Cancel";
+    ok.className = "btn " + variant;
+    const previous = document.activeElement;
+    modal.hidden = false;
+    (variant === "primary" ? ok : cancel).focus();
+    return new Promise((resolve) => {
+      const finish = (value) => {
+        modal.hidden = true;
+        modal.removeEventListener("keydown", onKey);
+        ok.onclick = cancel.onclick = backdrop.onclick = null;
+        if (previous && previous.focus) previous.focus();
+        resolve(value);
+      };
+      const onKey = (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();  // otherwise the global handler sees a closed dialog and closes the viewer too
+          finish(false);
+          return;
+        }
+        if (e.key !== "Tab") return;
+        const ring = [cancel, ok];
+        const i = ring.indexOf(document.activeElement);
+        ring[(i + (e.shiftKey ? -1 : 1) + ring.length) % ring.length].focus();
+        e.preventDefault();
+      };
+      modal.addEventListener("keydown", onKey);
+      ok.onclick = () => finish(true);
+      cancel.onclick = () => finish(false);
+      backdrop.onclick = () => finish(false);
+    });
+  }
+
+  // ---------------------------------------------------------------- auth
+  async function exchangeCode(code) {
+    const r = await fetch("/auth/exchange", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    return r.ok;
+  }
+
+  // A one-time code arrives in the URL fragment; clear it before any network call.
+  async function exchangeFromHash() {
+    const m = /^#code=([A-Za-z0-9_-]+)$/.exec(location.hash);
+    if (!m) return;
+    history.replaceState(null, "", location.pathname + location.search);
+    await exchangeCode(m[1]);
+  }
+
+  let authPromise = null;
+  function requireAuth() {
+    if (authPromise) return authPromise;
+    authPromise = new Promise((resolve) => {
+      const modal = $("#auth-modal"), input = $("#auth-input"), err = $("#auth-error");
+      input.value = "";
+      err.hidden = true;
+      modal.hidden = false;
+      input.focus();
+      $("#auth-form").onsubmit = async (e) => {
+        e.preventDefault();
+        if (await exchangeCode(input.value.trim())) {
+          modal.hidden = true;
+          authPromise = null;
+          resolve();
+        } else {
+          err.textContent = "That code or token was not accepted.";
+          err.hidden = false;
+          input.select();
+        }
+      };
+    });
+    return authPromise;
+  }
+
   async function api(path, opts) {
     opts = opts || {};
-    const headers = Object.assign({}, opts.headers || {});
-    const needsToken = (opts.method && opts.method !== "GET") || path.startsWith("/api/browse");
-    if (needsToken) headers["X-PCUR-Token"] = TOKEN;
-    const res = await fetch(path, Object.assign({}, opts, { headers }));
+    let res = await fetch(path, opts);
+    if (res.status === 401) {
+      await requireAuth();
+      res = await fetch(path, opts);
+    }
     if (!res.ok) {
-      let detail = res.statusText;
+      let detail = res.statusText, body = null;
       try {
-        const j = await res.json();
-        detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail || j);
+        body = await res.json();
+        detail = typeof body.detail === "string" ? body.detail : (body.error || JSON.stringify(body.detail || body));
       } catch (e) { /* keep status text */ }
-      throw new Error(detail || "HTTP " + res.status);
+      const err = new Error(detail || "HTTP " + res.status);
+      err.status = res.status;
+      err.body = body;
+      throw err;
     }
     return res.json();
   }
@@ -70,7 +163,11 @@
   }
 
   const eff = (it) => it.manual_bucket || it.category;
-  const thumbUrl = (id) => "/api/thumbnail/" + num(id);
+  // Tiers: micro for the grid, medium for burst inspection, preview for the lightbox.
+  const thumbUrl = (id, tier) => {
+    const it = state.byId[id];
+    return "/thumbnail/" + num(id) + "?tier=" + (tier || "micro") + (it && it.fp ? "&v=" + it.fp : "");
+  };
   const catKey = (c) => String(c || "unrouted").replace(/[^a-z_]/g, "") || "unknown";
   // Most useful first, so the number keys 1-9 cover the categories people assign most.
   const CAT_ORDER = ["people", "food", "scenery", "animal", "screenshot", "document", "graphic",
@@ -117,17 +214,36 @@
   }
 
   // ------------------------------------------------------------------ cards
-  function flagBadges(it) {
+  function flagList(it) {
     const out = [];
-    if (it.locked) out.push('<span class="badge lock">Locked</span>');
-    if (it.is_best_shot) out.push('<span class="badge best">Best shot</span>');
-    if (it.is_duplicate) out.push('<span class="badge warn">Duplicate</span>');
-    if (it.near_dup_of != null) out.push('<span class="badge warn">Near duplicate</span>');
-    if (it.is_alternate) out.push('<span class="badge">Alternate</span>');
-    if (it.is_blurry) out.push('<span class="badge">Blurry</span>');
-    if (it.is_too_dark) out.push('<span class="badge">Dark</span>');
-    if (it.is_overexposed) out.push('<span class="badge">Overexposed</span>');
-    return out.slice(0, 3).join("");
+    const add = (cls, text) => out.push({ cls, text });
+    if (it.locked) add("lock", "Locked");
+    if (num(it.rating) === -1) add("warn", "Rejected");
+    if (it.is_favorite) add("fav", "\u2665 Favourite");
+    if (num(it.rating) > 0) add("", "\u2605" + num(it.rating));
+    if (it.is_best_shot) add("best", "Best shot");
+    if (it.is_duplicate) add("warn", "Duplicate");
+    if (it.near_dup_of != null) add("warn", "Near duplicate");
+    if (it.is_alternate) add("", "Alternate");
+    if (it.has_blinks) add("warn", "Blink");
+    if (it.is_blurry) add("", "Blurry");
+    if (it.is_too_dark) add("", "Dark");
+    if (it.is_overexposed) add("", "Overexposed");
+    return out;
+  }
+
+  // Small DOM builder: text always goes through textContent. "html" is only for trusted constants (icons).
+  function el(tag, props, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props || {})) {
+      if (v == null || v === false) continue;
+      if (k === "class") n.className = v;
+      else if (k === "text") n.textContent = v;
+      else if (k === "html") n.innerHTML = v;
+      else n.setAttribute(k, v === true ? "" : String(v));
+    }
+    kids.flat().forEach((c) => { if (c != null && c !== false) n.append(c); });
+    return n;
   }
 
   function shortReason(it) {
@@ -144,34 +260,39 @@
     return r.text;
   }
 
-  function cardHTML(it) {
+  function cardNode(it) {
     const id = num(it.id);
     const rawCat = eff(it);
     const meta = [];
-    if (it.width && it.height) meta.push(num(it.width) + "×" + num(it.height));
+    if (it.width && it.height) meta.push(num(it.width) + "\u00d7" + num(it.height));
     if (it.taken_at) meta.push(String(it.taken_at).slice(0, 10));
     if (it.score != null) meta.push("match " + num(it.score).toFixed(2));
-    const cls = ["card", it.locked ? "locked" : "", state.picks.has(id) ? "picked" : ""].join(" ");
-    return `<figure class="${cls}" data-id="${id}" tabindex="0">
-      <div class="thumb">
-        <img loading="lazy" src="${thumbUrl(id)}" alt="${esc(it.filename)}" onerror="this.style.opacity=.15">
-        <button class="pick" data-pick="${id}" aria-label="Select ${esc(it.filename)}" aria-pressed="${state.picks.has(id)}">${icon("check")}</button>
-        <div class="hover-actions">
-          <button data-lock="${id}" title="${it.locked ? "Unlock" : "Lock"} (l)" aria-label="${it.locked ? "Unlock" : "Lock"}">${icon("lock", "sm")}</button>
-          <button data-similar="${id}" title="Find similar photos" aria-label="Find similar photos">${icon("copy", "sm")}</button>
-        </div>
-        <div class="flags">${flagBadges(it)}</div>
-      </div>
-      <figcaption class="caption">
-        <div class="fn" title="${esc(it.relative_path || it.filename)}">${esc(it.filename)}</div>
-        ${it.uncertain_reason && !it.manual_bucket ? `<div class="reason" title="${esc(it.uncertain_reason.text)}">${esc(shortReason(it))}</div>` : ""}
-        <div class="meta">${esc(meta.join(", "))}</div>
-        <div class="catline" style="${catStyle(rawCat)}"><i></i>
-          <span class="t">${esc(catLabel(rawCat))}</span>
-          ${it.manual_bucket ? `<span class="tag">edited</span><button class="x" data-clear="${id}" title="Back to the AI choice" aria-label="Back to the AI choice">${icon("x", "sm")}</button>` : ""}
-        </div>
-      </figcaption>
-    </figure>`;
+    const picked = state.picks.has(id);
+    const cls = ["card", it.locked ? "locked" : "", picked ? "picked" : "", num(it.rating) === -1 ? "rejected" : ""]
+      .filter(Boolean).join(" ");
+    const img = el("img", { loading: "lazy", decoding: "async", src: thumbUrl(id), alt: it.filename || "" });
+    img.onerror = () => { img.style.opacity = ".15"; };
+    const lockTitle = (it.locked ? "Unlock" : "Lock") + " (l)";
+    const thumb = el("div", { class: "thumb" }, img,
+      el("button", { class: "pick", "data-pick": id, "aria-label": "Select " + (it.filename || ""),
+        "aria-pressed": String(picked), html: icon("check") }),
+      el("div", { class: "hover-actions" },
+        el("button", { "data-lock": id, title: lockTitle, "aria-label": it.locked ? "Unlock" : "Lock", html: icon("lock", "sm") }),
+        el("button", { "data-similar": id, title: "Find similar photos", "aria-label": "Find similar photos", html: icon("copy", "sm") })),
+      el("div", { class: "flags" }, flagList(it).slice(0, 3).map((f) => el("span", { class: "badge " + f.cls, text: f.text }))));
+    const showReason = it.uncertain_reason && !it.manual_bucket;
+    const cap = el("figcaption", { class: "caption" },
+      el("div", { class: "fn", title: it.relative_path || it.filename, text: it.filename }),
+      showReason ? el("div", { class: "reason", title: it.uncertain_reason.text, text: shortReason(it) }) : null,
+      el("div", { class: "meta", text: meta.join(", ") }),
+      el("div", { class: "catline", style: catStyle(rawCat) },
+        el("button", { class: "catpick", type: "button", "data-catpick": id, title: "Change category",
+          "aria-haspopup": "listbox", "aria-label": `Category ${catLabel(rawCat)}, change` },
+        el("i"), el("span", { class: "t", text: catLabel(rawCat) })),
+        it.manual_bucket ? [el("span", { class: "tag", text: "edited" }),
+          el("button", { class: "x", "data-clear": id, title: "Back to the AI choice",
+            "aria-label": "Back to the AI choice", html: icon("x", "sm") })] : null));
+    return el("figure", { class: cls, "data-id": id, tabindex: 0 }, thumb, cap);
   }
 
   function emptyHTML(e) {
@@ -186,81 +307,70 @@
     return Array.from({ length: n }, () => '<div class="skel"></div>').join("");
   }
 
+  function emptyNode(e) {
+    const d = document.createElement("div");
+    d.innerHTML = emptyHTML(e);  // emptyHTML escapes its text
+    return d;
+  }
+
   function makeGrid(key, cfg) {
-    const g = {
-      key, cfg, items: [], total: null, loading: false, gen: 0,
-      el: $(cfg.el), more: $(cfg.more), countEl: cfg.count ? $(cfg.count) : null,
-    };
-    g.reset = async function () {
-      g.gen++;
-      g.items = [];
-      g.total = null;
-      g.loading = false;
-      g.el.innerHTML = skeletons(12);
-      g.more.innerHTML = "";
-      await g.loadMore();
-    };
-    g.updateMore = function () {
-      const left = g.total == null ? 0 : g.total - g.items.length;
-      g.more.innerHTML = left > 0
-        ? `<button class="btn" data-more="${esc(key)}">Show more (${fmtN(left)} left)</button>` : "";
-      if (g.countEl) {
-        g.countEl.textContent = g.total == null ? "" : `${fmtN(g.items.length)} of ${fmtN(g.total)}`;
-      }
-      if (g.total === 0) {
-        const e = typeof cfg.empty === "function" ? cfg.empty() : (cfg.empty || {});
-        g.el.innerHTML = emptyHTML(Object.assign({ title: "No photos here" }, e));
-      }
-    };
-    g.loadMore = async function () {
-      if (g.loading || (g.total != null && g.items.length >= g.total)) return;
-      g.loading = true;
-      const gen = g.gen;
-      try {
+    if (!window.PCUR_GRID) throw new Error("virtual_grid.mjs did not load");
+    const host = $(cfg.el);
+    const g = { key, cfg, el: host, countEl: cfg.count ? $(cfg.count) : null, stale: false };
+    const moreEl = cfg.more ? $(cfg.more) : null;
+    if (moreEl) moreEl.hidden = true;  // pages load by themselves as you scroll
+    g.vg = new window.PCUR_GRID.VirtualGrid({
+      host,
+      pageSize: PAGE,
+      renderCard: cardNode,
+      renderSkeleton: () => el("div", { class: "skel" }),
+      async fetchPage(offset, limit) {
         const qs = cfg.params();
-        const data = await api(`/api/images?${qs}${qs ? "&" : ""}limit=${PAGE}&offset=${g.items.length}`);
-        if (gen !== g.gen) return;
-        if (g.items.length === 0) g.el.innerHTML = "";
+        const data = await api(`/api/images?${qs}${qs ? "&" : ""}limit=${limit}&offset=${offset}`);
         data.items.forEach((it) => { state.byId[it.id] = it; });
-        g.items = g.items.concat(data.items);
-        g.total = data.total;
-        g.el.insertAdjacentHTML("beforeend", data.items.map(cardHTML).join(""));
-        g.updateMore();
-        g.applySel();
-      } catch (e) {
-        g.el.innerHTML = emptyHTML({ icon: "alert", title: "Could not load photos", text: e.message });
+        return data;
+      },
+      onChange: () => g.sync(),
+      onError(e) {
+        g.vg.showEmpty(emptyNode({ icon: "alert", title: "Could not load photos", text: e.message }));
         toast(e.message, "err");
-      } finally {
-        if (gen === g.gen) g.loading = false;
+      },
+    });
+    g.sync = function () {
+      const total = g.vg.total;
+      if (g.countEl) g.countEl.textContent = total == null ? "" : `${fmtN(total)} photo${total === 1 ? "" : "s"}`;
+      if (total === 0) {
+        const e = typeof cfg.empty === "function" ? cfg.empty() : (cfg.empty || {});
+        g.vg.showEmpty(emptyNode(Object.assign({ title: "No photos here" }, e)));
       }
     };
-    g.cards = () => $$(".card", g.el);
-    g.applySel = function () {
-      if (state.triageGrid !== g) return;
-      g.cards().forEach((c, i) => c.classList.toggle("sel", i === state.triageSel));
-    };
+    Object.defineProperty(g, "total", { get: () => g.vg.total });
+    g.reset = () => g.vg.reset();
+    g.loadMore = async () => {};
+    g.cards = () => $$(".card", host);
+    g.applySel = () => g.vg.applyCursor();
     g.rerender = function (it) {
-      const old = $(`.card[data-id="${num(it.id)}"]`, g.el);
-      if (!old) return;
-      const idx = g.items.findIndex((x) => x.id === it.id);
-      if (idx >= 0) g.items[idx] = it;
+      const idx = g.vg.indexOfId(it.id);
+      if (idx < 0) return;
       if (cfg.matches && !cfg.matches(it)) {
-        old.remove();
-        if (idx >= 0) g.items.splice(idx, 1);
-        if (g.total != null) g.total = Math.max(0, g.total - 1);
-        g.updateMore();
+        const wasCursor = g.vg.cursorId === it.id;
+        g.vg.removeItem(it.id);
+        if (wasCursor) {  // keep the cursor where it was, on whatever slid into its place
+          const next = g.vg.items[idx] || g.vg.items[idx - 1];
+          g.vg.cursorId = next ? next.id : null;
+          g.vg.applyCursor();
+        }
       } else {
-        old.outerHTML = cardHTML(it);
+        g.vg.rerenderItem(it);
       }
-      g.applySel();
     };
-    if ("IntersectionObserver" in window) {
-      new IntersectionObserver((es) => {
-        if (es.some((e) => e.isIntersecting) && g.el.offsetParent !== null) g.loadMore();
-      }, { rootMargin: "500px" }).observe(g.more);
-    }
     grids[key] = g;
     return g;
+  }
+
+  function gridOf(node) {
+    const host = node && node.closest && node.closest(".vgrid");
+    return host ? allGrids().find((g) => g.el === host) || null : null;
   }
 
   const allGrids = () => Object.values(grids);
@@ -270,7 +380,7 @@
   function itemUpdated(it) {
     state.byId[it.id] = it;
     allGrids().forEach((g) => g.rerender(it));
-    if (lb.open && lb.ids[lb.i] === it.id) lbRender();
+    if (lb.open && lbIdAt(lb.i) === it.id) lbRender();
   }
 
   function setupGrids() {
@@ -284,11 +394,24 @@
         if (val("catfilter")) p.set("category", val("catfilter"));
         if (chk("manualonly")) p.set("manual", "true");
         if (chk("neardup")) p.set("near_dup", "true");
+        if (val("f-camera")) p.set("camera", val("f-camera"));
+        const rt = val("f-rating");
+        if (rt.startsWith("min:")) p.set("min_rating", rt.slice(4));
+        else if (rt !== "") p.set("rating", rt);
+        if (val("f-country")) p.set("country", val("f-country"));
+        if (chk("f-fav")) p.set("favorite", "true");
+        scrubParams(p);
+        p.set("sort", "taken");  // oldest first, so the date scrubber means something
         return p.toString();
       },
       matches(it) {
         if (val("catfilter") && eff(it) !== val("catfilter")) return false;
         if (chk("manualonly") && !it.manual_bucket) return false;
+        if (chk("f-fav") && !it.is_favorite) return false;
+        const rt = val("f-rating");
+        if (rt.startsWith("min:") && num(it.rating) < num(rt.slice(4))) return false;
+        if (rt === "0" && num(it.rating) !== 0) return false;
+        if (rt !== "" && !rt.startsWith("min:") && rt !== "0" && num(it.rating) !== num(rt)) return false;
         return true;
       },
       empty: () => (state.overview && state.overview.total === 0
@@ -328,11 +451,75 @@
       params: () => "event_id=" + num(state.eventId),
       empty: { icon: "cal", title: "This event has no photos" },
     });
-    makeGrid("person", {
-      el: "#peopledetail", more: "#peopledetail-more",
-      params: () => "person_id=" + num(state.personId),
-      empty: { icon: "users", title: "This person has no photos" },
-    });
+  }
+
+  // -------------------------------------------------------- facets and scrubber
+  const DAY = 86400000;
+  const scrub = { lo: 0, days: 0 };
+
+  function fillSelect(sel, firstLabel, rows) {
+    const cur = sel.value;
+    sel.replaceChildren(el("option", { value: "", text: firstLabel }),
+      ...rows.map((r) => el("option", { value: r.value, text: r.text })));
+    sel.value = rows.some((r) => r.value === cur) ? cur : "";
+  }
+
+  const countryName = (code) => {
+    try { return new Intl.DisplayNames(["en"], { type: "region" }).of(code) || code; } catch (e) { return code; }
+  };
+
+  function scrubDate(n) { return new Date(scrub.lo + n * DAY).toISOString().slice(0, 10); }
+
+  function scrubLabels() {
+    $("#scrub-from-label").textContent = scrubDate(num($("#scrub-from").value));
+    $("#scrub-to-label").textContent = scrubDate(num($("#scrub-to").value));
+  }
+
+  function scrubParams(p) {
+    const box = $("#scrubber");
+    if (!box || box.hidden) return;
+    const a = num($("#scrub-from").value), b = num($("#scrub-to").value);
+    if (a > 0) p.set("date_from", scrubDate(a));
+    if (b < scrub.days) p.set("date_to", scrubDate(b));
+  }
+
+  function resetScrubber() {
+    $("#scrub-from").value = 0;
+    $("#scrub-to").value = scrub.days;
+    if (!$("#scrubber").hidden) scrubLabels();
+  }
+
+  // Bounds come from the library itself, never from hard-coded years.
+  function applyFacets(f) {
+    fillSelect($("#f-camera"), "All cameras", f.cameras.map((c) => ({ value: c.name, text: `${c.name} (${fmtN(c.count)})` })));
+    fillSelect($("#f-country"), "All countries",
+      f.countries.map((c) => ({ value: c.code, text: `${countryName(c.code)} (${fmtN(c.count)})` })));
+    $("#f-country").hidden = f.countries.length === 0;
+    $("#f-camera").hidden = f.cameras.length === 0;
+    const box = $("#scrubber");
+    if (!f.taken_min || !f.taken_max) { box.hidden = true; return; }
+    const lo = Date.parse(f.taken_min + "T00:00:00Z"), hi = Date.parse(f.taken_max + "T00:00:00Z");
+    const days = Math.max(0, Math.round((hi - lo) / DAY));
+    const changed = lo !== scrub.lo || days !== scrub.days;
+    scrub.lo = lo;
+    scrub.days = days;
+    box.hidden = days === 0;
+    $("#scrub-from").max = $("#scrub-to").max = String(days);
+    if (changed) resetScrubber();
+    if (!box.hidden) scrubLabels();
+  }
+
+  async function loadFacets() {
+    try { applyFacets(await api("/api/facets")); } catch (e) { /* the filters just stay as they were */ }
+  }
+
+  function bindFilters() {
+    let t = 0;
+    const again = () => { clearTimeout(t); t = setTimeout(() => grids.cat.reset(), 200); };
+    ["f-camera", "f-rating", "f-country", "f-fav"].forEach((id) => $("#" + id).addEventListener("change", again));
+    const from = $("#scrub-from"), to = $("#scrub-to");
+    from.addEventListener("input", () => { if (num(from.value) > num(to.value)) to.value = from.value; scrubLabels(); again(); });
+    to.addEventListener("input", () => { if (num(to.value) < num(from.value)) from.value = to.value; scrubLabels(); again(); });
   }
 
   // ------------------------------------------------------------- selection
@@ -351,13 +538,26 @@
 
   function clearPicks() { state.picks.clear(); state.lastPick = null; applyPicks(); }
 
-  function togglePick(id, shift) {
+  async function togglePick(id, shift) {
     const card = $(`.card[data-id="${id}"]`);
-    const box = card ? card.parentElement : null;
+    const g = gridOf(card);
+    const box = g || (card ? card.parentElement : null);
+    if (g) g.vg.setCursor(id);
     if (shift && state.lastPick && box && state.lastPick.box === box) {
-      const ids = $$(".card", box).map((c) => num(c.dataset.id));
-      const a = ids.indexOf(state.lastPick.id), b = ids.indexOf(id);
-      if (a >= 0 && b >= 0) ids.slice(Math.min(a, b), Math.max(a, b) + 1).forEach((i) => state.picks.add(i));
+      let ids = [];
+      if (g) {
+        const a = g.vg.indexOfId(state.lastPick.id), b = g.vg.indexOfId(id);
+        if (a >= 0 && b >= 0) {
+          const lo = Math.min(a, b), hi = Math.max(a, b);
+          await g.vg.ensureLoaded(lo, hi + 1);  // the range may span pages that are not loaded yet
+          ids = g.vg.items.slice(lo, hi + 1).filter(Boolean).map((x) => x.id);
+        }
+      } else {
+        const all = $$(".card", box).map((c) => num(c.dataset.id));
+        const a = all.indexOf(state.lastPick.id), b = all.indexOf(id);
+        if (a >= 0 && b >= 0) ids = all.slice(Math.min(a, b), Math.max(a, b) + 1);
+      }
+      ids.forEach((i) => state.picks.add(i));
     } else if (state.picks.has(id)) {
       state.picks.delete(id);
     } else {
@@ -391,6 +591,76 @@
     clearPicks();
   }
 
+  // --------------------------------------------------- quick category picker
+  let catPicker = null;
+
+  function closeCatPicker(restoreFocus = true) {
+    if (!catPicker) return;
+    const { node, anchor, off } = catPicker;
+    catPicker = null;
+    off();
+    node.remove();
+    if (restoreFocus && document.contains(anchor)) anchor.focus({ preventScroll: true });
+  }
+
+  async function pickCategory(id, bucket, current) {
+    closeCatPicker();
+    if (bucket === current && !state.picks.has(id)) return;
+    try {
+      if (state.picks.has(id)) { await bulkReassign(bucket); return; }
+      const prev = await reassign(id, bucket);
+      state.undo.push({ id, prev });
+      toast("Moved to " + catLabel(bucket), "ok");
+      loadStats();
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  function openCatPicker(anchor, id) {
+    if (catPicker && catPicker.anchor === anchor) { closeCatPicker(); return; }
+    closeCatPicker(false);
+    const current = eff(state.byId[id] || {});
+    const many = state.picks.has(id) && state.picks.size > 1;
+    const items = state.cats.map((c) => el("button", {
+      class: "catmenu-item" + (c === current ? " current" : ""), type: "button", role: "option",
+      "aria-selected": String(c === current), "data-catitem": c, style: catStyle(c),
+    }, el("i"), el("span", { text: catLabel(c) })));
+    const node = el("div", { class: "catmenu", role: "listbox", "aria-label": "Move to category" },
+      el("div", { class: "catmenu-head", text: many ? `Move ${fmtN(state.picks.size)} selected` : "Move to" }), items);
+    document.body.append(node);
+
+    const r = anchor.getBoundingClientRect();
+    const w = node.offsetWidth, h = node.offsetHeight;
+    const below = window.innerHeight - r.bottom - 8, above = r.top - 8;
+    const top = below >= Math.min(h, 240) || below >= above ? r.bottom + 4 : Math.max(8, r.top - h - 4);
+    node.style.top = Math.max(8, Math.min(top, window.innerHeight - h - 8)) + "px";
+    node.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
+
+    items.forEach((b) => { b.onclick = () => pickCategory(id, b.dataset.catitem, current); });
+    node.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();  // keep rating and grid shortcuts out while the menu is open
+      const i = items.indexOf(document.activeElement);
+      if (ev.key === "Escape") { ev.preventDefault(); closeCatPicker(); }
+      else if (ev.key === "Tab") closeCatPicker(false);
+      else if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        const d = ev.key === "ArrowDown" ? 1 : -1;
+        items[(i + d + items.length) % items.length].focus();
+      }
+    });
+    const onDown = (ev) => { if (!node.contains(ev.target) && !anchor.contains(ev.target)) closeCatPicker(false); };
+    const onAway = (ev) => { if (!(ev.target instanceof Node && node.contains(ev.target))) closeCatPicker(false); };
+    document.addEventListener("mousedown", onDown, true);
+    window.addEventListener("scroll", onAway, true);
+    window.addEventListener("resize", onAway);
+    const off = () => {
+      document.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("scroll", onAway, true);
+      window.removeEventListener("resize", onAway);
+    };
+    catPicker = { node, anchor, off };
+    (items.find((b) => b.classList.contains("current")) || items[0]).focus();
+  }
+
   // ----------------------------------------------------------- card actions
   async function reassign(id, bucket) {
     const prev = (state.byId[id] || {}).manual_bucket || null;
@@ -417,16 +687,17 @@
     const panel = $("#similar-panel");
     const it = state.byId[id];
     $("#similar-title").textContent = "Photos similar to " + (it ? it.filename : "#" + num(id));
-    $("#similar-grid").innerHTML = skeletons(8);
+    const sg = $("#similar-grid");
+    sg.replaceChildren(...Array.from({ length: 8 }, () => el("div", { class: "skel" })));
     panel.hidden = false;
     try {
       const data = await api(`/api/images/${num(id)}/similar?k=24`);
       data.items.forEach((x) => { state.byId[x.id] = x; });
-      $("#similar-grid").innerHTML = data.items.length
-        ? data.items.map(cardHTML).join("")
-        : emptyHTML({ icon: "copy", title: "No similar photos", text: "Analyze the library first, then try again." });
+      sg.replaceChildren(...(data.items.length
+        ? data.items.map(cardNode)
+        : [emptyNode({ icon: "copy", title: "No similar photos", text: "Analyze the library first, then try again." })]));
     } catch (e) {
-      $("#similar-grid").innerHTML = emptyHTML({ icon: "alert", title: "Search failed", text: e.message });
+      sg.replaceChildren(emptyNode({ icon: "alert", title: "Search failed", text: e.message }));
     }
   }
 
@@ -439,10 +710,11 @@
   function bindDelegates() {
     document.addEventListener("click", async (ev) => {
       const t = ev.target.closest && ev.target.closest(
-        "[data-pick],[data-clear],[data-lock],[data-similar],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
+        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-similar],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
       if (!t) return;
       try {
-        if (t.dataset.pick) togglePick(num(t.dataset.pick), ev.shiftKey);
+        if (t.dataset.pick) await togglePick(num(t.dataset.pick), ev.shiftKey);
+        else if (t.dataset.catpick) openCatPicker(t, num(t.dataset.catpick));
         else if (t.dataset.clear) {
           const id = num(t.dataset.clear);
           const prev = await reassign(id, null);
@@ -459,6 +731,9 @@
         else if (t.hasAttribute("data-clearfilters")) {
           $("#q").value = ""; $("#catfilter").value = "";
           $("#manualonly").checked = false; $("#neardup").checked = false;
+          ["f-camera", "f-rating", "f-country"].forEach((id) => { $("#" + id).value = ""; });
+          $("#f-fav").checked = false;
+          resetScrubber();
           grids.cat.reset();
         } else if (t.hasAttribute("data-copytext")) {
           ev.preventDefault();
@@ -482,14 +757,38 @@
   }
 
   // ------------------------------------------------------------- lightbox
-  const lb = { open: false, ids: [], i: 0, token: 0 };
+  const lb = { open: false, ids: [], i: 0, token: 0, grid: null };
+  const lbCount = () => (lb.grid ? lb.grid.vg.total || 0 : lb.ids.length);
+  const lbIdAt = (i) => (lb.grid ? lb.grid.vg.idAt(i) : lb.ids[i]);
 
   function openLightbox(card) {
-    const box = card.parentElement;
-    lb.ids = $$(".card", box).map((c) => num(c.dataset.id));
-    lb.i = Math.max(0, lb.ids.indexOf(num(card.dataset.id)));
+    const g = gridOf(card);
+    const id = num(card.dataset.id);
+    lb.grid = g;
+    if (g) {
+      lb.ids = [];
+      lb.i = Math.max(0, g.vg.indexOfId(id));
+      g.vg.setCursor(id);
+    } else {  // a plain list of cards (burst view, similar photos)
+      lb.ids = $$(".card", card.parentElement).map((c) => num(c.dataset.id));
+      lb.i = Math.max(0, lb.ids.indexOf(id));
+    }
+    lbShow(card);
+  }
+
+  function openLightboxFor(g, id) {
+    const idx = g.vg.indexOfId(id);
+    if (idx < 0) return;
+    lb.grid = g;
+    lb.ids = [];
+    lb.i = idx;
+    g.vg.setCursor(id);
+    lbShow(null);
+  }
+
+  function lbShow(opener) {
     lb.open = true;
-    lb.opener = card;
+    lb.opener = opener;
     $("#lightbox").hidden = false;
     document.body.style.overflow = "hidden";
     lbRender();
@@ -501,29 +800,38 @@
     lb.open = false;
     $("#lightbox").hidden = true;
     document.body.style.overflow = "";
-    if (lb.opener && document.contains(lb.opener)) lb.opener.focus({ preventScroll: true });
+    if (lb.grid) {  // leave the grid on the photo that was last viewed
+      const id = lbIdAt(lb.i);
+      if (id != null) lb.grid.vg.setCursor(id);
+      lb.grid.vg.scrollToIndex(lb.i);
+    } else if (lb.opener && document.contains(lb.opener)) {
+      lb.opener.focus({ preventScroll: true });
+    }
   }
 
-  function lbStep(d) {
+  async function lbStep(d) {
     const n = lb.i + d;
-    if (n < 0 || n >= lb.ids.length) return;
+    if (n < 0 || n >= lbCount()) return;
+    if (lb.grid) {  // the next photo may sit on a page that has not been fetched yet
+      await lb.grid.vg.ensureLoaded(n, n + 1);
+      if (lb.grid.vg.idAt(n) == null) return;
+    }
     lb.i = n;
     lbRender();
   }
 
   function lbRender() {
-    const id = lb.ids[lb.i];
-    const card = $(`.card[data-id="${id}"]`);
-    const it = state.byId[id] || { id, filename: card ? ($(".fn", card) || {}).textContent : "Photo #" + id, _basic: true };
+    const id = lbIdAt(lb.i);
+    const it = state.byId[id] || { id, filename: "Photo #" + id, _basic: true };
     const img = $("#lb-img");
     const my = ++lb.token;
     img.alt = it.filename || "";
-    img.src = thumbUrl(id);
+    img.src = thumbUrl(id, "micro");  // already cached from the grid: shows instantly
     $("#lb-loading").hidden = false;
     const big = new Image();
     big.onload = () => { if (my === lb.token) { img.src = big.src; $("#lb-loading").hidden = true; } };
     big.onerror = () => { if (my === lb.token) $("#lb-loading").hidden = true; };
-    big.src = "/api/preview/" + num(id);
+    big.src = thumbUrl(id, "preview");
 
     $("#lb-title").textContent = it.filename || "";
     $("#lb-path").textContent = it.relative_path || it.path || "";
@@ -536,7 +844,9 @@
     if (it.aesthetic != null) add("Appeal", num(it.aesthetic).toFixed(2));
     if (it.face_count) add("Faces", it.face_count);
     if (it.rating != null) add("Rating", "★".repeat(Math.max(0, Math.min(5, num(it.rating)))) || num(it.rating));
-    flagBadges(it).replace(/<[^>]+>/g, "|").split("|").filter(Boolean).forEach((f, k) => { if (k === 0) add("Notes", f); });
+    const notes = flagList(it).map((f) => f.text);
+    if (notes.length) add("Notes", notes.join(", "));
+    if (it.city || it.country_code) add("Place", [it.city, it.region, it.country_code].filter(Boolean).join(", "));
     $("#lb-meta").innerHTML = rows.join("");
 
     renderWhy(it);
@@ -550,10 +860,11 @@
     $("#lb-clear").disabled = !full || !it.manual_bucket;
     $("#lb-lock span").textContent = it.locked ? "Unlock" : "Lock";
     $("#lb-prev").disabled = lb.i === 0;
-    $("#lb-next").disabled = lb.i >= lb.ids.length - 1;
-    $("#lb-count").textContent = `${lb.i + 1} of ${lb.ids.length}`;
-    const nb = lb.ids[lb.i + 1];
-    if (nb) new Image().src = "/api/preview/" + num(nb);
+    $("#lb-next").disabled = lb.i >= lbCount() - 1;
+    $("#lb-count").textContent = `${fmtN(lb.i + 1)} of ${fmtN(lbCount())}`;
+    const nb = lbIdAt(lb.i + 1);
+    if (nb != null) new Image().src = thumbUrl(nb, "preview");
+    updateLbRating(it);
   }
 
   function renderWhy(it) {
@@ -582,7 +893,7 @@
       if (e.target.id === "lightbox" || e.target.classList.contains("lb-stage")) closeLightbox();
     });
     $("#lb-cat").onchange = async (e) => {
-      const id = lb.ids[lb.i];
+      const id = lbIdAt(lb.i);
       try {
         const prev = await reassign(id, e.target.value);
         state.undo.push({ id, prev });
@@ -590,10 +901,20 @@
         loadStats();
       } catch (err) { toast(err.message, "err"); }
     };
-    $("#lb-lock").onclick = () => toggleLock(lb.ids[lb.i]).catch((e) => toast(e.message, "err"));
-    $("#lb-similar").onclick = () => { const id = lb.ids[lb.i]; closeLightbox(); showSimilar(id); };
+    $("#lb-lock").onclick = () => toggleLock(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
+    $$("#lb-rate .star").forEach((b) => {
+      b.onclick = () => {
+        const id = lbIdAt(lb.i);
+        const n = num(b.dataset.star);
+        const same = num((state.byId[id] || {}).rating) === n;  // the current star again clears it
+        rateItem(id, same ? 0 : n).catch((e) => toast(e.message, "err"));
+      };
+    });
+    $("#lb-fav").onclick = () => toggleFavorite(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
+    $("#lb-reject").onclick = () => toggleReject(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
+    $("#lb-similar").onclick = () => { const id = lbIdAt(lb.i); closeLightbox(); showSimilar(id); };
     $("#lb-clear").onclick = async () => {
-      const id = lb.ids[lb.i];
+      const id = lbIdAt(lb.i);
       try { const prev = await reassign(id, null); state.undo.push({ id, prev }); toast("Back to the AI choice", "ok"); }
       catch (e) { toast(e.message, "err"); }
     };
@@ -710,32 +1031,37 @@
       (rest.length ? `<span class="muted">Use the viewer or Move to for ${esc(rest.map(catLabel).join(", "))}</span>` : "");
   }
 
-  function activeTriageGrid() {
-    if (state.tab === "uncertain") return grids.uncertain;
-    if (state.tab === "junk") return grids.junk;
-    return null;
+  function activeGrid() {
+    const key = { categories: "cat", highlights: "highlights", events: "event", junk: "junk", uncertain: "uncertain" }[state.tab];
+    return key ? grids[key] || null : null;
   }
 
-  function moveSel(g, delta) {
-    const cs = g.cards();
-    if (!cs.length) return;
-    state.triageGrid = g;
-    state.triageSel = Math.min(cs.length - 1, Math.max(0, state.triageSel + delta));
-    g.applySel();
-    cs[state.triageSel].scrollIntoView({ block: "nearest" });
-    if (state.triageSel >= cs.length - 3) g.loadMore();
-  }
+  const isTriage = (g) => g === grids.uncertain || g === grids.junk;
+  const MODALS = ["#picker", "#help"];
+  const SELF_MANAGED = ["#confirm-modal", "#auth-modal", "#restart-overlay"];  // they handle their own keys
+  const open = (sel) => { const e = $(sel); return !!(e && !e.hidden); };
+  const anyModal = () => MODALS.some(open);
 
-  const anyModal = () => !$("#picker").hidden || !$("#help").hidden;
+  // Rating, reject, favourite and lock for one photo. In the triage tabs 1-9 mean categories instead.
+  async function shortcut(k, id, triage) {
+    if (id == null) return false;
+    if (/^[1-5]$/.test(k) && !triage) { await rateItem(id, Number(k)); return true; }
+    if (k === "0") { await rateItem(id, 0); return true; }
+    if (k === "x") { await toggleReject(id); return true; }
+    if (k === "f") { await toggleFavorite(id); return true; }
+    if (k === "l") { await toggleLock(id); return true; }
+    return false;
+  }
 
   async function onKey(ev) {
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    if (SELF_MANAGED.some(open)) return;
     const tag = (ev.target.tagName || "").toLowerCase();
     const typing = tag === "input" || tag === "select" || tag === "textarea";
 
     if (ev.key === "Escape") {
-      if (!$("#picker").hidden) closePicker();
-      else if (!$("#help").hidden) $("#help").hidden = true;
+      if (open("#picker")) closePicker();
+      else if (open("#help")) $("#help").hidden = true;
       else if (lb.open) closeLightbox();
       else if (!$("#similar-panel").hidden) $("#similar-panel").hidden = true;
       else if (state.picks.size) clearPicks();
@@ -744,51 +1070,99 @@
     }
     if (typing || anyModal()) return;
     if (ev.key === "?") { $("#help").hidden = false; ev.preventDefault(); return; }
-
-    if (lb.open) {
-      if (ev.key === "ArrowLeft") lbStep(-1);
-      else if (ev.key === "ArrowRight") lbStep(1);
-      else if (ev.key.toLowerCase() === "l") toggleLock(lb.ids[lb.i]).catch((e) => toast(e.message, "err"));
-      else return;
-      ev.preventDefault();
-      return;
-    }
-
-    const g = activeTriageGrid();
-    if (!g) return;
-    state.triageGrid = g;
     const k = ev.key.toLowerCase();
+
     try {
-      if (k === "j") moveSel(g, 1);
-      else if (k === "k") moveSel(g, -1);
-      else if (k === " " || k === "enter") {
-        const card = g.cards()[state.triageSel];
-        if (!card) return;
-        openLightbox(card);
-      } else if (/^[1-9]$/.test(k)) {
-        const card = g.cards()[state.triageSel];
+      if (lb.open) {
+        if (k === "arrowleft") await lbStep(-1);
+        else if (k === "arrowright") await lbStep(1);
+        else if (!(await shortcut(k, lbIdAt(lb.i), false))) return;
+        ev.preventDefault();
+        return;
+      }
+
+      const g = activeGrid();
+      if (!g) return;
+      const triage = isTriage(g);
+      if (triage) state.triageGrid = g;
+      const cols = Math.max(1, g.vg.cols);
+      const step = { arrowright: 1, arrowleft: -1, arrowdown: cols, arrowup: -cols }[k]
+        ?? (triage ? { j: 1, k: -1 }[k] : undefined);
+      if (step !== undefined) {  // unrendered photos are scrolled into view first
+        await g.vg.moveCursor(step);
+        ev.preventDefault();
+        return;
+      }
+      const id = g.vg.cursorId;
+      if (k === " " || k === "enter") {
+        if (ev.target.closest && ev.target.closest(".card, button, a, [role='button']")) return;  // they handle it
+        if (id == null) return;
+        openLightboxFor(g, id);
+      } else if (triage && /^[1-9]$/.test(k)) {
         const cat = triageCats()[Number(k) - 1];
-        if (!card || !cat) return;
-        const id = num(card.dataset.id);
+        if (id == null || !cat) return;
         const prev = await reassign(id, cat);
         state.undo.push({ id, prev });
         toast(`Moved to ${catLabel(cat)}`, "ok");
-        const left = g.cards().length;
-        if (state.triageSel >= left) state.triageSel = left - 1;
-        g.applySel();
         loadStats();
-      } else if (k === "u") {
+      } else if (triage && k === "u") {
         const last = state.undo.pop();
         if (!last) { toast("Nothing to undo", "err"); return; }
         await reassign(last.id, last.prev);
         toast("Change undone", "ok");
         await g.reset();
-      } else if (k === "l") {
-        const card = g.cards()[state.triageSel];
-        if (card) await toggleLock(num(card.dataset.id));
-      } else return;
+      } else if (!(await shortcut(k, id, triage))) {
+        return;
+      }
       ev.preventDefault();
     } catch (e) { toast(e.message, "err"); }
+  }
+
+  // ------------------------------------------------------ ratings and favourites
+  async function ratingRequest(id, kind, body, describe) {
+    const url = `/api/images/${num(id)}/${kind}`;
+    try {
+      const r = await post(url, body);
+      itemUpdated(r.item);
+      return r.item;
+    } catch (e) {
+      if (!(e.status === 409 && e.body && e.body.needs_confirmation)) throw e;
+      // Another program changed this photo's sidecar. Ask before overwriting it.
+      const yes = await showConfirmDialog({
+        title: "Overwrite the sidecar?",
+        message: `This photo's sidecar was modified outside Photocure. Overwrite it with ${describe}?`,
+        confirmText: "Overwrite", variant: "warning" });
+      if (!yes) return null;
+      const r = await post(url, Object.assign({}, body, { overwrite: true }));
+      itemUpdated(r.item);
+      return r.item;
+    }
+  }
+
+  async function rateItem(id, n) {
+    const it = await ratingRequest(id, "rating", { rating: n },
+      n ? `a rating of ${n} star${n === 1 ? "" : "s"}` : "no rating");
+    if (it) toast(n ? `Rated ${n} star${n === 1 ? "" : "s"}` : "Rating cleared", "ok");
+  }
+
+  async function toggleReject(id) {
+    const un = num((state.byId[id] || {}).rating) === -1;
+    const it = await ratingRequest(id, "reject", { reject: !un }, un ? "no rating" : "a reject");
+    if (it) toast(un ? "No longer rejected" : "Rejected. Nothing was deleted.", "ok");
+  }
+
+  async function toggleFavorite(id) {
+    const r = await post(`/api/images/${num(id)}/favorite`, {});
+    itemUpdated(r.item);
+    toast(r.item.is_favorite ? "Added to favourites" : "Removed from favourites", "ok");
+  }
+
+  function updateLbRating(it) {
+    const rating = num(it.rating);
+    $$("#lb-rate .star").forEach((b) => b.classList.toggle("on", num(b.dataset.star) <= rating));
+    $("#lb-fav").setAttribute("aria-pressed", String(!!it.is_favorite));
+    $("#lb-reject").setAttribute("aria-pressed", String(rating === -1));
+    $$("#lb-rate button").forEach((b) => { b.disabled = !!it._basic; });
   }
 
   // ------------------------------------------------------------------ bursts
@@ -818,84 +1192,142 @@
     await showBurst(data.items[0].id);
   }
 
+  // Tight face crops with the eye state, built from DOM nodes only.
+  async function showFaces(imageId, host) {
+    const data = await api(`/api/images/${num(imageId)}/faces`);
+    host.replaceChildren();
+    if (!data.items.length) {
+      const p = document.createElement("p");
+      p.className = "help";
+      p.textContent = "No faces were found in this photo.";
+      host.appendChild(p);
+      return;
+    }
+    const wording = { open: "Eyes open", possible: "Eyes may be closing", closed: "Eyes closed", unknown: "Eyes not measured" };
+    data.items.forEach((f) => {
+      const chip = document.createElement("figure");
+      chip.className = "facechip" + (f.is_blink ? " blink" : "");
+      if (f.url) {
+        const img = document.createElement("img");
+        img.loading = "lazy";
+        img.alt = "Face crop";
+        img.src = f.url;
+        chip.appendChild(img);
+      }
+      const cap = document.createElement("figcaption");
+      const score = f.eye_closed_score != null ? " (" + num(f.eye_closed_score).toFixed(2) + ")" : "";
+      cap.textContent = (wording[f.eye_status] || wording.unknown) + score;
+      chip.appendChild(cap);
+      host.appendChild(chip);
+    });
+  }
+
+  async function rejectBlinks(burstId, count) {
+    const yes = await showConfirmDialog({
+      title: "Reject all blinks?",
+      message: `${fmtN(count)} alternate${count === 1 ? "" : "s"} with closed eyes will go to Junk review. The best shot stays where it is. No files are moved, and you can restore them.`,
+      confirmText: "Reject blinks", variant: "warning" });
+    if (!yes) return;
+    try {
+      const r = await post(`/api/bursts/${num(burstId)}/reject-blinks`, {});
+      toast(r.moved ? `Sent ${fmtN(r.moved)} to Junk review` : (r.note || "Nothing to reject"), "ok");
+      await showBurst(burstId);
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  async function restoreBlinks(burstId) {
+    try {
+      const r = await post(`/api/bursts/${num(burstId)}/restore-blinks`, {});
+      toast(`Restored ${fmtN(r.restored)}`, "ok");
+      await showBurst(burstId);
+    } catch (e) { toast(e.message, "err"); }
+  }
+
   async function showBurst(id) {
     $$(".burstrow", $("#burstlist")).forEach((r) => r.classList.toggle("on", num(r.dataset.burst) === id));
     const data = await api("/api/burst/" + num(id));
-    $("#burstdetail").innerHTML = `<h3>${esc(data.burst)}</h3><div class="burstgrid">` +
+    $("#burstdetail").innerHTML = `<h3>${esc(data.burst)}</h3>
+      <div class="btn-row" id="blinkbar"></div>
+      <div class="burstgrid">` +
       data.members.map((m) => {
         const bits = [];
         if (m.sharpness_norm != null) bits.push("sharpness " + num(m.sharpness_norm).toFixed(2));
         if (m.face_confidence != null) bits.push("face " + num(m.face_confidence).toFixed(2));
-        if (m.ear != null) bits.push("eyes " + num(m.ear).toFixed(2));
+        if (m.eye_closed != null) bits.push("eyes closed " + num(m.eye_closed).toFixed(2));
         return `<figure class="card${m.is_best_shot ? " best" : ""}" data-id="${num(m.id)}" tabindex="0">
           <div class="thumb">
             <img loading="lazy" src="${thumbUrl(m.id)}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
-            <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}</div>
+            <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}</div>
           </div>
           <figcaption class="caption">
             <div class="fn">${esc(m.filename)}</div>
             <div class="meta">${num(m.width)}×${num(m.height)}${m.taken_at ? ", " + esc(String(m.taken_at).slice(11, 19)) : ""}</div>
             <div class="meta">${esc(bits.join(", "))}</div>
+            ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}">Inspect faces</button>` : ""}
           </figcaption>
         </figure>`;
-      }).join("") + "</div>";
+      }).join("") + `</div><div id="facepanel" class="facepanel"></div>`;
+    const bar = $("#blinkbar");
+    const addBtn = (label, fn) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn";
+      b.textContent = label;
+      b.onclick = fn;
+      bar.appendChild(b);
+    };
+    if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
+    if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
+    $$("[data-faces]", $("#burstdetail")).forEach((b) => {
+      b.onclick = () => showFaces(num(b.dataset.faces), $("#facepanel")).catch((e) => toast(e.message, "err"));
+    });
   }
 
-  // ------------------------------------------------------- events and people
-  function clusterRow(kind, c, on) {
-    const title = kind === "event"
-      ? (c.label || "Event " + num(c.id)) : (c.name || "Person " + num(c.id));
-    const sub = kind === "event"
-      ? `${fmtN(c.image_count)} photos, ${esc((c.start || "").slice(0, 10))} to ${esc((c.end || "").slice(0, 10))}`
-      : `${fmtN(c.face_count)} faces`;
+  // ------------------------------------------------------------------ events
+  function clusterRow(c, on) {
+    const title = c.label || "Event " + num(c.id);
+    const sub = `${fmtN(c.image_count)} photos, ${esc((c.start || "").slice(0, 10))} to ${esc((c.end || "").slice(0, 10))}`;
     const thumb = c.cover_id != null
       ? `<img class="rowthumb" loading="lazy" src="${thumbUrl(c.cover_id)}" alt="">` : "";
-    return `<div class="burstrow${on ? " on" : ""}" role="button" tabindex="0" data-kind="${kind}" data-cid="${num(c.id)}">
+    return `<div class="burstrow${on ? " on" : ""}" role="button" tabindex="0" data-cid="${num(c.id)}">
       <div class="rowmain">${thumb}<div style="min-width:0"><div class="name">${esc(title)}</div>
         <div class="info">${sub}</div></div></div>
-      <button class="mini" data-rename="${kind}:${num(c.id)}">Rename</button>
+      <button class="mini" data-rename="${num(c.id)}">Rename</button>
     </div>`;
   }
 
-  async function loadClusters(kind) {
-    const url = kind === "event" ? "/api/events" : "/api/people";
-    const listEl = $(kind === "event" ? "#eventlist" : "#peoplelist");
-    const cntEl = $(kind === "event" ? "#eventcount" : "#peoplecount");
-    const gridKey = kind === "event" ? "event" : "person";
-    const data = await api(url);
-    cntEl.textContent = fmtN(data.count) + (kind === "event" ? " events" : " people");
+  async function loadEvents() {
+    const listEl = $("#eventlist");
+    const data = await api("/api/events");
+    $("#eventcount").textContent = fmtN(data.count) + " events";
     if (!data.items.length) {
       listEl.innerHTML = "";
-      grids[gridKey].el.innerHTML = emptyHTML(kind === "event"
-        ? { icon: "cal", title: "No events yet", text: "Choose the gap and distance above, then find events. Photos need dates to be grouped." }
-        : { icon: "users", title: "No people yet", text: "Faces are grouped after analysis. Select Find people to start." });
-      grids[gridKey].more.innerHTML = "";
+      grids.event.vg.showEmpty(emptyNode({ icon: "cal", title: "No events yet",
+        text: "Choose the gap and distance above, then find events. Photos need dates to be grouped." }));
       return;
     }
-    const cur = kind === "event" ? state.eventId : state.personId;
-    const selected = data.items.some((c) => c.id === cur) ? cur : data.items[0].id;
-    if (kind === "event") state.eventId = selected; else state.personId = selected;
-    listEl.innerHTML = data.items.map((c) => clusterRow(kind, c, c.id === selected)).join("");
-    grids[gridKey].reset();
+    const selected = data.items.some((c) => c.id === state.eventId) ? state.eventId : data.items[0].id;
+    state.eventId = selected;
+    listEl.innerHTML = data.items.map((c) => clusterRow(c, c.id === selected)).join("");
+    grids.event.reset();
     $$(".burstrow", listEl).forEach((row) => {
       const pick = (e) => {
         if (e.target.closest("[data-rename]")) return;
         $$(".burstrow", listEl).forEach((r) => r.classList.remove("on"));
         row.classList.add("on");
-        if (kind === "event") state.eventId = num(row.dataset.cid); else state.personId = num(row.dataset.cid);
-        grids[gridKey].reset();
+        state.eventId = num(row.dataset.cid);
+        grids.event.reset();
       };
       row.onclick = pick;
       row.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === row) { e.preventDefault(); pick(e); } };
     });
     $$("[data-rename]", listEl).forEach((b) => {
       b.onclick = async () => {
-        const [k, id] = b.dataset.rename.split(":");
         const name = prompt("New name:");
         if (name == null || !name.trim()) return;
         try {
-          await post(`/api/${k === "event" ? "events" : "people"}/${num(id)}/rename`, { name });
-          await loadClusters(k);
+          await post(`/api/events/${num(b.dataset.rename)}/rename`, { name });
+          await loadEvents();
         } catch (e) { toast(e.message, "err"); }
       };
     });
@@ -920,7 +1352,7 @@
         const j = await api(`/api/jobs/${encodeURIComponent(jobId)}?since=${since}`);
         j.log.forEach((l) => logLine(l.msg, l.level));
         since = j.next;
-        if (j.status !== "running") {
+        if (j.status !== "running" && j.status !== "stopping") {
           if (j.status === "error") throw new Error(j.error || label + " failed");
           return j.result;
         }
@@ -986,6 +1418,13 @@
       if (res && res.ok) {
         logLine(`Applied ${fmtN(res.executed)} files (change ${res.transaction_id})`, "ok");
         toast(`Organized ${fmtN(res.executed)} photos. You can undo this from this page.`, "ok");
+        if (res.backup_warning) toast(res.backup_warning, "err");
+        if (num(res.copy_fallbacks) > 0) {
+          addBanner("copy", "Cross-filesystem link detected; files were copied instead of hardlinked.", [["Dismiss", (ev) => ev.currentTarget.parentNode.remove()]]);
+        }
+        if (num(res.skipped_collisions) > 0) {
+          addBanner("skip", `${fmtN(res.skipped_collisions)} files were left in place because their names were already taken.`, [["Dismiss", (ev) => ev.currentTarget.parentNode.remove()]]);
+        }
       } else if (res && res.error) {
         logLine(res.error, "err");
         toast(res.error, "err");
@@ -1001,7 +1440,10 @@
 
   async function startUndo() {
     const tid = $("#txnselect").value || null;
-    if (!confirm("Undo this change? Files go back to where they were before.")) return;
+    const okUndo = await showConfirmDialog({
+      title: "Undo this change?", message: "Files go back to where they were before.",
+      confirmText: "Undo", variant: "warning" });
+    if (!okUndo) return;
     try {
       const r = await post("/api/undo", { transaction_id: tid, verify: $("#undo-verify").checked });
       if (!r.job_id) { toast(r.error || "Nothing to undo", "err"); return; }
@@ -1286,6 +1728,7 @@
       $("#eff-" + k).textContent = num(saved[key]) > 0 ? `Using ${fmtN(eff[key])}` : `Auto uses ${fmtN(eff[key])}`;
       input.oninput = () => { input.classList.remove("input-error"); $("#err-" + k).hidden = true; show(); };
     });
+    $("#set-collision").value = saved.collision_policy || "sequence";
     $("#settings-msg").textContent = "";
     $("#settings-msg").className = "help";
   }
@@ -1323,7 +1766,8 @@
       msg.className = "help err";
       return;
     }
-    const body = Object.assign({ device: state.draft.device, device_index: num(state.draft.device_index) }, workers);
+    const body = Object.assign({ device: state.draft.device, device_index: num(state.draft.device_index),
+      collision_policy: $("#set-collision").value }, workers);
     try {
       state.settings = await post("/api/settings", body);
       renderChip();
@@ -1430,6 +1874,7 @@
       renderComp(ov);
       renderCounts(ov);
     } catch (e) { /* ignore */ }
+    loadFacets();
   }
 
   // ------------------------------------------------------------------- tabs
@@ -1442,7 +1887,6 @@
 
   function showTab(name, keepPicks) {
     state.tab = name;
-    state.triageSel = -1;
     state.triageGrid = null;
     if (!keepPicks) clearPicks();
     $$(".tab").forEach((t) => {
@@ -1465,8 +1909,7 @@
       if (g.total == null || g.stale) { g.stale = false; g.reset(); }
     }
     if (name === "bursts") renderBursts().catch((e) => toast(e.message, "err"));
-    if (name === "events") loadClusters("event").catch((e) => toast(e.message, "err"));
-    if (name === "people") loadClusters("person").catch((e) => toast(e.message, "err"));
+    if (name === "events") loadEvents().catch((e) => toast(e.message, "err"));
     if (name === "actions") loadTransactions().catch(() => {});
     if (name === "settings") refreshSettings(true);
     if (name === "uncertain") renderLegend();
@@ -1518,9 +1961,11 @@
   }
 
   async function resetLibrary() {
-    if (!confirm("Are you sure you want to clear all indexed photos, AI analysis, bursts, and plans?\n\nThis will remove everything from the Photocure database.\nYour original photo files on disk will NOT be deleted or modified.")) {
-      return;
-    }
+    const okReset = await showConfirmDialog({
+      title: "Clear the indexed library?",
+      message: "This removes every indexed photo, AI analysis, burst and plan from the Photocure database. Your original photo files are not deleted or modified.",
+      confirmText: "Clear library", variant: "danger" });
+    if (!okReset) return;
     const btns = [$("#btn-reset-library"), $("#btn-import-reset")];
     btns.forEach((b) => {
       if (b) {
@@ -1584,8 +2029,124 @@
     refreshBackend();
   }
 
+  // ------------------------------------------------------- lifecycle
+  function showRestartOverlay() {
+    const box = $("#restart-overlay");
+    $("#restart-spinner").hidden = false;
+    $("#restart-text").textContent = "Restarting Photocure...";
+    box.hidden = false;
+    const t0 = Date.now();
+    const timer = setInterval(async () => {
+      // The old process can still answer for a moment, so wait before trusting /healthz.
+      try {
+        const r = await fetch("/healthz", { cache: "no-store" });
+        if (r.ok && Date.now() - t0 > 1000) { clearInterval(timer); window.location.reload(); return; }
+      } catch (e) { /* server is down; keep polling */ }
+      if (Date.now() - t0 > 60000) {
+        clearInterval(timer);
+        $("#restart-spinner").hidden = true;
+        $("#restart-text").textContent = "Server did not restart within 60 seconds. Please run 'photocure start' from your terminal.";
+      }
+    }, 500);
+  }
+
+  async function restartServer() {
+    const go = await showConfirmDialog({
+      title: "Restart Photocure?", message: "The server restarts and this page reloads.",
+      confirmText: "Restart", variant: "warning" });
+    if (!go) return;
+    try {
+      await api("/api/restart?force=false", { method: "POST" });
+    } catch (e) {
+      const msg = (e.body && e.body.error) || e.message;
+      if (e.status !== 409 || !/background task/.test(msg)) { toast(msg, "err"); return; }
+      const force = await showConfirmDialog({
+        title: "Restart anyway?", message: "A scan or analysis is running and will stop.",
+        confirmText: "Restart anyway", variant: "danger" });
+      if (!force) return;
+      try { await api("/api/restart?force=true", { method: "POST" }); }
+      catch (e2) { toast((e2.body && e2.body.error) || e2.message, "err"); return; }
+    }
+    showRestartOverlay();
+  }
+
+  function addBanner(kind, text, actions) {
+    const box = $("#banners");
+    const el = document.createElement("div");
+    el.className = "banner";
+    el.dataset.kind = kind;
+    const span = document.createElement("span");
+    span.textContent = text;
+    el.appendChild(span);
+    (actions || []).forEach(([label, fn]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn";
+      b.textContent = label;
+      b.onclick = fn;
+      el.appendChild(b);
+    });
+    box.appendChild(el);
+    return el;
+  }
+
+  async function checkOrphans() {
+    let r;
+    try { r = await api("/api/transactions/orphaned"); } catch (e) { return; }
+    $$('#banners [data-kind="orphan"]').forEach((n) => n.remove());
+    (r.transactions || []).forEach((t) => {
+      const url = "/api/transactions/" + encodeURIComponent(t.transaction_id);
+      const settle = async (path, label) => {
+        try { await post(url + path); toast(label, "ok"); } catch (e) { toast(e.message, "err"); }
+        checkOrphans();
+      };
+      addBanner("orphan",
+        `Incomplete transaction from unexpected shutdown detected (${t.transaction_id}). Resume to finish, or Undo to roll back.`,
+        [["Resume", () => settle("/resume", "Transaction settled")],
+         ["Undo", async () => {
+           const yes = await showConfirmDialog({
+             title: "Roll back this transaction?", message: "Files moved so far go back to where they were.",
+             confirmText: "Roll back", variant: "warning" });
+           if (yes) settle("/rollback", "Transaction rolled back");
+         }]]);
+    });
+  }
+
+  async function loadAboutInfo() {
+    try {
+      const about = await api("/api/about");
+      const versionBadge = $("#header-version-badge");
+      if (versionBadge) versionBadge.textContent = about.version || "0.0.0";
+      const sidebarVersion = $("#sidebar-version");
+      if (sidebarVersion) sidebarVersion.textContent = about.version || "0.0.0";
+
+      const aboutCard = $("#about-card");
+      if (aboutCard) {
+        const modelsList = (about.models || []).length > 0
+          ? `<div style="margin-top:12px;"><strong>Active models:</strong><ul style="margin:6px 0;padding-left:20px;">${about.models.map(m => `<li>${esc(m.name)}</li>`).join("")}</ul></div>`
+          : "";
+        aboutCard.innerHTML = `
+          <div style="font-size:13px;line-height:1.6;color:var(--mut);">
+            <p style="margin:0 0 8px;">Version: <strong>${esc(about.version || "0.0.0")}</strong></p>
+            <p style="margin:0 0 8px;">By <strong>${esc(about.author || "Unknown")}</strong> • ${esc(about.license || "MIT")}</p>
+            <p style="margin:0 0 8px;">Acceleration: <strong>${esc(about.device || "CPU")}</strong></p>
+            <p style="margin:0 0 8px;">Python: ${esc(about.python || "unknown")}</p>
+            ${modelsList}
+            <p style="margin:10px 0 0;"><a href="/licenses" target="_blank" class="link">View full licenses</a></p>
+          </div>
+        `;
+      }
+    } catch (e) {
+      console.warn("Could not load about info:", e);
+    }
+  }
+
   async function init() {
     applyTheme(document.documentElement.dataset.theme || "light");
+    await exchangeFromHash();
+    checkOrphans();
+    const btnRestart = $("#btn-restart");
+    if (btnRestart) btnRestart.onclick = restartServer;
     try {
       const cfg = await api("/api/config");
       state.cats = sortCats(cfg.categories.map((c) => c.value));
@@ -1598,8 +2159,10 @@
         "graphic", "accidental", "duplicate", "uncertain", "unknown"]);
       state.junk = new Set(["screenshot", "document", "graphic", "accidental", "duplicate"]);
     }
+    await loadAboutInfo();
     fillCatFilters();
     setupGrids();
+    bindFilters();
     bindDelegates();
     bindLightbox();
     bindPicker();
@@ -1625,6 +2188,7 @@
     const setDens = () => {
       document.documentElement.style.setProperty("--thumb-min", dens.value + "px");
       try { localStorage.setItem("pcur-density", dens.value); } catch (e) { /* ignore */ }
+      allGrids().forEach((g) => g.vg.update());  // card size changed, so the rows are different
     };
     dens.addEventListener("input", setDens);
     setDens();
@@ -1695,14 +2259,7 @@
           gap_hours: num($("#ev-gap").value) || 2, gps_km: num($("#ev-km").value) || 1,
         });
         toast(`Found ${fmtN(r.events)} events`, "ok");
-        await loadClusters("event");
-      } catch (e) { toast(e.message, "err"); }
-    };
-    $("#btn-people").onclick = async () => {
-      try {
-        const r = await post("/api/people/cluster", {});
-        toast(`Found ${fmtN(r.people)} people`, "ok");
-        await loadClusters("person");
+        await loadEvents();
       } catch (e) { toast(e.message, "err"); }
     };
 

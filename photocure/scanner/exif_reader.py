@@ -27,6 +27,8 @@ from .xmp import read_xmp
 # Explicit decompression-bomb cap (pixels); Pillow errors out above twice this.
 MAX_IMAGE_PIXELS_CAP = 500_000_000
 
+from .. import heif as _heif  # noqa: F401  (registers the HEIF opener so Pillow can read HEIC EXIF)
+
 try:
     from PIL import Image
     _cur = Image.MAX_IMAGE_PIXELS

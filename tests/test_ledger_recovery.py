@@ -114,7 +114,7 @@ def test_ledger_names_the_collision_renamed_target(tmp_path):
     ActionEngine(w.cfg, db_path=w.db).execute(acts, transaction_id="TX_COL")
     with get_session(w.db) as s:
         row = PhotoRepository(s).ledger_by_txn("TX_COL")[0]
-        assert row.target_path != str(target) and "_dup" in row.target_path
+        assert row.target_path != str(target) and " (1)" in row.target_path
     RollbackEngine(w.cfg, db_path=w.db).rollback_transaction("TX_COL")
     assert target.read_bytes() == b"pre-existing user file"
     assert src.exists()

@@ -155,15 +155,15 @@ def test_missing_embedding_or_time_excluded(cfg):
 def test_best_shot_prefers_sharp_open_eye(cfg):
     sel = BestShotSelector(cfg)
     sharp = ShotCandidate(image_id=1, sharpness_norm=0.95, face_sharpness_norm=0.9,
-                          eye_open=0.28, width=4000, height=3000, has_face=True)
+                          eye_open=0.95, width=4000, height=3000, has_face=True)
     blurry = ShotCandidate(image_id=2, sharpness_norm=0.10, face_sharpness_norm=0.1,
-                           eye_open=0.27, width=4000, height=3000, has_face=True)
+                           eye_open=0.93, width=4000, height=3000, has_face=True)
     closed1 = ShotCandidate(image_id=3, sharpness_norm=0.80, face_sharpness_norm=0.7,
                             eye_open=0.10, width=4000, height=3000, has_face=True)
     closed2 = ShotCandidate(image_id=4, sharpness_norm=0.78, face_sharpness_norm=0.65,
                             eye_open=0.12, width=4000, height=3000, has_face=True)
     lowres = ShotCandidate(image_id=5, sharpness_norm=0.95, face_sharpness_norm=0.9,
-                           eye_open=0.28, width=640, height=480, has_face=True)
+                           eye_open=0.95, width=640, height=480, has_face=True)
     best = sel.pick_best_shot([closed1, blurry, sharp, closed2, lowres])
     assert best is not None
     assert best.image_id == 1
@@ -192,12 +192,11 @@ def test_face_components_ignored_without_face(cfg):
 
 def test_eye_openness_mapping(cfg):
     from photocure.clustering.best_shot_selector import _eye_open_score
-    t = cfg.burst
-    assert _eye_open_score(0.10, t) == 0.0
-    assert _eye_open_score(t.ear_open, t) == 1.0
-    assert _eye_open_score(0.5, t) == 1.0
-    mid = _eye_open_score((t.ear_closed + t.ear_open) / 2, t)
-    assert 0.4 < mid < 0.6
+    # Openness is 1 - eye_closed_score and is only clipped to [0, 1].
+    assert _eye_open_score(0.10) == pytest.approx(0.10)
+    assert _eye_open_score(1.5) == 1.0
+    assert _eye_open_score(-0.2) == 0.0
+    assert _eye_open_score(None) is None
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +362,16 @@ def test_candidate_uses_taxonomy_face_gate(cfg):
     assert _candidate_from_record(rec, cfg.taxonomy.face_confidence_min).has_face is False
     rec.faces[0].confidence = 0.9
     assert _candidate_from_record(rec, cfg.taxonomy.face_confidence_min).has_face is True
+
+
+def test_candidate_derives_openness_and_blink_count_from_the_blink_fields(cfg):
+    from photocure.clustering.best_shot_selector import _candidate_from_record
+    from photocure.db.models import FaceDetection, ImageRecord
+    rec = ImageRecord(id=1, path="/p", filename="p", width=100, height=100, blink_count=2)
+    rec.faces = [FaceDetection(bbox_x1=0, bbox_y1=0, bbox_x2=9, bbox_y2=9, confidence=0.9,
+                               face_sharpness=200, eye_closed_score=0.8)]
+    c = _candidate_from_record(rec)
+    assert c.eye_open == pytest.approx(0.2) and c.blink_count == 2
 
 
 def test_candidate_carries_unknown_eye_and_aesthetic(cfg):

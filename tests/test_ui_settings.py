@@ -80,8 +80,9 @@ def test_get_settings_shape(env):
     assert "fallback_reason" in j and "requested" in j
 
 
-def test_get_settings_needs_no_token(env):
-    assert TestClient(env.app).get("/api/settings").status_code == 200
+def test_get_settings_needs_a_token(env):
+    assert TestClient(env.app).get("/api/settings").status_code == 401
+    assert env.client.get("/api/settings").status_code == 200
 
 
 # -------------------------------------------------------------------- POST
@@ -124,9 +125,9 @@ def test_post_rejects_bad_values_with_plain_message(env, body, needle):
 
 def test_post_needs_token(env):
     anon = TestClient(env.app)
-    assert anon.post("/api/settings", json={"device": "cpu"}).status_code == 403
+    assert anon.post("/api/settings", json={"device": "cpu"}).status_code == 401
     assert anon.post("/api/settings", json={"device": "cpu"},
-                     headers={"X-PCUR-Token": "nope"}).status_code == 403
+                     headers={"X-PCUR-Token": "nope"}).status_code == 401
 
 
 def test_post_rejects_non_object_body(env):

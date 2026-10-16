@@ -67,8 +67,8 @@ def test_ui_scan_and_ingest(tmp_path):
 def test_ui_mutations_require_token(tmp_path):
     app = create_app(str(tmp_path / "tok.db"))
     client = TestClient(app)
-    assert client.post("/api/cluster", json={}).status_code == 403
+    assert client.post("/api/cluster", json={}).status_code == 401
     r = client.post("/api/cluster", json={}, headers={"X-PCUR-Token": "wrong"})
-    assert r.status_code == 403
+    assert r.status_code == 401
     r = client.post("/api/cluster", json={}, headers={"X-PCUR-Token": app.state.token})
     assert r.status_code == 200

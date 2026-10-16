@@ -4,7 +4,6 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 import pytest
@@ -15,12 +14,16 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_package_and_entry_points():
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        tomllib = pytest.importorskip("tomli")
     meta = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert meta["project"]["name"] == "photocure"
     scripts = meta["project"]["scripts"]
     assert scripts["photocure"] == "photocure.cli:cli"
     assert scripts["photo-curator"] == "photocure.cli:cli"      # old command still works
-    assert meta["tool"]["setuptools"]["package-data"] == {"photocure": ["ui/static/*"]}
+    assert meta["tool"]["setuptools"]["package-data"] == {"photocure": ["ui/static/*", "models/*"]}
     assert not (ROOT / "photo_curator").exists()
 
 

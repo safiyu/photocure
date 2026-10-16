@@ -68,7 +68,7 @@ def watch(target: Path | str, db_path: Path | str | None = None,
     if use_watchdog is None:
         use_watchdog = _watchdog_available()
     if use_watchdog:
-        _watch_events(scanner, root, db, debounce_s, stop, record)
+        _watch_events(scanner, root, db, debounce_s, stop, record, prune_missing)
     else:
         interval = poll_interval if poll_interval is not None else max(debounce_s, 1.0)
         _watch_poll(scanner, root, db, debounce_s, interval, stop, record,
@@ -93,29 +93,55 @@ def _watch_poll(scanner: FileScanner, root: Path, db, debounce_s: float,
 
 def _watch_events(scanner: FileScanner, root: Path, db, debounce_s: float,
                   stop: threading.Event,
-                  record: Callable[[ScanResult], None]) -> None:
+                  record: Callable[[ScanResult], None],
+                  prune_missing: bool = False) -> None:
     from watchdog.events import FileSystemEventHandler
     from watchdog.observers import Observer
 
     pending: dict[Path, float] = {}
+    removed: dict[Path, float] = {}
+    new_dirs: dict[Path, float] = {}
     lock = threading.Lock()
 
     def touch(p) -> None:
         with lock:
             pending[Path(p)] = time.monotonic()
 
+    def gone(p) -> None:
+        if prune_missing:
+            with lock:
+                removed[Path(p)] = time.monotonic()
+
+    def appeared_dir(p) -> None:
+        with lock:
+            new_dirs[Path(p)] = time.monotonic()
+
     class _Handler(FileSystemEventHandler):
         def on_created(self, event):
-            if not event.is_directory:
+            if event.is_directory:
+                appeared_dir(event.src_path)
+            else:
                 touch(event.src_path)
 
         def on_modified(self, event):
             if not event.is_directory:
                 touch(event.src_path)
 
+        def on_deleted(self, event):
+            gone(event.src_path)
+
         def on_moved(self, event):
-            if not event.is_directory:
+            gone(event.src_path)
+            if event.is_directory:
+                appeared_dir(event.dest_path)
+            else:
                 touch(event.dest_path)
+
+    def take_ready(table: dict[Path, float], now: float) -> list[Path]:
+        ready = [p for p, t in table.items() if now - t >= debounce_s]
+        for p in ready:
+            del table[p]
+        return ready
 
     observer = Observer()
     observer.schedule(_Handler(), str(root), recursive=True)
@@ -125,9 +151,20 @@ def _watch_events(scanner: FileScanner, root: Path, db, debounce_s: float,
         while not stop.wait(tick):
             now = time.monotonic()
             with lock:
-                ready = [p for p, t in pending.items() if now - t >= debounce_s]
-                for p in ready:
-                    del pending[p]
+                ready = take_ready(pending, now)
+                ready_removed = take_ready(removed, now)
+                ready_dirs = take_ready(new_dirs, now)
+            for d in ready_dirs:
+                for f in scanner.expand_dir(d) if d.is_dir() else []:
+                    touch(f)
+            if ready_removed:
+                try:
+                    n = scanner.mark_missing(root, ready_removed, db_path=db)
+                except Exception:
+                    log.exception("watch prune failed")
+                else:
+                    if n:
+                        record(ScanResult(missing=n))
             if not ready:
                 continue
             try:

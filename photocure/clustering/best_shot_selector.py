@@ -1,17 +1,18 @@
 """Best-shot selector for burst groups.
 
-Composite score (spec section 2.D)::
+Composite score::
 
     Score = w_blur * S_laplacian
           + w_face_sharp * S_face
           + w_eye * S_eye_open
           + w_res * log(width * height)
+          - min(blink_penalty * closed_eyed_faces, blink_penalty_max)
 
 Each component is normalized to ``[0, 1]``. Components that are unknown for a
-candidate (eye openness without 106 landmarks, aesthetic without an embedding)
-are left out and the remaining weights are renormalized, so an unknown value
-is never scored as zero. The highest-scoring photo is kept as the primary
-shot; the rest are alternates.
+candidate (eye openness when MediaPipe could not measure it, aesthetic without an
+embedding) are left out and the remaining weights are renormalized, so an unknown
+value is never scored as zero. The highest-scoring photo is kept as the primary
+shot; the rest are alternates. When every frame blinks the best one is still chosen.
 """
 from __future__ import annotations
 
@@ -34,8 +35,10 @@ class ShotCandidate:
     sharpness_norm: float = 0.0
     # 0..1 normalized face-crop sharpness (0 if no face).
     face_sharpness_norm: float = 0.0
-    # Canonical EAR of the face, or None when unknown (no 106 landmarks).
+    # 1 - eye_closed_score of the face, or None when it could not be measured.
     eye_open: float | None = None
+    # Faces in this frame classified as closed-eyed.
+    blink_count: int = 0
     # 0..1 aesthetic score from the CLIP embedding, None when not computed.
     aesthetic: float | None = None
     width: int = 0
@@ -53,30 +56,26 @@ class ShotCandidate:
         return float(math.log(max(1, self.width * self.height)))
 
 
-# Reference Laplacian variance used to normalize a face-crop sharpness value.
-_FACE_SHARP_REF = 300.0
 # Resolution normalization anchors (log of megapixel-ish pixel counts).
 _RES_MIN = math.log(1024 * 768)
 _RES_MAX = math.log(4000 * 3000)
 
 
-def _normalize_face_sharpness(v: float | None) -> float:
-    if v is None:
+def _normalize_face_sharpness(v: float | None, ref: float = 300.0) -> float:
+    if v is None or ref <= 0:
         return 0.0
-    return float(np.clip(v / _FACE_SHARP_REF, 0.0, 1.0))
+    return float(np.clip(v / ref, 0.0, 1.0))
 
 
 # Default weight of the aesthetic term when the config has none.
 DEFAULT_AESTHETIC_WEIGHT = 0.10
 
 
-def _eye_open_score(ear: float | None, t: BurstThresholds) -> float | None:
-    """Map a canonical EAR to an openness score in [0, 1]; None if unknown."""
-    if ear is None:
+def _eye_open_score(eye_open: float | None, t: BurstThresholds | None = None) -> float | None:
+    """Openness in [0, 1]; None if unknown."""
+    if eye_open is None:
         return None
-    if t.ear_open <= t.ear_closed:
-        return 1.0
-    return float(np.clip((ear - t.ear_closed) / (t.ear_open - t.ear_closed), 0.0, 1.0))
+    return float(np.clip(eye_open, 0.0, 1.0))
 
 
 def _resolution_score(width: int, height: int) -> float:
@@ -113,7 +112,10 @@ class BestShotSelector:
             terms.append((getattr(w, "weight_aesthetic", DEFAULT_AESTHETIC_WEIGHT), s_aes))
         total_w = sum(wt for wt, _ in terms)
         composite = sum(wt * v for wt, v in terms) / total_w if total_w > 0 else 0.0
+        penalty = min(w.blink_penalty * max(0, c.blink_count), w.blink_penalty_max)
+        composite -= penalty
         breakdown = {
+            "blink_penalty": float(penalty),
             "blur": s_blur, "face": s_face,
             "eye": s_eye if s_eye is not None else 0.0,
             "eye_known": s_eye is not None,
@@ -164,7 +166,7 @@ class BestShotSelector:
         )
 
 
-def _candidate_from_record(rec, face_min: float = 0.65) -> ShotCandidate:
+def _candidate_from_record(rec, face_min: float = 0.65, face_sharp_ref: float = 300.0) -> ShotCandidate:
     """Build a :class:`ShotCandidate` from an :class:`ImageRecord` row.
 
     ``face_min`` is the same face-confidence gate the decision matrix uses.
@@ -173,7 +175,7 @@ def _candidate_from_record(rec, face_min: float = 0.65) -> ShotCandidate:
     q = getattr(rec, "quality", None)
     sharp = q.sharpness_norm if q is not None else 0.0
     faces: list[FaceDetection] = getattr(rec, "faces", None) or []
-    # Pick the highest-confidence face for sharpness/EAR.
+    # Pick the highest-confidence face for sharpness and eye openness.
     best_face = None
     best_conf = -1.0
     for f in faces:
@@ -191,8 +193,10 @@ def _candidate_from_record(rec, face_min: float = 0.65) -> ShotCandidate:
         image_id=rec.id,
         sharpness_norm=sharp,
         face_sharpness_norm=_normalize_face_sharpness(
-            best_face.face_sharpness) if has_face else 0.0,
-        eye_open=(best_face.eye_aspect_ratio if has_face else None),
+            best_face.face_sharpness, face_sharp_ref) if has_face else 0.0,
+        eye_open=(None if not has_face or best_face.eye_closed_score is None
+                  else 1.0 - best_face.eye_closed_score),
+        blink_count=int(getattr(rec, "blink_count", 0) or 0),
         width=rec.width,
         height=rec.height,
         has_face=has_face,
@@ -213,6 +217,6 @@ def pick_best_shot_records(records: Sequence,
     cfg = config or CuratorConfig()
     sel = BestShotSelector(cfg)
     face_min = cfg.taxonomy.face_confidence_min
-    cands = [_candidate_from_record(r, face_min) for r in records]
+    cands = [_candidate_from_record(r, face_min, cfg.burst.face_sharp_ref) for r in records]
     best = sel.pick_best_shot(cands)
     return best.image_id if best is not None else None

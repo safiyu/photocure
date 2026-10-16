@@ -37,6 +37,8 @@ class ImageRecord(SQLModel, table=True):
     mime_type: str = Field(default="")
 
     file_size: int = 0
+    # st_mtime seen at scan time; None on rows scanned before this column existed.
+    file_mtime: float | None = None
     # Tier-1 quick fingerprint (size + head/tail xxh64) as hex.
     quick_hash: str = Field(default="", index=True)
     # Tier-2 definitive hash.
@@ -53,7 +55,13 @@ class ImageRecord(SQLModel, table=True):
     taken_at_source: str = Field(default="")
     gps_lat: float | None = None
     gps_lon: float | None = None
-    camera_model: str = Field(default="")
+    camera_model: str = Field(default="", index=True)
+    # Filled from the GPS position by the optional offline geocoder (photocure[geo]).
+    city: str = Field(default="")
+    region: str = Field(default="")
+    country_code: str = Field(default="", index=True)
+    # Local favourite. Never written to a sidecar.
+    is_favorite: bool = Field(default=False, index=True)
 
     # Scan state machine.
     scan_status: str = Field(default="scanned", index=True)
@@ -82,11 +90,21 @@ class ImageRecord(SQLModel, table=True):
     near_dup_of: int | None = Field(default=None)
     # Minutes east of UTC for the camera-local taken_at, when known.
     tz_offset_minutes: int | None = Field(default=None)
-    # Star rating 0-5 from XMP sidecars.
-    rating: int | None = Field(default=None)
+    # Star rating: 1-5 stars, -1 rejected, None or 0 unrated (from XMP sidecars or set in the UI).
+    rating: int | None = Field(default=None, index=True)
     # Human-locked rows are never re-routed by automatic passes.
     locked: bool = Field(default=False)
     event_id: int | None = Field(default=None, index=True)
+
+    # Blink flags (set by photocure.clustering.blinks); faces_schema_version tells which
+    # face pipeline produced the face rows (older rows are re-detected).
+    has_blinks: bool = Field(default=False, index=True)
+    blink_count: int = Field(default=0)
+    faces_schema_version: int = Field(default=0)
+
+    # XMP sidecar tracking (schema v3, for C2).
+    xmp_written_rating: int | None = Field(default=None)
+    xmp_written_tags: str | None = Field(default=None)
 
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
@@ -145,9 +163,19 @@ class FaceDetection(SQLModel, table=True):
     # Normalized face embedding as JSON and its person cluster.
     embedding_json: str | None = Field(default=None)
     person_id: int | None = Field(default=None, index=True)
-    eye_aspect_ratio: float | None = None
+    eye_aspect_ratio: float | None = None  # legacy, no longer written
     # Laplacian variance of the face crop (proxy for focus).
     face_sharpness: float | None = None
+    # Box as fractions of the EXIF-oriented image (0..1). Null on rows from older versions.
+    x1: float | None = None
+    y1: float | None = None
+    x2: float | None = None
+    y2: float | None = None
+    # (eyeBlinkLeft + eyeBlinkRight) / 2 from MediaPipe, 0..1; null when it could not be measured.
+    eye_closed_score: float | None = None
+    # open | possible | closed | unknown. Unknown is never scored as open or closed.
+    eye_status: str = Field(default="unknown")
+    is_blink: bool = Field(default=False)
 
 
 class SemanticScore(SQLModel, table=True):
@@ -203,6 +231,10 @@ class ActionLedger(SQLModel, table=True):
     prev_relative_path: str = Field(default="")
     sha256: str = Field(default="")
     file_size: int = 0
+    # What really happened on disk (a requested hardlink may have become a copy).
+    actual_operation: str = Field(default="")
+    target_dev: int | None = Field(default=None)
+    target_ino: int | None = Field(default=None)
     # "pending", "committed", "rolled_back", "failed".
     status: str = Field(default="pending", index=True)
     error: str | None = Field(default=None)

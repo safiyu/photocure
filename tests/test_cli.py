@@ -207,13 +207,20 @@ def test_cli_serve_and_start_options(tmp_path, monkeypatch):
     from photocure import setup_cmd as sc
     opened = []
     served = []
-    monkeypatch.setattr(sc, "open_browser_when_ready", lambda host, port: opened.append((host, port)))
+    codes = []
+    for var in ("PCUR_HOST", "PCUR_PORT", "PCUR_OTC", "PCUR_AUTH_TOKEN"):
+        monkeypatch.setenv(var, "")  # registers restore for what serve() sets
+        monkeypatch.delenv(var)
+    monkeypatch.setenv("PCUR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(sc, "open_browser_when_ready",
+                        lambda host, port, code=None: (opened.append((host, port)), codes.append(code)))
     monkeypatch.setattr(uvicorn, "run", lambda app, host, port, **kw: served.append((host, port)))
 
     db = tmp_path / "test.db"
     r = runner.invoke(app, ["serve", "--db", str(db), "--port", "8099", "--open"])
     assert r.exit_code == 0
     assert len(opened) == 1 and opened[0] == ("127.0.0.1", 8099)
+    assert codes[0] and len(codes[0]) >= 32  # one-time code is handed to the browser opener
     assert len(served) == 1 and served[0] == ("127.0.0.1", 8099)
 
     r2 = runner.invoke(app, ["serve", "--db", str(db), "--port", "8099", "--no-open"])

@@ -5,7 +5,12 @@ foreign-key enforcement on every connection.
 """
 from __future__ import annotations
 
+import contextlib
+import os
+import secrets
+import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Iterator
 
@@ -49,7 +54,7 @@ def get_engine(db_path: Path | str = "photocure.db", echo: bool = False):
     return engine
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 7  # 7: file_mtime; 6: geo/favourite columns and indexes; 5: blink/face columns; 4: xmp_written_*
 
 
 def _sql_type(col) -> str:
@@ -68,7 +73,26 @@ def _default_clause(col) -> str:
         return f" DEFAULT {d}"
     if isinstance(d, str):
         return " DEFAULT '" + d.replace("'", "''") + "'"
+    if callable(d) and not col.nullable:
+        return " DEFAULT " + _callable_default_literal(col, d)
     return ""
+
+
+def _callable_default_literal(col, fn) -> str:
+    """SQL literal for a callable default, evaluated once for existing rows."""
+    try:
+        v = fn(None) if fn.__code__.co_argcount else fn()
+    except Exception:
+        v = None
+    if isinstance(v, datetime):
+        return "'" + v.strftime("%Y-%m-%d %H:%M:%S.%f") + "'"
+    if isinstance(v, bool):
+        return str(int(v))
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, str):
+        return "'" + v.replace("'", "''") + "'"
+    return "''" if "CHAR" in _sql_type(col).upper() or "TEXT" in _sql_type(col).upper() else "0"
 
 
 def migrate(engine) -> int:
@@ -87,6 +111,13 @@ def migrate(engine) -> int:
                        f"{_sql_type(col)}{_default_clause(col)}")
                 conn.exec_driver_sql(ddl)
                 added += 1
+        # Columns added above are not indexed by create_all on an existing table, so create any
+        # index the models declare that the database does not have yet.
+        for table in SQLModel.metadata.sorted_tables:
+            if not conn.exec_driver_sql(f'PRAGMA table_info("{table.name}")').fetchall():
+                continue
+            for index in table.indexes:
+                index.create(conn, checkfirst=True)
         conn.exec_driver_sql(f"PRAGMA user_version={SCHEMA_VERSION}")
     return added
 
@@ -127,3 +158,30 @@ def close_engine(db_path: Path | str = "photocure.db") -> None:
     engine = _engine_cache.pop(url, None)
     if engine is not None:
         engine.dispose()
+
+
+def snapshot_database(db_path: Path | str = "photocure.db", backup_dir: Path | None = None, keep: int = 10) -> Path:
+    """Online SQLite backup with UTC timestamp and rotation (keep N newest)."""
+    src = Path(db_path).resolve()
+    if not src.exists():
+        raise FileNotFoundError(f"Database file not found: {src}")
+    b_dir = backup_dir or (src.parent / "backups")
+    b_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dst = b_dir / f"{src.stem}_{timestamp}.bak.db"
+    with contextlib.closing(sqlite3.connect(str(src), timeout=30.0)) as src_conn:
+        with contextlib.closing(sqlite3.connect(str(dst))) as dst_conn:
+            src_conn.backup(dst_conn, pages=100)
+    backups = sorted(b_dir.glob(f"{src.stem}_*.bak.db"))
+    while len(backups) > keep:
+        oldest = backups.pop(0)
+        try:
+            oldest.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return dst
+
+
+def generate_otc() -> str:
+    """Generate a 32-byte URL-safe one-time code."""
+    return secrets.token_urlsafe(32)

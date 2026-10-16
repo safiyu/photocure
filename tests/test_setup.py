@@ -33,9 +33,9 @@ def test_detect_kind(tools, system, machine, expect):
 
 
 # ---------------------------------------------------------------------- plan
-FRESH = {"torch": False, "open_clip": None, "insightface": False}
+FRESH = {"torch": False, "open_clip": None, "mediapipe": False}
 READY = {"torch": True, "version": "2.5", "cuda_build": True, "hip_build": False, "has_xpu": False,
-         "open_clip": "3.0", "insightface": True}
+         "open_clip": "3.0", "mediapipe": True}
 
 
 def titles(steps):
@@ -48,7 +48,7 @@ def test_fresh_machine_installs_everything_in_order():
     assert steps[0].cmd[:4] == ["py", "-m", "pip", "install"] and "torch" in steps[0].cmd
     assert steps[0].cmd[-2:] == ["--index-url", sc.TORCH_INDEX["cuda"]]
     assert "open-clip-torch>=2.20" in steps[1].cmd           # after torch, so torch is kept
-    assert "onnxruntime-gpu" in steps[2].cmd and steps[2].optional
+    assert "mediapipe>=0.10.14" in steps[2].cmd and steps[2].optional
 
 
 @pytest.mark.parametrize("kind,index", [("rocm", "rocm"), ("xpu", "xpu"), ("cpu", "cpu")])
@@ -80,7 +80,7 @@ def test_cuda_torch_without_a_working_driver_is_not_reinstalled():
 
 
 def test_force_reinstalls_and_no_faces_skips_faces():
-    steps = sc.plan_steps("mps", dict(READY, insightface=False), faces=False, force=True,
+    steps = sc.plan_steps("mps", dict(READY, mediapipe=False), faces=False, force=True,
                           python="py", system="Darwin")
     assert titles(steps) == [steps[0].title] and "--force-reinstall" in steps[0].cmd
 
@@ -157,8 +157,6 @@ def cli_env(monkeypatch, tmp_path):
     monkeypatch.setattr(sc, "probe_state", lambda *a, **k: dict(FRESH))
     monkeypatch.setattr(sc, "run_step", lambda step, runner=None: ran.append(step.title) or True)
     monkeypatch.setattr(sc, "verify_model", lambda *a, **k: {"ok": True, "device": "mps", "model": "ViT-B-16", "seconds": 1.0})
-    monkeypatch.setattr(sc, "prefetch_faces", lambda *a, **k: True)
-    monkeypatch.setattr(sc, "open_browser_when_ready", lambda *a, **k: served.setdefault("opened", a))
     monkeypatch.setattr(cli_mod, "serve", lambda **kw: served.setdefault("serve", kw))
     return types.SimpleNamespace(ran=ran, served=served, db=tmp_path / "x.db")
 
@@ -169,7 +167,7 @@ def test_setup_installs_verifies_and_opens_the_ui(cli_env):
     assert len(cli_env.ran) == 3
     assert "Ready." in r.output and "mps" in r.output
     assert cli_env.served["serve"]["host"] == "127.0.0.1"
-    assert cli_env.served["opened"][0] == "127.0.0.1"
+    assert cli_env.served["serve"]["open_browser"] is True  # serve opens the browser with the one-time code
 
 
 def test_setup_dry_run_installs_nothing(cli_env):
@@ -194,7 +192,7 @@ def test_setup_stops_when_a_required_step_fails(cli_env, monkeypatch):
 def test_setup_continues_when_faces_fail(cli_env, monkeypatch):
     monkeypatch.setattr(sc, "run_step", lambda step, runner=None: not step.optional)
     r = CliRunner().invoke(cli_mod.app, ["setup", "-y", "--db", str(cli_env.db)])
-    assert r.exit_code == 0 and "OpenCV" in r.output and "serve" in cli_env.served
+    assert r.exit_code == 0 and "eye state stays unknown" in r.output and "serve" in cli_env.served
 
 
 def test_setup_stops_when_the_model_does_not_load(cli_env, monkeypatch):
@@ -290,6 +288,7 @@ def test_faces_step_tidies_up_the_duplicate_opencv():
     step = sc.plan_steps("cpu", FRESH, python="py", system="Linux")[-1]
     assert step.optional and any("uninstall" in c for c in step.after)
     assert any("opencv-python-headless" in c for c in step.after)
+    assert any("opencv-contrib-python" in c for c in step.after)  # what MediaPipe drags in
     ran = []
     ok = sc.run_step(step, runner=lambda cmd, **k: ran.append(cmd) or types.SimpleNamespace(returncode=0))
     assert ok and len(ran) == 1 + len(step.after)
@@ -322,7 +321,7 @@ def test_setup_skips_faces_after_an_earlier_failure(cli_env, monkeypatch, tmp_pa
     (cache / "setup_faces_failed").write_text("failed\n")
     monkeypatch.setenv("PCUR_CACHE_DIR", str(cache))
     r = CliRunner().invoke(cli_mod.app, ["setup", "--dry-run", "--db", str(cli_env.db)])
-    assert r.exit_code == 0 and "InsightFace" not in r.output.replace("Skipping", "")
+    assert r.exit_code == 0 and "MediaPipe" not in r.output.replace("Skipping", "")
     assert "failed to install earlier" in r.output
 
 
@@ -391,3 +390,22 @@ def test_no_warning_when_nothing_is_set(cli_env, monkeypatch):
     monkeypatch.delenv("PCUR_DEVICE_DEVICE", raising=False)
     r = CliRunner().invoke(cli_mod.app, ["setup", "-y", "--db", str(cli_env.db)])
     assert r.exit_code == 0 and "Ignoring" not in r.output
+
+
+def test_setup_runs_the_real_serve_without_crashing(monkeypatch, tmp_path):
+    """setup calls serve() as a plain function; every option it does not pass must still work."""
+    import uvicorn
+    monkeypatch.setenv("PCUR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("PCUR_BACKEND", "stub")
+    monkeypatch.delenv("PCUR_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("PCUR_OTC", "")
+    monkeypatch.delenv("PCUR_OTC")
+    served = {}
+    monkeypatch.setattr(sc, "detect_kind", lambda *a, **k: "mps")
+    monkeypatch.setattr(sc, "probe_state", lambda *a, **k: dict(READY))
+    monkeypatch.setattr(sc, "verify_model", lambda *a, **k: {"ok": True, "device": "mps", "model": "m", "seconds": 1.0})
+    monkeypatch.setattr(sc, "open_browser_when_ready", lambda host, port, code=None, **k: served.setdefault("code", code))
+    monkeypatch.setattr(uvicorn, "run", lambda app, host, port, **k: served.setdefault("ran", (host, port)))
+    r = CliRunner().invoke(cli_mod.app, ["setup", "--yes", "--db", str(tmp_path / "x.db"), "--port", "8097"])
+    assert r.exit_code == 0, r.output
+    assert served["ran"] == ("127.0.0.1", 8097) and served["code"] and len(served["code"]) >= 32

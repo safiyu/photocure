@@ -35,12 +35,12 @@ KIND_LABEL = {
 # Rough download sizes in MB, shown before anything big is fetched.
 TORCH_MB = {"cuda": 2800, "rocm": 3500, "xpu": 2200, "mps": 90, "cpu": 200}
 CLIP_WEIGHTS_MB = 350
-FACE_MB = 450
+MEDIAPIPE_MB = 200
 
 # Reported by a fresh interpreter, so this process never imports torch itself.
 _PROBE = r"""
 import json
-out = {"torch": False, "open_clip": None, "insightface": False, "onnxruntime": False}
+out = {"torch": False, "open_clip": None, "mediapipe": False}
 try:
     import torch
     out.update(torch=True, version=torch.__version__,
@@ -56,12 +56,8 @@ try:
     out["open_clip"] = open_clip.__version__
 except Exception:
     pass
-for m in ("insightface", "onnxruntime"):
-    try:
-        __import__(m)
-        out[m] = True
-    except Exception:
-        pass
+import importlib.util
+out["mediapipe"] = importlib.util.find_spec("mediapipe") is not None
 print(json.dumps(out))
 """
 
@@ -80,13 +76,6 @@ print(json.dumps({"ok": eng.bs.semantic_backend == "clip", "device": info.get("s
                   "backend": eng.bs.semantic_backend, "seconds": round(time.time() - t, 1),
                   "model": cfg.taxonomy.clip_model_name}))
 """
-
-_FACES = r"""
-from insightface.app import FaceAnalysis
-FaceAnalysis(name="buffalo_l", allowed_modules=["detection"], providers=["CPUExecutionProvider"]).prepare(ctx_id=-1)
-print("ok")
-"""
-
 
 @dataclass
 class Step:
@@ -218,14 +207,15 @@ def plan_steps(kind: str, st: dict, *, faces: bool = True, force: bool = False,
     if not st.get("open_clip"):
         steps.append(Step("Install OpenCLIP (the photo classifier)",
                           pip + ["open-clip-torch>=2.20"], size_mb=30))
-    if faces and not st.get("insightface"):
-        ort = "onnxruntime-gpu" if kind == "cuda" else "onnxruntime"
-        steps.append(Step("Install face detection (InsightFace)",
-                          pip + [ort, "insightface>=0.7.3"], optional=True, size_mb=FACE_MB,
-                          after=[[py, "-m", "pip", "uninstall", "-y", "opencv-python"],
+    if faces and not st.get("mediapipe"):
+        # MediaPipe pulls in the GUI build of OpenCV, which shadows the headless one this
+        # project ships and needs desktop libraries in containers. Put the headless build back.
+        steps.append(Step("Install blink detection (MediaPipe)",
+                          pip + ["mediapipe>=0.10.14"], optional=True, size_mb=MEDIAPIPE_MB,
+                          after=[[py, "-m", "pip", "uninstall", "-y", "opencv-contrib-python", "opencv-python"],
                                  pip + ["--force-reinstall", "--no-deps", "opencv-python-headless"]],
-                          note="Needs a C++ compiler on some systems. If it fails, "
-                               "OpenCV face detection is used instead."))
+                          note="Optional. Without it faces are still found, but eyes are not "
+                               "measured, so no blink badges appear."))
     return steps
 
 
@@ -253,22 +243,6 @@ def verify_model(runner: Runner = subprocess.run, python: str | None = None) -> 
     return {"ok": False, "error": " | ".join(tail)[:500] or "model check failed"}
 
 
-def prefetch_faces(runner: Runner = subprocess.run, python: str | None = None) -> bool:
-    try:
-        r = runner([python or sys.executable, "-c", _FACES], capture_output=True,
-                   text=True, timeout=1800)
-        return r.returncode == 0
-    except Exception:
-        return False
-
-
-def face_weights_cached() -> bool:
-    """True if buffalo_l face detection models are already cached on disk."""
-    home = os.environ.get("INSIGHTFACE_HOME") or os.path.expanduser("~/.insightface")
-    model_dir = os.path.join(home, "models", "buffalo_l")
-    return os.path.exists(os.path.join(model_dir, "det_10g.onnx"))
-
-
 # ------------------------------------------------------------------- serving
 def pick_port(host: str, port: int, tries: int = 20) -> int:
     """First free port at or above ``port`` (so a running server does not block setup)."""
@@ -286,7 +260,8 @@ def pick_port(host: str, port: int, tries: int = 20) -> int:
 
 def open_browser_when_ready(host: str, port: int, timeout: float = 180.0,
                             opener: Callable[[str], object] = webbrowser.open,
-                            fetch: Callable[..., object] = urllib.request.urlopen) -> threading.Thread:
+                            fetch: Callable[..., object] = urllib.request.urlopen,
+                            code: str | None = None) -> threading.Thread:
     """Open the browser as soon as the server answers its health check."""
     shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
     url = f"http://{shown}:{port}/"
@@ -296,7 +271,7 @@ def open_browser_when_ready(host: str, port: int, timeout: float = 180.0,
         while time.time() < end:
             try:
                 fetch(url + "healthz", timeout=2)
-                opener(url)
+                opener(url + (f"#code={code}" if code else ""))
                 return
             except Exception:
                 time.sleep(0.5)

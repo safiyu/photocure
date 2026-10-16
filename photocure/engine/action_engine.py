@@ -13,6 +13,7 @@ The engine is fully reversible via :class:`RollbackEngine`.
 """
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import shutil
@@ -20,13 +21,14 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 
 from ..config import CuratorConfig
 from ..db.repository import PhotoRepository
 from ..db.session import get_session
 from ..rules.organizer import PlannedAction
 from .hash import file_sha256, file_size
+from .locks import LEDGER_WRITING
 
 log = logging.getLogger("photocure.action")
 
@@ -48,6 +50,10 @@ class ExecutionReport:
     dry_run: bool = False
     duration_s: float = 0.0
     errors: list = field(default_factory=list)
+    copy_fallbacks: int = 0  # hardlinks that fell back to a copy
+    skipped_collisions: int = 0  # collision_policy=skip leftovers (not errors)
+    filtered: int = 0  # skipped by the only_category filter
+    in_place: int = 0  # target already is this photo (re-apply no-op)
     # image_id -> final on-disk target actually used (after collision rename).
     resolved_targets: dict = field(default_factory=dict)
     # Dry-run diff: what an apply would cost.
@@ -140,13 +146,17 @@ class ActionEngine:
         return rep
 
     # --------------------------------------------------------------- execute
-    def execute(self, plan: Sequence[PlannedAction],
-                transaction_id: str | None = None,
-                organize_root: Path | None = None,
-                only_category: Iterable[str] | str | None = None,
-                trash: bool = False,
-                cancel_check: Callable[[], bool] | None = None,
-                ) -> ExecutionReport:
+    def execute(self, plan: Sequence[PlannedAction], *args, **kwargs) -> ExecutionReport:
+        with LEDGER_WRITING:
+            return self._execute(plan, *args, **kwargs)
+
+    def _execute(self, plan: Sequence[PlannedAction],
+                 transaction_id: str | None = None,
+                 organize_root: Path | None = None,
+                 only_category: Iterable[str] | str | None = None,
+                 trash: bool = False,
+                 cancel_check: Callable[[], bool] | None = None,
+                 ) -> ExecutionReport:
         """Apply every planned mutation, recording the ledger as we go.
 
         For each action the ledger row is written ``PENDING`` and committed
@@ -155,6 +165,7 @@ class ActionEngine:
         """
         txn = transaction_id or new_transaction_id()
         rep = ExecutionReport(transaction_id=txn, dry_run=False)
+        self._rep = rep  # read by _apply; safe because execute() holds LEDGER_WRITING
         t0 = time.monotonic()
         wanted = _norm_categories(only_category)
         root = Path(organize_root) if organize_root else None
@@ -165,13 +176,22 @@ class ActionEngine:
                     break
                 if wanted is not None and _cat_value(action) not in wanted:
                     rep.skipped += 1
+                    rep.filtered += 1
                     continue
                 entry = None
+                mutated = False
+                action.collides = False  # drop flags left by dry_run
                 sha = action.sha256 or ""
                 size = action.file_size or 0
                 try:
                     if trash and action.operation == "move" and _is_junk(action):
                         action.target = self._trash_target(action, root, txn)
+                    if self._is_in_place(action, repo):
+                        self._mark_in_place(action, repo, root)
+                        session.commit()
+                        rep.skipped += 1
+                        rep.in_place += 1
+                        continue
                     if not os.path.lexists(action.source):
                         raise FileNotFoundError(f"source missing: {action.source}")
                     if not sha:
@@ -182,6 +202,10 @@ class ActionEngine:
                     # 1. Resolve collision first so the ledger names the real target.
                     created = _first_missing_dir(action.target.parent)
                     target = self._prepare_target(action, repo)
+                    if target is None:  # collision_policy == "skip"
+                        rep.skipped += 1
+                        rep.skipped_collisions += 1
+                        continue
 
                     # 2. PENDING ledger row, durable before any mutation.
                     img = repo.get_by_id(action.image_id) if action.image_id else None
@@ -193,7 +217,10 @@ class ActionEngine:
                     session.commit()
 
                     # 3. Filesystem mutation.
-                    self._apply(action, target, sha)
+                    entry.actual_operation = self._apply(action, target, sha)
+                    mutated = True
+                    st = os.lstat(target)
+                    entry.target_dev, entry.target_ino = st.st_dev, st.st_ino
 
                     # 4. COMMIT ledger row (post-mutation success), durable.
                     action.target = target
@@ -215,7 +242,8 @@ class ActionEngine:
                     rep.failures += 1
                     rep.errors.append(f"{action.source}: {e}")
                     session.rollback()
-                    if entry is not None:
+                    # After a successful mutation leave the row pending so reconcile recovers it.
+                    if entry is not None and not mutated:
                         try:
                             repo.ledger_fail(entry, str(e))
                             session.commit()
@@ -235,27 +263,74 @@ class ActionEngine:
             rel = Path(action.target.name)
         return trash_root / rel
 
-    def _prepare_target(self, action: PlannedAction, repo) -> Path:
-        """Ensure the destination directory exists and resolve collisions.
+    @staticmethod
+    def _is_in_place(action: PlannedAction, repo) -> bool:
+        """True when the target already is this photo (same file, or its own earlier apply)."""
+        target = action.target
+        if not os.path.lexists(target):
+            return False
+        try:
+            if os.path.samefile(action.source, target):
+                return True
+        except OSError:
+            pass  # source gone: fall back to the ledger
+        if not action.image_id:
+            return False
+        from sqlmodel import select
+        from ..db.models import ActionLedger
+        prior = repo.s.exec(select(ActionLedger).where(
+            ActionLedger.image_id == action.image_id,
+            ActionLedger.status == "committed",
+            ActionLedger.target_path == str(target))).first()
+        if prior is None or not prior.sha256:
+            return False
+        return file_sha256(target) == prior.sha256
 
-        Returns the final target path (possibly renamed with ``_dup<sha6>``).
+    @staticmethod
+    def _mark_in_place(action: PlannedAction, repo, root: Path | None) -> None:
+        img = repo.get_by_id(action.image_id) if action.image_id else None
+        if img is None:
+            return
+        img.target_path = str(action.target)
+        img.route_status = "executed"
+        if action.operation == "move":
+            img.path = str(action.target)
+            img.relative_path = _rel(action.target, root)
+
+    def _prepare_target(self, action: PlannedAction, repo) -> Path | None:
+        """Create the destination dir and resolve a name collision per ``collision_policy``.
+
+        Returns the final target, or None when the policy is ``skip`` and the name is taken.
         """
         action.target.parent.mkdir(parents=True, exist_ok=True)
-        final = action.target
-        if os.path.lexists(final):
-            action.collides = True
-            stem = action.target.stem
-            sha6 = (action.sha256 or file_sha256(action.source))[:6]
-            candidate = action.target.with_name(f"{stem}_dup{sha6}{action.target.suffix}")
-            n = 1
-            while os.path.lexists(candidate):
-                candidate = action.target.with_name(
-                    f"{stem}_dup{sha6}_{n}{action.target.suffix}")
-                n += 1
-            final = candidate
-        return final
+        if not os.path.lexists(action.target):
+            return action.target
+        action.collides = True
+        policy = self.cfg.collision_policy
+        if policy == "skip":
+            return None
+        stem, suffix = action.target.stem, action.target.suffix
+        if policy == "date_suffix":
+            from datetime import datetime
+            img = repo.get_by_id(action.image_id) if action.image_id else None
+            when = img.taken_at if img is not None and img.taken_at else None
+            if when is None:
+                try:
+                    when = datetime.fromtimestamp(os.stat(action.source).st_mtime)
+                except OSError:
+                    when = datetime.now()
+            base = f"{stem}_{when:%Y%m%d}"
+            candidate = action.target.with_name(f"{base}{suffix}")
+        else:  # sequence: photo (1).jpg, photo (2).jpg
+            base, candidate = stem, action.target
+        n = 0
+        while os.path.lexists(candidate):
+            n += 1
+            candidate = action.target.with_name(f"{base} ({n}){suffix}")
+        return candidate
 
-    def _apply(self, action: PlannedAction, target: Path, sha: str = "") -> None:
+    def _apply(self, action: PlannedAction, target: Path, sha: str = "") -> str:
+        """Perform the mutation; return the operation that actually happened."""
         src = action.source
         op = action.operation
         if op == "move":
@@ -263,11 +338,12 @@ class ActionEngine:
         elif op == "copy":
             self._copy(src, target)
         elif op == "hardlink":
-            self._hardlink(src, target)
+            return self._link_or_copy(src, target, self._rep)
         elif op == "symlink":
             self._symlink(src, target)
         else:
             raise ValueError(f"unknown operation: {op}")
+        return op
 
     @staticmethod
     def _same_device(a: Path, b: Path) -> bool:
@@ -310,16 +386,24 @@ class ActionEngine:
         shutil.copy2(str(src), str(target))
 
     @staticmethod
-    def _hardlink(src: Path, target: Path) -> None:
+    def _link_or_copy(src: Path, target: Path, rep: ExecutionReport) -> str:
+        """Hardlink, or copy when the filesystem refuses. Returns "hardlink" or "copy"."""
         try:
             os.link(src, target)
+            return "hardlink"
         except FileExistsError:
             raise
         except OSError as e:
-            # Cross-device or filesystem without hardlink support -> copy.
-            log.warning("hardlink failed (%s); using copy", e)
+            if e.errno not in {errno.EXDEV, errno.EPERM, errno.EMLINK, errno.ENOTSUP, errno.EOPNOTSUPP}:
+                raise  # e.g. ENOSPC: do not mask a real failure with a copy attempt
             ActionEngine._check_space(src, target)
             shutil.copy2(str(src), str(target))
+            rep.copy_fallbacks += 1
+            why = {errno.EXDEV: "cross-filesystem (EXDEV)",
+                   errno.EPERM: "refused (EPERM, protected_hardlinks or ACL?)"}.get(
+                       e.errno, f"unsupported (errno {e.errno})")
+            log.warning("hardlink %s; copied %s -> %s", why, src, target)
+            return "copy"
 
     @staticmethod
     def _symlink(src: Path, target: Path) -> None:

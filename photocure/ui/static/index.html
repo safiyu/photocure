@@ -4,7 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Photocure</title>
-  <meta name="pcur-token" content="__PCUR_TOKEN__">
   <script>
     (function () {
       var t = null;
@@ -68,7 +67,6 @@
           <button class="tab navitem" data-tab="bursts"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span>Bursts</span><em class="count" data-count="bursts"></em></button>
           <button class="tab navitem" data-tab="highlights"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg><span>Highlights</span><em class="count"></em></button>
           <button class="tab navitem" data-tab="events"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg><span>Events</span><em class="count"></em></button>
-          <button class="tab navitem" data-tab="people"><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg><span>People</span><em class="count"></em></button>
         </div>
         <div class="navgroup" style="margin-top:18px">
           <h2>Review</h2>
@@ -88,6 +86,7 @@
           <button class="icon-btn" id="theme-toggle" title="Switch between light and dark" aria-label="Switch between light and dark"><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg></button>
           <button class="icon-btn" id="btn-help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
         </div>
+        <div class="sidebar-footer"><span class="app-credit">Photocure <span id="sidebar-version"></span> • by Safiyu</span></div>
       </div>
     </aside>
 
@@ -98,6 +97,7 @@
           <h1 id="page-title">Import</h1>
           <div class="sub" id="page-sub"></div>
         </div>
+        <span id="header-version-badge" class="version-pill" role="button" tabindex="0" title="Click to view About Photocure" data-goto="settings"></span>
         <div id="topbar-progress" class="pill" hidden role="status">
           <span class="spinner" id="topbar-spinner"></span>
           <span id="topbar-status-icon" hidden></span>
@@ -199,9 +199,27 @@
             <select id="catfilter" aria-label="Category"><option value="">All categories</option></select>
             <label class="toggle"><input type="checkbox" id="manualonly">Changed by me</label>
             <label class="toggle"><input type="checkbox" id="neardup">Near duplicates</label>
+            <select id="f-camera" aria-label="Camera" hidden><option value="">All cameras</option></select>
+            <select id="f-rating" aria-label="Rating">
+              <option value="">Any rating</option>
+              <option value="min:5">5 stars</option>
+              <option value="min:4">4 stars or more</option>
+              <option value="min:3">3 stars or more</option>
+              <option value="min:1">Rated</option>
+              <option value="0">Not rated</option>
+              <option value="-1">Rejected</option>
+            </select>
+            <select id="f-country" aria-label="Country" hidden><option value="">All countries</option></select>
+            <label class="toggle"><input type="checkbox" id="f-fav">Favourites</label>
             <span class="grow"></span>
             <label class="density">Size <input type="range" id="density" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="rowcount" class="rowcount"></span>
+          </div>
+          <div class="scrubber" id="scrubber" hidden>
+            <label>From <span id="scrub-from-label"></span>
+              <input type="range" id="scrub-from" min="0" max="0" value="0" aria-label="Earliest date shown"></label>
+            <label>To <span id="scrub-to-label"></span>
+              <input type="range" id="scrub-to" min="0" max="0" value="0" aria-label="Latest date shown"></label>
           </div>
           <div id="grid" class="grid"></div>
           <div id="grid-more" class="loadmore"></div>
@@ -279,21 +297,6 @@
           </div>
         </section>
 
-        <!-- PEOPLE -->
-        <section id="tab-people" class="panel">
-          <div class="toolbar">
-            <button id="btn-people" class="btn" data-busy>Find people</button>
-            <span class="grow"></span>
-            <span id="peoplecount" class="rowcount"></span>
-          </div>
-          <div class="split">
-            <div id="peoplelist" class="burstlist"></div>
-            <div>
-              <div id="peopledetail" class="grid"></div>
-              <div id="peopledetail-more" class="loadmore"></div>
-            </div>
-          </div>
-        </section>
 
         <!-- APPLY AND UNDO -->
         <section id="tab-actions" class="panel">
@@ -382,6 +385,19 @@
           </div>
 
           <div class="sect">
+            <h2>File name collisions</h2>
+            <p class="lede">What to do when a file with the same name is already in the destination. Photocure never overwrites a file.</p>
+            <div class="field">
+              <label for="set-collision">When a name is taken</label>
+              <select id="set-collision">
+                <option value="sequence">Add a number: photo (1).jpg</option>
+                <option value="date_suffix">Add the date taken: photo_20240501.jpg</option>
+                <option value="skip">Leave the file where it is</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="sect">
             <h2>Workers</h2>
             <p class="lede">More workers can speed things up but use more memory and disk bandwidth. Leave a box empty to let the app decide.</p>
             <div class="form-grid workers">
@@ -410,6 +426,17 @@
             <button id="btn-save-settings" class="btn primary" type="button">Save settings</button>
             <button id="btn-reset-settings" class="btn" type="button">Back to saved</button>
             <span id="settings-msg" class="help" role="status"></span>
+          </div>
+
+          <div class="sect" style="margin-top:28px">
+            <h2>About Photocure</h2>
+            <div id="about-card"></div>
+          </div>
+
+          <div class="sect" style="margin-top:28px">
+            <h2>Restart server</h2>
+            <p class="lede">Restart Photocure and reload this page. A restart is refused while files are being moved or restored.</p>
+            <div class="btn-row"><button id="btn-restart" class="btn" type="button">Restart Photocure</button></div>
           </div>
 
           <div class="sect danger" style="margin-top:28px">
@@ -453,6 +480,15 @@
         <div id="lb-guesses" class="bars"></div>
         <p class="help">Choose a category below. Then use Learn from my choices on the Needs a look page.</p>
       </section>
+      <div class="lb-rate" id="lb-rate" role="group" aria-label="Rating">
+        <button type="button" class="star" data-star="1" aria-label="1 star">&#9733;</button>
+        <button type="button" class="star" data-star="2" aria-label="2 stars">&#9733;</button>
+        <button type="button" class="star" data-star="3" aria-label="3 stars">&#9733;</button>
+        <button type="button" class="star" data-star="4" aria-label="4 stars">&#9733;</button>
+        <button type="button" class="star" data-star="5" aria-label="5 stars">&#9733;</button>
+        <button type="button" class="btn sm" id="lb-fav" aria-pressed="false">&#9829; Favourite</button>
+        <button type="button" class="btn sm" id="lb-reject" aria-pressed="false">Reject</button>
+      </div>
       <div class="field">
         <label for="lb-cat">Category</label>
         <select id="lb-cat"></select>
@@ -463,7 +499,7 @@
         <button class="btn sm" id="lb-clear">Back to AI choice</button>
       </div>
       <div class="lb-count" id="lb-count"></div>
-      <div class="keys"><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> browse</span><span><kbd>l</kbd> lock</span><span><kbd>Esc</kbd> close</span></div>
+      <div class="keys"><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> browse</span><span><kbd>1</kbd>-<kbd>5</kbd> rate</span><span><kbd>0</kbd> clear</span><span><kbd>x</kbd> reject</span><span><kbd>f</kbd> favourite</span><span><kbd>l</kbd> lock</span><span><kbd>Esc</kbd> close</span></div>
     </aside>
   </div>
 
@@ -507,12 +543,19 @@
       </header>
       <div class="modal-body">
         <table class="helptable">
-          <tr><td colspan="2"><h3>Review screens</h3></td></tr>
-          <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Move to the next or previous photo</td></tr>
-          <tr><td><kbd>1</kbd>-<kbd>9</kbd></td><td>Set the category of the highlighted photo</td></tr>
-          <tr><td><kbd>u</kbd></td><td>Undo the last category change</td></tr>
+          <tr><td colspan="2"><h3>Moving around</h3></td></tr>
+          <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd> <kbd>&uarr;</kbd> <kbd>&darr;</kbd></td><td>Move the highlight over the photos. It scrolls into view.</td></tr>
+          <tr><td><kbd>Enter</kbd> <kbd>Space</kbd></td><td>Open the highlighted photo</td></tr>
+          <tr><td colspan="2"><h3>Any photo, in a list or in the viewer</h3></td></tr>
+          <tr><td><kbd>1</kbd>-<kbd>5</kbd></td><td>Rate with that many stars</td></tr>
+          <tr><td><kbd>0</kbd></td><td>Clear the rating</td></tr>
+          <tr><td><kbd>x</kbd></td><td>Reject, or un-reject. Nothing is deleted.</td></tr>
+          <tr><td><kbd>f</kbd></td><td>Favourite, or remove from favourites (kept in Photocure only)</td></tr>
           <tr><td><kbd>l</kbd></td><td>Lock or unlock the photo so re-analysis never changes it</td></tr>
-          <tr><td><kbd>Space</kbd></td><td>Open the highlighted photo</td></tr>
+          <tr><td colspan="2"><h3>Needs a look and Junk review</h3></td></tr>
+          <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Next or previous photo</td></tr>
+          <tr><td><kbd>1</kbd>-<kbd>9</kbd></td><td>Set the category of the highlighted photo (instead of rating)</td></tr>
+          <tr><td><kbd>u</kbd></td><td>Undo the last category change</td></tr>
           <tr><td colspan="2"><h3>Photo viewer</h3></td></tr>
           <tr><td><kbd>&larr;</kbd> <kbd>&rarr;</kbd></td><td>Previous or next photo</td></tr>
           <tr><td><kbd>Esc</kbd></td><td>Close the viewer</td></tr>
@@ -524,7 +567,44 @@
     </div>
   </div>
 
+  <div id="banners" class="banners" role="region" aria-label="Notices"></div>
+
+  <div id="confirm-modal" class="confirm-modal" role="alertdialog" aria-modal="true"
+       aria-labelledby="confirm-modal-title" aria-describedby="confirm-modal-message" hidden>
+    <div class="confirm-backdrop"></div>
+    <div class="confirm-content">
+      <p id="confirm-modal-subtitle" class="confirm-subtitle" hidden></p>
+      <h2 id="confirm-modal-title"></h2>
+      <p id="confirm-modal-message"></p>
+      <div id="confirm-modal-detail" class="confirm-detail"></div>
+      <div class="confirm-buttons">
+        <button type="button" id="confirm-modal-cancel" class="btn"></button>
+        <button type="button" id="confirm-modal-ok" class="btn"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="auth-modal" class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title" hidden>
+    <div class="confirm-backdrop"></div>
+    <form id="auth-form" class="confirm-content">
+      <h2 id="auth-title">Sign in to Photocure</h2>
+      <p>Paste the one-time code printed in the terminal, or your access token.</p>
+      <input id="auth-input" type="password" autocomplete="off" spellcheck="false" aria-label="Code or token" required>
+      <p id="auth-error" class="field-error" role="alert" hidden></p>
+      <div class="confirm-buttons"><button type="submit" class="btn primary">Continue</button></div>
+    </form>
+  </div>
+
+  <div id="restart-overlay" class="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="restart-text" hidden>
+    <div class="confirm-backdrop"></div>
+    <div class="confirm-content restart-box">
+      <div id="restart-spinner" class="spinner" aria-hidden="true"></div>
+      <p id="restart-text">Restarting Photocure...</p>
+    </div>
+  </div>
+
   <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script type="module" src="/static/virtual_grid.mjs"></script>
   <script src="/static/app.js?v=2.2.0"></script>
 </body>
 </html>

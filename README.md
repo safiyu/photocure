@@ -45,7 +45,7 @@ photocure setup
 |---|---|
 | `--dry-run` | Show what would be installed without downloading anything |
 | `--yes`, `-y` | Do not ask confirmation before downloading |
-| `--no-faces` | Skip face detection (InsightFace) |
+| `--no-faces` | Skip blink detection when installing (`setup`); skip face analysis entirely (`infer`) |
 | `--cpu-only` | Ignore any GPU and force CPU build |
 | `--reinstall` | Force reinstalling PyTorch (e.g. after changing GPU) |
 | `--no-open` | Start server without opening the browser |
@@ -88,6 +88,10 @@ photocure serve [OPTIONS]
 
 - **Import:** Step-by-step import wizard (scan, analyze, detect bursts) with built-in folder picker.
 - **Review:** Filter by category (People, Animals, Food, Scenery, Architecture, etc.), bursts, highlights, and junk.
+- **Browse large libraries:** The grid only keeps the photos near the screen, so 100,000 photos scroll smoothly. Thumbnails are cached WebP in three sizes. HEIC and camera RAW (CR2, NEF, ARW, DNG) are read natively.
+- **Filter:** by camera, rating, country, favourites and capture date (the date sliders take their range from your library). Photos are shown oldest first.
+- **Rate and cull:** press `1`-`5` to rate, `0` to clear, `x` to reject, `f` to favourite, `l` to lock, arrow keys to move, `?` for the full list. Ratings and rejects are also written to an XMP sidecar next to the photo, after a short pause. If another program changed that sidecar, Photocure asks before overwriting it. Rejecting never deletes anything. Set `PCUR_WRITE_SIDECARS=false` to keep ratings in the database only (for example on a read-only mount).
+- **Place names (optional):** `pip install "photocure[geo]"` adds city, region and country from GPS, looked up offline. Run `photocure geocode` for photos you imported earlier.
 - **Actions:** Safe dry-run plan, execution, and 1-click byte-for-byte rollback.
 
 ---

@@ -292,6 +292,8 @@ def rescore_from_embeddings(session, cfg: CuratorConfig | None = None,
         tax = engine.taxonomy
         updated = 0
         for row in session.exec(sselect(SemanticScore)).all():
+            if row.backend == "stub":  # placeholder embeddings are unrelated to the text tower
+                continue
             emb = dequantize_embedding(row.embedding)
             if not emb or len(emb) != text.shape[1]:
                 continue
@@ -352,6 +354,8 @@ def learn_from_corrections(session, cfg: CuratorConfig | None = None,
             .join(ImageRecord, ImageRecord.id == SemanticScore.image_id)).all()
 
         def _unit(row) -> np.ndarray | None:
+            if row.backend == "stub":  # placeholder embeddings carry no signal
+                return None
             emb = dequantize_embedding(row.embedding)
             if not emb or len(emb) != text.shape[1]:
                 return None

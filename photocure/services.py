@@ -13,6 +13,7 @@ import os
 import shutil
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +23,7 @@ from sqlmodel import select
 from rich.table import Table
 
 from .clustering.best_shot_selector import BestShotSelector, _candidate_from_record
+from .clustering.blinks import apply_blinks
 from .clustering.burst_detector import BurstDetector
 from .config import (
     DEVICE_CHOICES,
@@ -64,8 +66,8 @@ def describe_backends(cfg: CuratorConfig) -> dict:
             "semantic_backend": bs.semantic_backend,
             "face_backend": bs.face_backend,
             "semantic_is_stub": bs.semantic_backend == "stub",
-            "face_is_fallback": bs.face_backend != "insightface",
-            "hint": ('No AI model is installed. Run: pip install "photocure[ml]"'
+            "face_is_fallback": bs.face_backend != "yunet",
+            "hint": (f'No AI model is installed. Run: {bk.ml_install_cmd()}'
                      if bs.semantic_backend == "stub" else ""),
         }
     except Exception as e:  # keep the UI and CLI alive if torch is broken
@@ -76,7 +78,9 @@ def describe_backends(cfg: CuratorConfig) -> dict:
 
 
 # Settings store. Precedence: CLI flag > this settings file > environment > defaults.
-SETTINGS_KEYS = ("device", "device_index", "decode_workers", "torch_threads", "scan_workers")
+SETTINGS_KEYS = ("device", "device_index", "decode_workers", "torch_threads", "scan_workers",
+                 "collision_policy")
+COLLISION_POLICIES = ("sequence", "date_suffix", "skip")
 
 
 def settings_path(db_path: Path | str) -> Path:
@@ -97,6 +101,12 @@ def _validate_settings(data: dict, allow_none: bool = False) -> dict:
             out[key] = None
         elif key == "device":
             out[key] = normalize_device(value)
+        elif key == "collision_policy":
+            v = str(value).strip().lower()
+            if v not in COLLISION_POLICIES:
+                raise ValueError(f"Unknown collision policy '{value}'. "
+                                 f"Choose one of: {', '.join(COLLISION_POLICIES)}.")
+            out[key] = v
         else:
             if isinstance(value, bool):
                 raise ValueError(f"'{key}' must be a whole number.")
@@ -158,6 +168,8 @@ def apply_settings(cfg: CuratorConfig, settings: dict) -> CuratorConfig:
             setattr(new.device, key, checked[key])
     if "scan_workers" in checked:
         new.scan_workers = checked["scan_workers"] or auto_scan_workers()
+    if "collision_policy" in checked:
+        new.collision_policy = checked["collision_policy"]
     return new
 
 
@@ -172,6 +184,7 @@ def effective_settings(db_path: Path | str, cfg: CuratorConfig | None = None,
         "decode_workers": base.device.decode_workers,
         "torch_threads": base.device.torch_threads,
         "scan_workers": 0 if stored.get("scan_workers") == 0 else base.scan_workers,
+        "collision_policy": base.collision_policy,
     }
     return {
         "values": values,
@@ -180,6 +193,7 @@ def effective_settings(db_path: Path | str, cfg: CuratorConfig | None = None,
                     for k in SETTINGS_KEYS},
         "resolved": resolve_workers(base, resolved_device),
         "choices": list(DEVICE_CHOICES),
+        "collision_choices": list(COLLISION_POLICIES),
         "path": str(settings_path(db_path)),
     }
 
@@ -268,13 +282,19 @@ class Planner:
 
         burst_results = BurstDetector(self.cfg).cluster_records(records)
         by_id = {r.id: r for r in records}
-        burst_count = 0
+        groups = []
         for res in burst_results:
             members = [by_id[m] for m in res.image_ids if m in by_id]
-            if len(members) < self.cfg.burst.min_group_size:
-                continue
+            if len(members) >= self.cfg.burst.min_group_size:
+                groups.append(members)
+        # Blinks are judged per burst (a subject's own frames set their baseline) before the
+        # best shot is chosen, so the selector sees the closed-eye counts.
+        apply_blinks(records, groups, self.cfg.face)
+        burst_count = 0
+        for members in groups:
             best_id = BestShotSelector(self.cfg).pick_best_shot(
-                [_candidate_from_record(m, self.cfg.taxonomy.face_confidence_min)
+                [_candidate_from_record(m, self.cfg.taxonomy.face_confidence_min,
+                                        self.cfg.burst.face_sharp_ref)
                  for m in members]).image_id
             earliest = min(members, key=lambda m: (m.taken_at is None,
                                                    m.taken_at or _EPOCH))
@@ -416,7 +436,8 @@ class Planner:
                             r.manual_bucket, r.id)
             else:
                 return Decision(cat, reason="manual override", subcategory="manual",
-                                needs_date=cat.is_date_grouped)
+                                needs_date=cat.is_date_grouped,
+                                is_alternate=cat == CategoryType.BURST_ALTERNATE)
         if r.locked and r.category:
             try:
                 cat = CategoryType(r.category)
@@ -424,7 +445,8 @@ class Planner:
                 pass
             else:
                 return Decision(cat, reason="locked", subcategory=r.subcategory or "",
-                                needs_date=cat.is_date_grouped)
+                                needs_date=cat.is_date_grouped,
+                                is_alternate=cat == CategoryType.BURST_ALTERNATE)
         return matrix.evaluate_record(r)
 
     # --------------------------------------------------------- persistence
@@ -525,12 +547,20 @@ class Planner:
                              only_category=only_category, trash=trash,
                              cancel_check=cancel_check)
         if rep.executed:
+            partial = rep.filtered > 0 or (
+                rep.executed + rep.failures + rep.skipped) < len(plan.actions)
             with get_session(self.db_path) as session:
                 rec = session.exec(select(PlanRecord).where(
                     PlanRecord.plan_id == plan.plan_id)).first()
-                if rec is not None:
+                if rec is not None and not partial:
                     rec.applied_transaction = rep.transaction_id
-            plan.applied_transaction = rep.transaction_id
+                elif rec is not None and plan.input_hash:
+                    # Partial apply moved files: rebase the drift hash so the rest applies without force.
+                    fresh = compute_inputs_hash(PhotoRepository(session).all_images())
+                    rec.input_hash = fresh
+                    plan.input_hash = fresh
+            if not partial:
+                plan.applied_transaction = rep.transaction_id
         return rep
 
     def dry_run(self, plan: Plan | str) -> ExecutionReport:
@@ -673,11 +703,13 @@ class Planner:
         return res
 
     def _mark_purged(self, trash_txn_dir: Path) -> None:
-        prefix = str(trash_txn_dir) + os.sep
+        base = trash_txn_dir.resolve()
         with get_session(self.db_path) as session:
-            rows = session.exec(select(ActionLedger).where(
+            candidates = session.exec(select(ActionLedger).where(
                 ActionLedger.status == "committed",
-                ActionLedger.target_path.startswith(prefix))).all()  # type: ignore[attr-defined]
+                ActionLedger.transaction_id == trash_txn_dir.name)).all()
+            rows = [e for e in candidates
+                    if Path(e.target_path).resolve().is_relative_to(base)]
             repo = PhotoRepository(session)
             for e in rows:
                 e.status = "purged"

@@ -1,4 +1,4 @@
-"""XMP sidecar reader (date, star rating, color label, keywords).
+"""XMP sidecar reader (date, star rating, color label, keywords) and non-destructive writer.
 
 Looks for ``IMG.xmp`` and ``IMG.ext.xmp`` next to a photo. Parsing uses the
 stdlib XML parser on a size-capped file with DOCTYPE/entity declarations
@@ -7,10 +7,16 @@ rejected, so hostile sidecars cannot trigger entity expansion.
 from __future__ import annotations
 
 import datetime as dt
+import logging
+import os
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from lxml import etree
+
+log = logging.getLogger("photocure.scanner.xmp")
 
 _MAX_BYTES = 2 * 1024 * 1024
 
@@ -122,3 +128,158 @@ def read_xmp(path: Path | str) -> XmpInfo | None:
         return parse_xmp(sc.read_bytes())
     except OSError:
         return None
+
+
+# ---------------------------------------------------------------- writer
+_RDF = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}"
+_XMP = "{http://ns.adobe.com/xap/1.0/}"
+_DC = "{http://purl.org/dc/elements/1.1/}"
+OWNED_TAG_PREFIX = "photocure-"
+
+
+def _writer_sidecar(photo: Path) -> Path | None:
+    """Sidecar to update or create; None when both forms exist (ambiguous)."""
+    ext_form = photo.with_name(photo.name + ".xmp")
+    base_form = photo.with_suffix(".xmp")
+    if ext_form.exists() and base_form.exists():
+        return None
+    return base_form if base_form.exists() else ext_form
+
+
+def _safe_parse(path: Path):
+    """Parse with size cap and DOCTYPE/entity rejection, matching the reader."""
+    if path.stat().st_size > _MAX_BYTES:
+        raise ValueError("sidecar too large")
+    data = path.read_bytes()
+    if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+        raise ValueError("DOCTYPE/entity declarations are not allowed")
+    parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
+    return etree.fromstring(data, parser)
+
+
+def _sub(parent, uri_tag: str, prefix: str):
+    """SubElement that binds a readable prefix when the document has none for it."""
+    uri = uri_tag[1:uri_tag.index("}")]
+    nsmap = None if uri in parent.nsmap.values() else {prefix: uri}
+    return etree.SubElement(parent, uri_tag, nsmap=nsmap)
+
+
+def _reader_view_sidecar(photo: Path) -> Path | None:
+    """Sidecar Photocure reads values from; the one the scanner sees when both forms exist."""
+    return _writer_sidecar(photo) or find_sidecar(photo)
+
+
+def get_on_disk_rating(photo_path: Path | str) -> int | None:
+    """xmp:Rating currently on disk for this photo, or None."""
+    sc = _reader_view_sidecar(Path(photo_path))
+    if sc is None or not sc.exists():
+        return None
+    try:
+        info = parse_xmp(sc.read_bytes())
+    except Exception:
+        return None
+    return info.rating if info else None
+
+
+def get_on_disk_owned_tags(photo_path: Path | str) -> set[str]:
+    """photocure-* tags currently in the sidecar's dc:subject (other tags are not ours)."""
+    sc = _reader_view_sidecar(Path(photo_path))
+    if sc is None or not sc.exists():
+        return set()
+    try:
+        root = _safe_parse(sc)
+    except Exception:
+        return set()
+    return {li.text for li in root.iter(f"{_RDF}li")
+            if li.text and li.text.startswith(OWNED_TAG_PREFIX)}
+
+
+def update_xmp_sidecar(photo_path: Path | str, *, rating: int | None = None,
+                       add_tags: tuple[str, ...] = (), remove_tags: tuple[str, ...] = (),
+                       label: str | None = None) -> tuple[bool, str]:
+    """Modify only xmp:Rating, xmp:Label and photocure-* dc:subject tags.
+
+    Returns (ok, path or reason). Unparsable or ambiguous sidecars are left untouched.
+    """
+    photo = Path(photo_path)
+    sidecar = _writer_sidecar(photo)
+    if sidecar is None:
+        return False, "sidecar_skipped_dual"
+    if sidecar.exists():
+        try:
+            root = _safe_parse(sidecar)
+        except Exception as e:
+            log.warning("sidecar_skipped (%s): %s", sidecar, e)
+            return False, "sidecar_skipped"
+        descs = list(root.iter(f"{_RDF}Description"))
+        if not descs:
+            return False, "sidecar_skipped"
+    else:
+        root = etree.Element(f"{_RDF}RDF", nsmap={"rdf": _RDF[1:-1]})
+        desc = etree.SubElement(root, f"{_RDF}Description", nsmap={"xmp": _XMP[1:-1], "dc": _DC[1:-1]})
+        desc.set(f"{_RDF}about", "")
+        descs = [desc]
+    first = descs[0]
+
+    if rating is not None:
+        found = False
+        for d in descs:
+            if f"{_XMP}Rating" in d.attrib:
+                d.set(f"{_XMP}Rating", str(rating))
+                found = True
+            for el in d.findall(f"{_XMP}Rating"):
+                el.text = str(rating)
+                found = True
+        if not found:
+            _sub(first, f"{_XMP}Rating", "xmp").text = str(rating)
+
+    add = {t for t in add_tags if t.startswith(OWNED_TAG_PREFIX)}
+    rem = {t for t in remove_tags if t.startswith(OWNED_TAG_PREFIX)}
+    if add or rem:
+        bags = []
+        for d in descs:
+            for subject in d.findall(f"{_DC}subject"):
+                bag = subject.find(f"{_RDF}Bag")
+                if bag is None:
+                    bag = etree.SubElement(subject, f"{_RDF}Bag")
+                bags.append(bag)
+        if not bags:
+            subject = _sub(first, f"{_DC}subject", "dc")
+            bags.append(etree.SubElement(subject, f"{_RDF}Bag"))
+        have = set()
+        for bag in bags:
+            for li in list(bag.findall(f"{_RDF}li")):
+                if li.text in rem:
+                    bag.remove(li)
+                else:
+                    have.add(li.text)
+        for t in sorted(add - have):
+            etree.SubElement(bags[0], f"{_RDF}li").text = t
+
+    if label is not None:
+        found = False
+        for d in descs:
+            els = d.findall(f"{_XMP}Label")
+            if label:
+                if f"{_XMP}Label" in d.attrib:
+                    d.set(f"{_XMP}Label", label)
+                    found = True
+                for el in els:
+                    el.text = label
+                    found = True
+            else:
+                for el in els:
+                    d.remove(el)
+                d.attrib.pop(f"{_XMP}Label", None)
+        if label and not found:
+            _sub(first, f"{_XMP}Label", "xmp").text = label
+
+    tmp = sidecar.with_name(f"{sidecar.name}.tmp.{os.getpid()}")
+    try:
+        tmp.write_bytes(etree.tostring(root, encoding="UTF-8", xml_declaration=True))
+        os.replace(tmp, sidecar)
+    except OSError as e:
+        tmp.unlink(missing_ok=True)
+        log.warning("sidecar write failed (%s): %s", sidecar, e)
+        return False, "write_failed"
+    return True, str(sidecar)

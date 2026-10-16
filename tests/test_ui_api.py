@@ -54,9 +54,9 @@ def plan_body(env, **kw):
 
 
 # ---------------------------------------------------------------- security
-def test_index_injects_token_and_no_cors(env):
+def test_index_leaks_no_credentials_and_no_cors(env):
     html = env.client.get("/").text
-    assert env.app.state.token in html
+    assert env.app.state.token not in html
     assert "__PCUR_TOKEN__" not in html
     r = env.client.get("/api/stats", headers={"Origin": "http://evil.example"})
     assert "access-control-allow-origin" not in r.headers
@@ -72,7 +72,6 @@ MUTATING = [
     ("/api/plan/rebuild", {"output_dir": "/x"}), ("/api/plan/diff", {"output_dir": "/x"}),
     ("/api/plan/apply", {"output_dir": "/x"}), ("/api/undo", {}), ("/api/repair", {}),
     ("/api/events/cluster", {}), ("/api/events/1/rename", {"name": "n"}),
-    ("/api/people/cluster", {}), ("/api/people/1/rename", {"name": "n"}),
     ("/api/learn", {}), ("/api/stop", {}), ("/api/reset", {}),
 ]
 
@@ -80,8 +79,8 @@ MUTATING = [
 @pytest.mark.parametrize(("path", "body"), MUTATING)
 def test_every_mutating_endpoint_needs_token(env, path, body):
     anon = TestClient(env.app)
-    assert anon.post(path, json=body).status_code == 403
-    assert anon.post(path, json=body, headers={"X-PCUR-Token": "nope"}).status_code == 403
+    assert anon.post(path, json=body).status_code == 401
+    assert anon.post(path, json=body, headers={"X-PCUR-Token": "nope"}).status_code == 401
 
 
 def test_import_has_no_side_effects_and_lazy_app(tmp_path, monkeypatch):
@@ -138,7 +137,7 @@ def test_images_filters(env):
     assert c.get("/api/images?group=bogus").status_code == 422
 
 
-def test_near_dup_highlights_event_person_filters(env):
+def test_near_dup_highlights_event_filters(env):
     ids = [i["id"] for i in env.client.get("/api/images").json()["items"]]
     with get_session(env.db) as s:
         a, b = s.get(M.ImageRecord, ids[0]), s.get(M.ImageRecord, ids[1])
@@ -148,18 +147,12 @@ def test_near_dup_highlights_event_person_filters(env):
         s.flush()
         a.event_id = ev.id
         b.event_id = ev.id
-        pc = M.PersonCluster(name="Ada", face_count=1)
-        s.add(pc)
-        s.flush()
-        s.add(M.FaceDetection(image_id=a.id, bbox_x1=0, bbox_y1=0, bbox_x2=1, bbox_y2=1,
-                              confidence=0.9, person_id=pc.id))
         for i, val in zip(ids, (1.0, 2.0, 7.5, 3.0)):
             s.get(M.ImageRecord, i).semantic.aesthetic = val
-        eid, pid = ev.id, pc.id
+        eid = ev.id
     c = env.client
     assert [i["id"] for i in c.get("/api/images?near_dup=true").json()["items"]] == [ids[1]]
     assert c.get(f"/api/images?event_id={eid}").json()["total"] == 2
-    assert [i["id"] for i in c.get(f"/api/images?person_id={pid}").json()["items"]] == [ids[0]]
     h = c.get("/api/images?highlights=true").json()
     assert [i["id"] for i in h["items"]] == [ids[2], ids[3], ids[1], ids[0]]
     assert [i["id"] for i in c.get("/api/images?min_aesthetic=5").json()["items"]] == [ids[2]]
@@ -295,7 +288,7 @@ def test_apply_job_log_transactions_and_undo(env):
 
     # Moved images still serve thumbnails.
     iid = c.get("/api/images").json()["items"][0]["id"]
-    assert c.get(f"/api/thumbnail/{iid}").status_code == 200
+    assert c.get(f"/thumbnail/{iid}").status_code == 200
 
     u = c.post("/api/undo", json={})
     assert u.status_code == 202
@@ -347,12 +340,12 @@ def test_latest_undoable_skips_fully_rolled_back(env):
 # -------------------------------------------------------------- thumbnails
 def test_thumbnail_ok_cached_and_fingerprinted(env):
     iid = env.client.get("/api/images").json()["items"][0]["id"]
-    r = env.client.get(f"/api/thumbnail/{iid}")
-    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
-    cached = list((env.app.state.cfg.cache_dir / "thumbs").glob(f"*_{iid:09d}_*.jpg"))
+    r = env.client.get(f"/thumbnail/{iid}")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/webp"
+    cached = list((env.app.state.cfg.cache_dir / "thumbs" / "micro").glob(f"*_{iid}_*.webp"))
     assert len(cached) == 1
-    assert env.client.get(f"/api/thumbnail/{iid}").status_code == 200
-    assert env.client.get("/api/thumbnail/99999").status_code == 404
+    assert env.client.get(f"/thumbnail/{iid}").status_code == 200
+    assert env.client.get("/thumbnail/99999").status_code == 404
 
 
 def test_thumbnail_missing_file_404(env):
@@ -361,17 +354,7 @@ def test_thumbnail_missing_file_404(env):
         rec = s.get(M.ImageRecord, iid)
         Path(rec.path).unlink()
         rec.quick_hash = "changed"  # new fingerprint avoids any cached copy
-    assert env.client.get(f"/api/thumbnail/{iid}").status_code == 404
-
-
-def test_make_thumb_jpeg_draft_and_size(tmp_path):
-    from io import BytesIO
-
-    from PIL import Image
-    p = make_image(tmp_path / "big.jpg", size=(2000, 3000))
-    data = ui_app._make_thumb(str(p), ".jpg", 1)
-    with Image.open(BytesIO(data)) as im:
-        assert max(im.size) <= 384
+    assert env.client.get(f"/thumbnail/{iid}").status_code == 404
 
 
 # ------------------------------------------------------- similar / clusters
@@ -412,25 +395,10 @@ def test_events_endpoints(env, monkeypatch):
     assert env.client.post("/api/events/999/rename", json={"name": "x"}).status_code == 404
 
 
-def test_people_endpoints(env, monkeypatch):
-    iid = env.client.get("/api/images").json()["items"][0]["id"]
-
-    def fake_people(session):
-        pc = M.PersonCluster(name=None, face_count=1)
-        session.add(pc)
-        session.flush()
-        session.add(M.FaceDetection(image_id=iid, bbox_x1=0, bbox_y1=0, bbox_x2=1,
-                                    bbox_y2=1, confidence=0.9, person_id=pc.id))
-        return 1
-    _fake(monkeypatch, "photocure.clustering.people", cluster_people=fake_people)
-    assert env.client.post("/api/people/cluster", json={}).json() == {"ok": True, "people": 1}
-    p = env.client.get("/api/people").json()
-    assert p["count"] == 1 and p["items"][0]["cover_id"] == iid
-    pid = p["items"][0]["id"]
-    assert env.client.post(f"/api/people/{pid}/rename", json={"name": "Ada"}).json()["name"] == "Ada"
-    members = env.client.get(f"/api/images?person_id={pid}").json()
-    assert [i["id"] for i in members["items"]] == [iid]
-    assert env.client.post("/api/people/999/rename", json={"name": "x"}).status_code == 404
+def test_identity_clustering_endpoints_are_gone(env):
+    assert env.client.get("/api/people").status_code == 404
+    assert env.client.post("/api/people/cluster", json={}).status_code == 404
+    assert env.client.post("/api/people/1/rename", json={"name": "x"}).status_code == 404
 
 
 # ------------------------------------------------------- verify and repair

@@ -16,14 +16,13 @@ python-multipart>=0.0.9
 pyyaml>=6
 
 # AI model: the same packages as the "ml" extra (Apple Silicon, NVIDIA or CPU).
-# Optional "faces" extra: insightface plus onnxruntime. The line below is NVIDIA only;
-# on macOS replace onnxruntime-gpu with onnxruntime.
+# Optional "faces" extra (blink detection): mediapipe>=0.10.14. It installs OpenCV's GUI build;
+# reinstall opencv-python-headless afterwards or use "photocure setup", which does that.
 torch>=2.1
 torchvision>=0.16
 open-clip-torch>=2.20
-insightface>=0.7.3
-onnxruntime-gpu>=1.16
 
 # Dev / tests
 pytest>=7.0
 httpx>=0.26
+lxml>=5.0

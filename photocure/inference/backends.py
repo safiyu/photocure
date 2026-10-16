@@ -15,6 +15,7 @@ import platform
 import sys
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from ..config import (
     CuratorConfig,
@@ -34,7 +35,26 @@ _threads_applied = False
 _DEVICE_ORDER = ("cuda", "rocm", "xpu", "mps", "directml", "cpu")
 # Aliases that expand to a preference list instead of one device.
 _ALIASES = {"integrated": ("xpu", "mps")}
-ML_INSTALL_CMD = 'pip install "photocure[ml]"'
+
+
+def in_venv() -> bool:
+    return sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+
+
+def pip_install_cmd(spec: str) -> str:
+    """A command that is safe to show a user.
+
+    Inside a venv this is that venv's own pip, never a bare ``pip`` that may belong to
+    another Python. Outside one, installing into the system Python is not advised, so
+    point to the guided setup instead.
+    """
+    if in_venv():
+        return f"{Path(sys.prefix) / 'bin' / 'pip'} install {spec}"
+    return "photocure setup --reinstall"
+
+
+def ml_install_cmd() -> str:
+    return pip_install_cmd('"photocure[ml]"')
 
 _LABELS = {
     "cuda": "NVIDIA GPU (CUDA)",
@@ -44,14 +64,23 @@ _LABELS = {
     "directml": "Windows GPU (DirectML)",
     "cpu": "CPU",
 }
-_INSTALL_HINTS = {
-    "cuda": "pip install torch --index-url https://download.pytorch.org/whl/cu124",
-    "rocm": "pip install torch --index-url https://download.pytorch.org/whl/rocm6.2",
-    "xpu": "pip install torch --index-url https://download.pytorch.org/whl/xpu",
-    "mps": "Needs an Apple Silicon Mac with macOS 12.3 or newer and a current PyTorch",
-    "directml": "pip install torch-directml",
-    "cpu": "",
+_TORCH_INDEX_URLS = {
+    "cuda": "https://download.pytorch.org/whl/cu124",
+    "rocm": "https://download.pytorch.org/whl/rocm6.2",
+    "xpu": "https://download.pytorch.org/whl/xpu",
 }
+
+
+def _install_hint(acc: str) -> str:
+    if acc in _TORCH_INDEX_URLS:
+        return pip_install_cmd(f"torch --index-url {_TORCH_INDEX_URLS[acc]}")
+    if acc == "mps":
+        return "Needs an Apple Silicon Mac with macOS 12.3 or newer and a current PyTorch"
+    if acc == "directml":
+        return pip_install_cmd("torch-directml")
+    return ""
+
+
 # onnxruntime execution providers to prefer per accelerator (CPU always last).
 _PROVIDER_PREFS = {
     "cuda": ("CUDAExecutionProvider",),
@@ -71,7 +100,7 @@ class BackendState:
     torch: object | None
     cuda_available: bool
     memory_fraction: float
-    # Face backend: "insightface" | "cv2" | "stub"
+    # Face backend: "yunet" | "stub"
     face_backend: str
     # Semantic backend: "clip" | "stub"
     semantic_backend: str
@@ -202,14 +231,14 @@ def _probe_one(acc: str, torch, index: int = 0) -> dict:
     """Describe one accelerator: availability, a reason when missing, name, memory."""
     info = {"id": acc, "label": _LABELS[acc], "name": "", "kind": "discrete",
             "memory_gb": None, "available": False, "reason": "",
-            "install_hint": _INSTALL_HINTS[acc]}
+            "install_hint": _install_hint(acc)}
     if acc == "cpu":
         info.update(kind="cpu", available=True,
                     name=f"{platform.processor() or platform.machine() or 'CPU'} "
                          f"({_cpu_count()} threads)")
         return info
     if torch is None and acc != "directml":
-        info.update(reason="PyTorch is not installed", install_hint=ML_INSTALL_CMD)
+        info.update(reason="PyTorch is not installed", install_hint=ml_install_cmd())
         return info
 
     if acc in ("cuda", "rocm"):
@@ -269,7 +298,7 @@ def _probe_one(acc: str, torch, index: int = 0) -> dict:
         info["reason"] = "package not installed"
     elif torch is None:
         info["reason"] = "PyTorch is not installed"
-        info["install_hint"] = ML_INSTALL_CMD
+        info["install_hint"] = ml_install_cmd()
     else:
         count = _safe(dml.device_count, 0) or 0
         if count < 1:
@@ -288,7 +317,13 @@ def list_accelerators(torch=None, device_index: int = 0) -> list[dict]:
     GPU entries that are available also carry count and devices [{index, name, memory_gb}].
     """
     torch = torch if torch is not None else _import_torch()
-    return [_probe_one(acc, torch, device_index) for acc in _DEVICE_ORDER]
+    probes = [_probe_one(acc, torch, device_index) for acc in _DEVICE_ORDER]
+    if any(p["available"] and p["id"] != "cpu" for p in probes):
+        # A GPU backend already works; another torch build could break it, so do not suggest one.
+        for p in probes:
+            if not p["available"]:
+                p["install_hint"] = ""
+    return probes
 
 
 def _resolve_accelerator(requested: str, probes: dict) -> tuple[str, str]:
@@ -389,14 +424,12 @@ def detect_backend(config: CuratorConfig | None = None) -> BackendState:
         threads = resolve_torch_threads(cfg, accelerator)
         apply_thread_settings(torch, threads)
 
-        # Force override (PCUR_BACKEND=cpu / cuda / stub / insightface / clip).
+        # Force override (PCUR_BACKEND=cpu / cuda / stub / clip).
         force = _force_env()
 
         # Face backend.
         if force in ("stub", "off"):
             face_backend = "stub"
-        elif force == "insightface":
-            face_backend = "insightface" if _have_insightface() else "cv2"
         else:
             face_backend = _pick_face_backend(device)
 
@@ -439,7 +472,7 @@ def _warn_if_stub(semantic_backend: str, force: str) -> None:
     _stub_warned = True
     log.warning(
         "No AI model is installed, so photos cannot be recognised and most will "
-        "be marked uncertain. Run: photocure setup   (or: %s)", ML_INSTALL_CMD)
+        "be marked uncertain. Run: photocure setup   (or: %s)", ml_install_cmd())
 
 
 def describe_backend(state: BackendState | None = None) -> dict:
@@ -459,7 +492,7 @@ def describe_backend(state: BackendState | None = None) -> dict:
                 "then restart the app.")
     elif stub:
         hint = ("The AI model is not installed, so photos cannot be recognised yet. "
-                f"Run: photocure setup   (or install it with: {ML_INSTALL_CMD})")
+                f"Run: photocure setup   (or install it with: {ml_install_cmd()})")
     else:
         hint = ""
     return {
@@ -468,7 +501,8 @@ def describe_backend(state: BackendState | None = None) -> dict:
         "semantic_backend": bs.semantic_backend,
         "face_backend": bs.face_backend,
         "semantic_is_stub": stub,
-        "face_is_fallback": bs.face_backend != "insightface",
+        "face_is_fallback": bs.face_backend != "yunet",
+        "blink_available": bs.face_backend == "yunet" and _have_mediapipe(),
         "hint": hint,
         "accelerators": list_accelerators(bs.torch, bs.device_index),
         "selected": bs.accelerator,
@@ -477,11 +511,12 @@ def describe_backend(state: BackendState | None = None) -> dict:
     }
 
 
-def _have_insightface() -> bool:
+def _have_mediapipe() -> bool:
+    """MediaPipe is an optional extra; without it eye state stays unknown."""
+    import importlib.util
     try:
-        import insightface  # noqa: F401
-        return True
-    except Exception:
+        return importlib.util.find_spec("mediapipe") is not None
+    except (ImportError, ValueError):
         return False
 
 
@@ -494,14 +529,15 @@ def _have_open_clip() -> bool:
 
 
 def _pick_face_backend(device: str) -> str:
-    """Prefer InsightFace (SCRFD); fall back to OpenCV Haar; then stub."""
-    if _have_insightface():
-        return "insightface"
+    """YuNet when OpenCV can run it and the bundled model is intact; otherwise the stub."""
     try:
-        import cv2  # noqa: F401
-        return "cv2"
+        import cv2
+        from .. import models
+        if hasattr(cv2, "FaceDetectorYN") and models.verify_model(models.YUNET):
+            return "yunet"
     except Exception:
-        return "stub"
+        pass
+    return "stub"
 
 
 def _pick_semantic_backend(device: str) -> str:

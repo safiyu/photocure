@@ -15,10 +15,7 @@ from photocure.config import CuratorConfig
 from photocure.db.repository import PhotoRepository, dequantize_embedding
 from photocure.db.session import get_session, init_db
 from photocure.inference.backends import detect_backend, reset_backend_cache
-from photocure.inference.face_engine import (
-    FaceEngine,
-    eye_aspect_ratio,
-)
+from photocure.inference.face_engine import FaceEngine
 from photocure.inference.pipeline import InferencePipeline
 from photocure.inference.semantic_engine import SemanticEngine
 
@@ -35,33 +32,6 @@ def _reset_backend():
     reset_backend_cache()
     yield
     reset_backend_cache()
-
-
-# ---------------------------------------------------------------------------
-# EAR geometry
-# ---------------------------------------------------------------------------
-
-def test_eye_aspect_ratio_open_eye():
-    # Canonical open eye: [p1,p2,p3,p4,p5,p6] with p1/p4 the horizontal
-    # corners and p2,p3 (top) / p5,p6 (bottom) the vertical pairs.
-    pts = [
-        (0.0, 0.5), (0.25, 0.35), (0.75, 0.35), (1.0, 0.5), (0.75, 0.65), (0.25, 0.65),
-    ]
-    ear = eye_aspect_ratio(pts)
-    assert 0.1 < ear < 0.5
-
-
-def test_eye_aspect_ratio_closed_eye_is_small():
-    pts = [
-        (0.0, 0.5), (0.25, 0.48), (0.75, 0.48), (1.0, 0.5), (0.75, 0.52), (0.25, 0.52),
-    ]
-    ear = eye_aspect_ratio(pts)
-    assert ear < 0.08
-
-
-def test_eye_aspect_ratio_degenerate_returns_zero():
-    assert eye_aspect_ratio([(0, 0)] * 6) == 0.0
-    assert eye_aspect_ratio([(0, 0), (1, 0)]) == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -294,146 +264,14 @@ def test_pipeline_streams_across_chunks(tmp_db, tmp_path):
 
 import sys
 import types
-import logging
 
 from photocure.inference.backends import BackendState, is_oom
-from photocure.inference.face_engine import (
-    HAAR_CONFIDENCE,
-    _LEFT_EYE_106,
-    _RIGHT_EYE_106,
-    eye_openness_from_106,
-)
 
 
-def _bs(device="cpu", cuda_available=False, face="insightface", sem="stub"):
+def _bs(device="cpu", cuda_available=False, face="yunet", sem="stub"):
     return BackendState(device=device, fp16=False, torch=None,
                         cuda_available=cuda_available, memory_fraction=0.75,
                         face_backend=face, semantic_backend=sem)
-
-
-def _lm106(open_eye: bool) -> np.ndarray:
-    """106 landmarks where only the eye contours matter, open or closed."""
-    pts = np.zeros((106, 2), dtype=float)
-    half = 0.0 if not open_eye else 6.0
-    for base_x, idx in ((100.0, _LEFT_EYE_106), (200.0, _RIGHT_EYE_106)):
-        c1, t1, t2, c2, b2, b1 = idx
-        pts[c1] = (base_x, 50)
-        pts[c2] = (base_x + 40, 50)
-        pts[t1] = (base_x + 13, 50 - half)
-        pts[t2] = (base_x + 27, 50 - half)
-        pts[b1] = (base_x + 13, 50 + half)
-        pts[b2] = (base_x + 27, 50 + half)
-    return pts
-
-
-def test_eye_openness_from_106_open_vs_closed():
-    open_ear = eye_openness_from_106(_lm106(True))
-    closed_ear = eye_openness_from_106(_lm106(False))
-    assert open_ear is not None and 0.2 < open_ear < 0.4
-    # Fully closed lids collapse to zero and are reported as unknown.
-    assert closed_ear is None
-
-
-def test_eye_openness_unknown_for_bad_input():
-    assert eye_openness_from_106(np.zeros((5, 2))) is None
-    assert eye_openness_from_106(None) is None
-    assert eye_openness_from_106(np.zeros((106, 2))) is None
-
-
-def test_five_landmarks_never_invent_eye_openness(tmp_db):
-    class _Face(dict):
-        pass
-
-    f = _Face(bbox=[10, 10, 90, 90], det_score=0.9,
-              kps=np.array([[30, 40], [70, 40], [50, 60], [35, 75], [65, 75]]))
-    fe = FaceEngine(_cfg(tmp_db), backend=_bs())
-    fe._insightface = types.SimpleNamespace(get=lambda bgr: [f])
-    out = fe._detect_insightface(np.zeros((100, 100, 3), np.uint8), 100, 100)
-    assert out[0].eye_aspect_ratio is None
-    assert out[0].embedding is None
-
-
-def test_insightface_detect_reads_106_and_embedding(tmp_db):
-    emb = np.ones(512, dtype=np.float32) / np.sqrt(512)
-    f = {"bbox": [10, 10, 90, 90], "det_score": 0.9,
-         "kps": np.zeros((5, 2)), "landmark_2d_106": _lm106(True),
-         "normed_embedding": emb}
-    fe = FaceEngine(_cfg(tmp_db), backend=_bs())
-    fe._insightface = types.SimpleNamespace(get=lambda bgr: [f])
-    out = fe._detect_insightface(np.zeros((100, 100, 3), np.uint8), 100, 100)[0]
-    assert out.eye_aspect_ratio is not None
-    assert out.embedding is not None and len(out.embedding) == 512
-
-
-def _fake_insightface(monkeypatch, calls, fail_modules=()):
-    class FaceAnalysis:
-        def __init__(self, name, allowed_modules, providers):
-            calls.append((tuple(allowed_modules), tuple(providers)))
-            if tuple(allowed_modules) in fail_modules:
-                raise RuntimeError("model files missing")
-
-        def prepare(self, ctx_id, det_size):
-            calls.append(("prepare", ctx_id))
-
-    app_mod = types.ModuleType("insightface.app")
-    app_mod.FaceAnalysis = FaceAnalysis
-    pkg = types.ModuleType("insightface")
-    pkg.app = app_mod
-    monkeypatch.setitem(sys.modules, "insightface", pkg)
-    monkeypatch.setitem(sys.modules, "insightface.app", app_mod)
-
-
-def test_load_insightface_imports_face_analysis(tmp_db, monkeypatch):
-    calls: list = []
-    _fake_insightface(monkeypatch, calls)
-    fe = FaceEngine(_cfg(tmp_db), backend=_bs())
-    app = fe._load_insightface()
-    assert app is not None
-    assert calls[0][0] == ("detection", "landmark_2d_106", "recognition")
-
-
-def test_load_insightface_uses_requested_device_not_cuda_presence(tmp_db, monkeypatch):
-    calls: list = []
-    _fake_insightface(monkeypatch, calls)
-    # CUDA exists but the run was resolved to cpu: no CUDA provider, ctx -1.
-    fe = FaceEngine(_cfg(tmp_db), backend=_bs(device="cpu", cuda_available=True))
-    fe._load_insightface()
-    assert calls[0][1] == ("CPUExecutionProvider",)
-    assert ("prepare", -1) in calls
-
-
-def test_load_insightface_falls_back_to_detection_only(tmp_db, monkeypatch):
-    calls: list = []
-    _fake_insightface(monkeypatch, calls,
-                      fail_modules={("detection", "landmark_2d_106", "recognition")})
-    fe = FaceEngine(_cfg(tmp_db), backend=_bs())
-    assert fe._load_insightface() is not None
-    assert calls[-2][0] == ("detection",)
-
-
-def test_insightface_failure_is_logged_as_warning_with_reason(tmp_db, monkeypatch, caplog):
-    monkeypatch.setitem(sys.modules, "insightface", None)
-    monkeypatch.setitem(sys.modules, "insightface.app", None)
-    fe = FaceEngine(_cfg(tmp_db), backend=_bs())
-    with caplog.at_level(logging.WARNING, logger="photocure.face"):
-        assert fe._load_insightface() is None
-    assert any("InsightFace import failed" in r.getMessage()
-               and r.levelno == logging.WARNING for r in caplog.records)
-
-
-def test_haar_confidence_is_below_the_face_gate():
-    cfg = CuratorConfig()
-    assert HAAR_CONFIDENCE < cfg.taxonomy.face_confidence_min
-
-
-def test_oom_is_not_swallowed_by_insightface_detect(tmp_db):
-    def boom(bgr):
-        raise RuntimeError("CUDA out of memory. Tried to allocate 2 GiB")
-
-    fe = FaceEngine(_cfg(tmp_db), backend=_bs())
-    fe._insightface = types.SimpleNamespace(get=boom)
-    with pytest.raises(RuntimeError):
-        fe._detect_insightface(np.zeros((10, 10, 3), np.uint8), 10, 10)
 
 
 # ---------------------------------------------------------------------------
@@ -871,24 +709,28 @@ def test_pipeline_stores_low_contrast_flag_and_aesthetic(tmp_db, tmp_path):
         assert 0.0 <= rec.semantic.aesthetic <= 1.0
 
 
-def test_pipeline_persists_face_embedding_and_scale(tmp_db, tmp_path, monkeypatch):
+def test_pipeline_persists_normalised_face_boxes_and_scale(tmp_db, tmp_path, monkeypatch):
     from photocure.db.models import FaceDetection
-    from photocure.db.repository import dequantize_embedding
     from photocure.inference.face_engine import FaceInfo
     cfg, _ = _scan(tmp_path, tmp_db, 1, size=(640, 480))
     cfg.device.face_max_side = 320
-    emb = (np.ones(512) / np.sqrt(512)).tolist()
 
     def fake(self, images):
-        return [[FaceInfo(1, 2, 30, 40, 0.9, embedding=emb)] for _ in images]
+        return [[FaceInfo(0.1, 0.2, 0.3, 0.5, 0.9)] for _ in images]
 
     monkeypatch.setattr(FaceEngine, "detect_faces_batch", fake)
-    InferencePipeline(cfg).run(db_path=tmp_db, show_progress=False)
+    monkeypatch.setattr(FaceEngine, "analyze_faces", lambda self, bgr, faces: None)
+    InferencePipeline(cfg, backend=_bs()).run(db_path=tmp_db, show_progress=False)
     with get_session(tmp_db) as s:
         from sqlmodel import select
+
+        from photocure.db.models import ImageRecord
         f = s.exec(select(FaceDetection)).first()
         assert f.scale == pytest.approx(0.5, rel=0.02)
-        assert len(dequantize_embedding(f.embedding_json)) == 512
+        assert (f.x1, f.y1, f.x2, f.y2) == (0.1, 0.2, 0.3, 0.5)
+        assert f.eye_status == "unknown" and f.is_blink is False
+        rec = s.get(ImageRecord, f.image_id)
+        assert rec.faces_schema_version == cfg.face.schema_version
 
 
 # ---------------------------------------------------------------------------

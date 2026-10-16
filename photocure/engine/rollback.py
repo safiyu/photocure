@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from ..config import CuratorConfig
 from ..db.repository import PhotoRepository
 from ..db.session import get_session
 from .hash import file_sha256, file_size
+from .locks import LEDGER_WRITING
 
 log = logging.getLogger("photocure.rollback")
 
@@ -49,9 +51,13 @@ class RollbackEngine:
         self.cfg = config or CuratorConfig()
         self.db_path = db_path or self.cfg.db_path
 
-    def rollback_transaction(self, transaction_id: str,
-                             verify: bool = True,
-                             cancel_check: Callable[[], bool] | None = None) -> RollbackReport:
+    def rollback_transaction(self, transaction_id: str, *args, **kwargs) -> RollbackReport:
+        with LEDGER_WRITING:
+            return self._rollback_transaction(transaction_id, *args, **kwargs)
+
+    def _rollback_transaction(self, transaction_id: str,
+                              verify: bool = True,
+                              cancel_check: Callable[[], bool] | None = None) -> RollbackReport:
         rep = RollbackReport(transaction_id=transaction_id)
         import time
         t0 = time.monotonic()
@@ -150,6 +156,19 @@ class RollbackEngine:
         # recorded hash before we touch anything.
         if not target.exists() and not target.is_symlink():
             return False, "destination missing (nothing to revert)"
+        actual = getattr(entry, "actual_operation", "") or op
+        if actual == "hardlink" and entry.target_ino is not None:
+            # The (device, inode) pair proves this is the link we made, even if the
+            # source was deleted since. Edits through the link change both names, so
+            # a content hash would wrongly block the undo.
+            st = os.lstat(target)
+            if (st.st_dev, st.st_ino) != (entry.target_dev, entry.target_ino):
+                return False, "target was replaced since it was linked (refusing to remove)"
+            self._remove_target(target, actual)
+            self._prune_empty_dirs(target.parent, entry.created_dir)
+            return True, "removed hardlink target"
+        if op == "hardlink" and actual == "copy":
+            op = "copy"
         if verify and entry.sha256:
             try:
                 actual = file_sha256(target) if not target.is_symlink() \

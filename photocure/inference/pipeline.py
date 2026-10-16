@@ -1,7 +1,7 @@
 """Sequential GPU inference pipeline (Phase A: faces, Phase B: CLIP).
 
 Orchestrates the two model families without ever holding both in VRAM at once:
-    1. Phase A - FaceEngine (InsightFace/SCRFD or fallback).
+    1. Phase A - FaceEngine (YuNet detection, then crop analysis on the full-resolution photo).
     2. Memory sweep - ``gc.collect()`` + ``torch.cuda.empty_cache()``.
     3. Phase B - SemanticEngine (OpenCLIP).
 
@@ -31,6 +31,7 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
+from sqlalchemy import and_, or_
 from sqlmodel import col, select as sselect
 
 from ..config import CuratorConfig
@@ -52,12 +53,14 @@ from .backends import (
     is_oom,
     resolve_decode_workers,
 )
+from ..clustering.blinks import classify_group
 from .face_engine import FaceEngine
 from .semantic_engine import SemanticEngine
 
 log = logging.getLogger("photocure.pipeline")
 
-# Statuses that still need work. "faces_done" rows only need Phase B.
+# Statuses that still need work. "faces_done" rows only need Phase B. Inferred rows whose
+# faces_schema_version is old also need Phase A again (and stay "inferred" meanwhile).
 _PENDING_STATUSES = ("pending", "faces_done")
 # SQLite's host-parameter limit is 999 on old builds.
 _IN_BATCH = 500
@@ -73,6 +76,7 @@ class InferResult:
     duration_s: float = 0.0
     skipped_already_inferred: int = 0
     reanalyzed_stub: int = 0
+    faces_redone: int = 0
     oom_retries: int = 0
     errors: list = field(default_factory=list)
 
@@ -152,9 +156,12 @@ class InferencePipeline:
         self.bs = backend or detect_backend(self.cfg)
         self.quality = QualityEngine(self.cfg.quality)
 
+    def _faces_stale(self, rec: ImageRecord) -> bool:
+        return (self.bs.face_backend != "stub" and self.cfg.face.enabled
+                and rec.faces_schema_version < self.cfg.face.schema_version)
+
     # ------------------------------------------------------------ selection
-    @staticmethod
-    def _select_records(repo: PhotoRepository, only_paths: list[str] | None,
+    def _select_records(self, repo: PhotoRepository, only_paths: list[str] | None,
                         retry_failed: bool, limit: int) -> list[ImageRecord]:
         s = repo.s
         if only_paths is not None:
@@ -168,9 +175,12 @@ class InferencePipeline:
             recs.sort(key=lambda r: r.id or 0)
             return recs[:limit] if limit else recs
         statuses = _PENDING_STATUSES + (("failed",) if retry_failed else ())
-        stmt = (sselect(ImageRecord)
-                .where(col(ImageRecord.infer_status).in_(statuses))
-                .order_by(col(ImageRecord.id)))
+        wanted = col(ImageRecord.infer_status).in_(statuses)
+        if self.bs.face_backend != "stub" and self.cfg.face.enabled:
+            # Photos analysed by an older face pipeline: their boxes cannot be reused.
+            wanted = or_(wanted, and_(ImageRecord.infer_status == "inferred",
+                                      ImageRecord.faces_schema_version < self.cfg.face.schema_version))
+        stmt = sselect(ImageRecord).where(wanted).order_by(col(ImageRecord.id))
         if limit:
             stmt = stmt.limit(limit)
         return list(s.exec(stmt).all())
@@ -204,7 +214,7 @@ class InferencePipeline:
 
             todo: list[ImageRecord] = []
             for rec in pending:
-                if rec.infer_status == "inferred":
+                if rec.infer_status == "inferred" and not self._faces_stale(rec):
                     result.skipped_already_inferred += 1
                 else:
                     todo.append(rec)
@@ -310,7 +320,10 @@ class InferencePipeline:
                 if cancel_check and cancel_check():
                     raise InterruptedError("Inference cancelled by user")
                 # Rows already in "faces_done" only need Phase B.
-                a_recs = [r for r in chunk if r.infer_status in ("pending", "failed")]
+                a_recs = [r for r in chunk
+                          if r.infer_status in ("pending", "failed")
+                          or (r.infer_status == "inferred" and self._faces_stale(r))]
+                stale_ids = {r.id for r in a_recs if r.infer_status == "inferred"}
                 done += len(chunk) - len(a_recs)
                 rec_by_id = {r.id: r for r in a_recs}
                 frames = decode(a_recs, face_max)
@@ -342,6 +355,8 @@ class InferencePipeline:
                             continue
                         result.faces_total += len(faces)
                         try:
+                            self._analyze_crops(face_engine, rec, fr, faces)
+                            counts = classify_group([faces], self.cfg.face)
                             q = self.quality.score(fr.bgr)
                             repo.upsert_quality(QualityMetric(
                                 image_id=fr.image_id,
@@ -349,10 +364,19 @@ class InferencePipeline:
                             ))
                             repo.replace_faces(
                                 fr.image_id,
-                                [self._face_row(fr.image_id, f, fr.scale) for f in faces],
+                                [self._face_row(fr.image_id, f, fr.scale, fr.bgr.shape) for f in faces],
                             )
-                            # Phase B promotes this to "inferred".
-                            rec.infer_status = "faces_done"
+                            rec.blink_count = counts[0]
+                            rec.has_blinks = counts[0] > 0
+                            if self.bs.face_backend != "stub" and self.cfg.face.enabled:
+                                # Only a real face pass counts; a stub or --no-faces run must
+                                # leave the photo eligible for detection later.
+                                rec.faces_schema_version = self.cfg.face.schema_version
+                            if fr.image_id in stale_ids:
+                                result.faces_redone += 1  # CLIP is already done; stays "inferred"
+                            else:
+                                # Phase B promotes this to "inferred".
+                                rec.infer_status = "faces_done"
                         except Exception as e:
                             log.warning("persist failed for %s: %s", rec.path, e)
                             rec.infer_status = "failed"
@@ -446,19 +470,38 @@ class InferencePipeline:
             gc.collect()
             empty_cuda_cache(self.bs)
 
+    def _analyze_crops(self, engine: FaceEngine, rec: ImageRecord, fr: _LoadedFrame, faces: list) -> None:
+        """Stage 2: measure faces on the full-resolution photo (or the frame if it already is)."""
+        if not faces:
+            return
+        if fr.scale >= 0.999:
+            engine.analyze_faces(fr.bgr, faces)
+            return
+        try:
+            full = load_image(rec.path, max_side=None, orientation=rec.orientation)
+        except Exception as e:
+            log.warning("full-resolution decode failed for %s (%s); eye state stays unknown", rec.path, e)
+            return
+        try:
+            engine.analyze_faces(full.bgr, faces)
+        finally:
+            del full
+
     @staticmethod
-    def _face_row(image_id: int, f, scale: float = 1.0) -> FaceDetection:
-        lm = f.landmarks or []
-        emb = getattr(f, "embedding", None)
+    def _face_row(image_id: int, f, scale: float = 1.0, shape: tuple = (0, 0)) -> FaceDetection:
+        h, w = shape[:2]
         return FaceDetection(
             image_id=image_id,
-            bbox_x1=f.x1, bbox_y1=f.y1, bbox_x2=f.x2, bbox_y2=f.y2,
+            # Legacy pixel box in the decoded frame, kept for older readers.
+            bbox_x1=f.x1 * w, bbox_y1=f.y1 * h, bbox_x2=f.x2 * w, bbox_y2=f.y2 * h,
+            x1=f.x1, y1=f.y1, x2=f.x2, y2=f.y2,
             confidence=f.confidence,
-            landmarks=_json_sem([(round(x, 5), round(y, 5)) for x, y in lm]),
+            landmarks=_json_sem([(round(x, 5), round(y, 5)) for x, y in (f.landmarks or [])]),
             scale=float(scale),
-            embedding_json=quantize_embedding(emb) if emb else None,
-            eye_aspect_ratio=f.eye_aspect_ratio,
             face_sharpness=f.face_sharpness,
+            eye_closed_score=f.eye_closed_score,
+            eye_status=f.eye_status,
+            is_blink=bool(getattr(f, "is_blink", False)),
         )
 
 

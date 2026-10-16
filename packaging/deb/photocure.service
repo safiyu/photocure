@@ -1,0 +1,19 @@
+[Unit]
+Description=Photocure photo curation service
+After=network-online.target
+Wants=network-online.target
+Documentation=https://github.com/safiyu/photocure
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/photocure serve --no-open
+Restart=on-failure
+RestartSec=5s
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

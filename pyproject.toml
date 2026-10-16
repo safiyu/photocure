@@ -9,7 +9,7 @@ description = "Intelligent image curator. Offline, GPU-accelerated, transactiona
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Safi" }]
+authors = [{ name = "Safiyu Vattaparambil" }]
 dependencies = [
     "numpy>=1.24",
     "sqlmodel>=0.0.14",
@@ -26,6 +26,8 @@ dependencies = [
     "exifread>=3.0",
     "python-multipart>=0.0.9",
     "pyyaml>=6",
+    "lxml>=5.0",
+    "tomli>=1.1.0;python_version<'3.11'",
 ]
 
 [project.optional-dependencies]
@@ -35,19 +37,20 @@ ml = [
     "torchvision>=0.16",
     "open-clip-torch>=2.20",
 ]
-# Better face detection. Optional, a basic OpenCV detector is used without it.
+# Blink detection. Optional: faces are found with the bundled YuNet model either way, but
+# eye state stays "unknown" without MediaPipe. It installs OpenCV's GUI build as a
+# dependency; "photocure setup" swaps the headless build back in.
 faces = [
-    "insightface>=0.7.3",
-    "onnxruntime>=1.16",
+    "mediapipe>=0.10.14",
 ]
-# NVIDIA only: the ml packages plus CUDA face detection (no onnxruntime-gpu on macOS).
+# The ml packages for NVIDIA GPUs.
 gpu = [
     "torch>=2.1",
     "torchvision>=0.16",
     "open-clip-torch>=2.20",
-    "insightface>=0.7.3",
-    "onnxruntime-gpu>=1.16",
 ]
+# Place names (city, region, country) from GPS, looked up offline. Pulls in scipy.
+geo = ["reverse_geocoder>=1.5.1"]
 watch = ["watchdog>=3"]
 dev = ["pytest>=7.0", "httpx>=0.26"]
 
@@ -59,7 +62,7 @@ photo-curator = "photocure.cli:cli"  # old command name, kept so existing habits
 include = ["photocure*"]
 
 [tool.setuptools.package-data]
-photocure = ["ui/static/*"]
+photocure = ["ui/static/*", "models/*"]
 
 [tool.ruff]
 target-version = "py310"
@@ -96,3 +99,7 @@ known-first-party = ["photocure"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "real_venv_detection: do not pin in_venv() for this test",
+    "browser: drives a real Chrome through node (skipped when node or Chrome is missing)",
+]
