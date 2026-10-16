@@ -13,6 +13,7 @@ The engine is fully reversible via :class:`RollbackEngine`.
 """
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import shutil
@@ -48,6 +49,7 @@ class ExecutionReport:
     dry_run: bool = False
     duration_s: float = 0.0
     errors: list = field(default_factory=list)
+    copy_fallbacks: int = 0  # C2: count of hardlinks that fell back to copy
     # image_id -> final on-disk target actually used (after collision rename).
     resolved_targets: dict = field(default_factory=dict)
     # Dry-run diff: what an apply would cost.
@@ -310,16 +312,34 @@ class ActionEngine:
         shutil.copy2(str(src), str(target))
 
     @staticmethod
-    def _hardlink(src: Path, target: Path) -> None:
+    def _link_or_copy(src: Path, target: Path, rep: ExecutionReport) -> tuple[str, int, int]:
+        """Hardlink with EXDEV/EPERM fallback to copy. Return (operation, target_dev, target_ino)."""
         try:
             os.link(src, target)
+            st = os.stat(target)
+            return ("hardlink", st.st_dev, st.st_ino)
         except FileExistsError:
             raise
         except OSError as e:
-            # Cross-device or filesystem without hardlink support -> copy.
-            log.warning("hardlink failed (%s); using copy", e)
-            ActionEngine._check_space(src, target)
-            shutil.copy2(str(src), str(target))
+            fallback_errnos = {errno.EXDEV, errno.EPERM, errno.EMLINK, errno.ENOTSUP, errno.EOPNOTSUPP}
+            if e.errno in fallback_errnos:
+                ActionEngine._check_space(src, target)
+                shutil.copy2(str(src), str(target))
+                rep.copy_fallbacks += 1
+                if e.errno == errno.EXDEV:
+                    log.warning("Cross-filesystem link (EXDEV); copied: %s -> %s", src, target)
+                elif e.errno == errno.EPERM:
+                    log.warning("Hardlink refused (EPERM, likely protected_hardlinks or ACL); copied: %s -> %s", src, target)
+                else:
+                    log.warning("Hardlink unsupported (errno=%s); copied: %s -> %s", e.errno, src, target)
+                st = os.stat(target)
+                return ("copy", st.st_dev, st.st_ino)
+            raise
+
+    @staticmethod
+    def _hardlink(src: Path, target: Path) -> None:
+        rep = ExecutionReport(transaction_id="", copy_fallbacks=0)
+        ActionEngine._link_or_copy(src, target, rep)
 
     @staticmethod
     def _symlink(src: Path, target: Path) -> None:
