@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.safiyu.photocure</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Photocure</name>
+  <summary>Intelligent, local photo curation and cull assistant</summary>
+  <description>
+    <p>
+      Photocure is a standalone, privacy-first photo curation tool that runs entirely on your computer.
+      It analyzes your photo library to identify duplicates, burst sequences, blinking subjects,
+      quality issues, and helps you organize and cull your collection efficiently.
+    </p>
+    <p>
+      Key features:
+    </p>
+    <ul>
+      <li>Zero network requests; all processing happens locally</li>
+      <li>Burst detection and best-shot selection</li>
+      <li>Blink detection with visual badges</li>
+      <li>Quality scoring (blur, brightness, contrast)</li>
+      <li>HEIC, RAW, and WebP support</li>
+      <li>Non-destructive XMP sidecar writing</li>
+      <li>Hardlink-based organization with automatic undo</li>
+      <li>Optional offline reverse geocoding</li>
+    </ul>
+  </description>
+  <developer_name>Safiyu</developer_name>
+  <url type="homepage">https://github.com/safiyu/photocure</url>
+  <url type="bugtracker">https://github.com/safiyu/photocure/issues</url>
+  <content_rating type="oars-1.1" />
+  <icon type="stock">io.github.safiyu.photocure</icon>
+  <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
+  <releases>
+    <release version="0.1.0" type="development" date="2026-10-16">
+      <description>
+        <p>Initial development release with burst detection, blink flagging, and hardlink organization.</p>
+      </description>
+    </release>
+  </releases>
+</component>

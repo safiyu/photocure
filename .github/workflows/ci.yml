@@ -54,3 +54,41 @@ jobs:
           pip install --force-reinstall --no-deps opencv-python-headless
       - name: Face tests with the real landmarker
         run: pytest -q tests/test_c3_faces.py tests/test_bench_c3.py
+
+  packaging:
+    name: Debian packaging and validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends appstream-glib desktop-file-utils imagemagick
+          python -m pip install --upgrade pip build
+      - name: Build wheel and .deb package
+        run: |
+          python -m build --wheel
+          bash packaging/deb/build_deb.sh
+      - name: Validate AppStream metainfo
+        run: appstreamcli validate --no-net packaging/deb/photocure.metainfo.xml
+      - name: Validate desktop file
+        run: desktop-file-validate packaging/deb/photocure.desktop
+      - name: Check .deb package contents
+        run: |
+          deb_file=$(ls dist/photocure_*_amd64.deb | head -1)
+          dpkg -c "$deb_file" | head -20
+          dpkg -c "$deb_file" | grep -q "usr/lib/systemd/user/photocure.service" || exit 1
+          dpkg -c "$deb_file" | grep -q "usr/share/metainfo/io.github.safiyu.photocure.metainfo.xml" || exit 1
+      - name: Smoke test - install in isolated container
+        run: |
+          docker run --rm -v "$(pwd)/dist:/dist" ubuntu:24.04 bash -c "
+            apt-get update &&
+            apt-get install -y --no-install-recommends dpkg &&
+            dpkg -i /dist/photocure_*_amd64.deb &&
+            /usr/bin/photocure --version &&
+            /usr/bin/photocure stop || true
+          "

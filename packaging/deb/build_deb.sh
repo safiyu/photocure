@@ -25,7 +25,12 @@ mkdir -p "$STAGING_DIR/DEBIAN"
 mkdir -p "$STAGING_DIR/opt/photocure/wheels"
 mkdir -p "$STAGING_DIR/usr/bin"
 mkdir -p "$STAGING_DIR/usr/share/applications"
-mkdir -p "$STAGING_DIR/usr/share/icons/hicolor/256x256/apps"
+mkdir -p "$STAGING_DIR/usr/share/metainfo"
+mkdir -p "$STAGING_DIR/usr/lib/systemd/user"
+mkdir -p "$STAGING_DIR/usr/share/doc/photocure"
+for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do
+  mkdir -p "$STAGING_DIR/usr/share/icons/hicolor/$size/apps"
+done
 mkdir -p "$STAGING_DIR/usr/share/pixmaps"
 
 # 1. Package metadata and maintainer scripts (no pip, no process killing)
@@ -55,13 +60,31 @@ rm -rf "$WHEEL_SRC"
 cp "$SCRIPT_DIR/bootstrap.py" "$STAGING_DIR/opt/photocure/bootstrap.py"
 printf '%s\n' "$VERSION" > "$STAGING_DIR/opt/photocure/VERSION"
 cp "$SCRIPT_DIR/photocure-wrapper" "$STAGING_DIR/usr/bin/photocure"
-cp "$SCRIPT_DIR/photocure.desktop" "$STAGING_DIR/usr/share/applications/photocure.desktop"
+cp "$SCRIPT_DIR/photocure.desktop" "$STAGING_DIR/usr/share/applications/io.github.safiyu.photocure.desktop"
+cp "$SCRIPT_DIR/photocure.metainfo.xml" "$STAGING_DIR/usr/share/metainfo/io.github.safiyu.photocure.metainfo.xml"
+cp "$SCRIPT_DIR/photocure.service" "$STAGING_DIR/usr/lib/systemd/user/photocure.service"
 
-# 4. Icons
-if [ -f "$PROJECT_ROOT/docs/logo.png" ]; then
-    cp "$PROJECT_ROOT/docs/logo.png" "$STAGING_DIR/usr/share/icons/hicolor/256x256/apps/photocure.png"
-    cp "$PROJECT_ROOT/docs/logo.png" "$STAGING_DIR/usr/share/pixmaps/photocure.png"
+# 4. Icons - generate multi-resolution from source or use source directly
+LOGO="$PROJECT_ROOT/docs/logo.png"
+if [ -f "$LOGO" ]; then
+    if command -v convert >/dev/null 2>&1; then
+        # Generate resized versions with ImageMagick
+        for size in 16 24 32 48 64 128 256 512; do
+            convert "$LOGO" -resize "${size}x${size}!" \
+                "$STAGING_DIR/usr/share/icons/hicolor/${size}x${size}/apps/io.github.safiyu.photocure.png"
+        done
+    else
+        # Fallback: copy source to all standard sizes
+        for size in 16 24 32 48 64 128 256 512; do
+            cp "$LOGO" "$STAGING_DIR/usr/share/icons/hicolor/${size}x${size}/apps/io.github.safiyu.photocure.png"
+        done
+    fi
+    cp "$LOGO" "$STAGING_DIR/usr/share/pixmaps/io.github.safiyu.photocure.png"
 fi
+
+# 5. Documentation
+cp "$PROJECT_ROOT/NOTICE" "$STAGING_DIR/usr/share/doc/photocure/NOTICE"
+cp "$PROJECT_ROOT/LICENSE" "$STAGING_DIR/usr/share/doc/photocure/LICENSE"
 
 # Permissions: root-owned (dpkg-deb --root-owner-group), dirs 0755, files 0644,
 # executables 0755. Nothing is world-writable.
@@ -70,7 +93,7 @@ find "$STAGING_DIR" -type f -exec chmod 644 {} +
 chmod 755 "$STAGING_DIR/DEBIAN/postinst" "$STAGING_DIR/DEBIAN/postrm" \
     "$STAGING_DIR/opt/photocure/bootstrap.py" "$STAGING_DIR/usr/bin/photocure"
 
-# 5. Build .deb package
+# 6. Build .deb package
 echo "Running dpkg-deb..."
 dpkg-deb --build --root-owner-group "$STAGING_DIR" "$DIST_DIR/$DEB_NAME"
 cp "$DIST_DIR/$DEB_NAME" "$DIST_DIR/photocure_amd64.deb"
