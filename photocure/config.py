@@ -125,12 +125,44 @@ class BurstThresholds(BaseSettings):
     weight_face_sharp: float = 0.30
     weight_eye: float = 0.20
     weight_resolution: float = 0.10
-    # EAR (eye aspect ratio) below this is considered "closed eyes".
-    ear_closed: float = 0.16
-    ear_open: float = 0.24
+    # Standardized face sharpness (Laplacian variance at 128 px) that counts as fully sharp.
+    # Measured: a sharp portrait gives about 490, mild blur about 95, clear blur under 30.
+    face_sharp_ref: float = 300.0      # (tune)
+    # Best-shot score drops by blink_penalty per closed-eyed face, never by more than the max.
+    blink_penalty: float = 0.15        # (tune)
+    blink_penalty_max: float = 0.45    # (tune)
     # Longest time span a single burst may cover.
     max_burst_duration_s: float = 120.0
     weight_aesthetic: float = 0.10
+
+
+class FaceSettings(BaseSettings):
+    """Face detection, crop and blink thresholds. Every number here is a starting default."""
+
+    model_config = SettingsConfigDict(env_prefix="PCUR_FACE_")
+
+    # False turns face analysis off completely (infer --no-faces): no faces, no blink flags.
+    enabled: bool = True
+    # YuNet.
+    detect_score_min: float = 0.7      # (tune) minimum detector score
+    nms_threshold: float = 0.3         # (tune)
+    max_faces: int = 200
+    # Stage 2 crops come from the full-resolution frame.
+    crop_margin: float = 0.20          # (tune) margin added around the box
+    min_px: int = 60                   # (tune) narrower crops get eye_status "unknown"
+    landmark_max_side: int = 512       # (tune) crops are shrunk to this before MediaPipe
+    sharpness_width: int = 128         # crop width used for the Laplacian variance
+    landmark_min_confidence: float = 0.3  # (tune) MediaPipe detection/presence gate on a crop
+    landmark_num_faces: int = 2        # a crop may include a neighbour; the centred face is used
+    # classify_blinks.
+    closed_hi: float = 0.75            # (tune) absolute "closed" score
+    possible: float = 0.50             # (tune) "possible" from here
+    rel_delta: float = 0.35            # (tune) rise above the subject's own baseline
+    rel_floor: float = 0.40            # (tune) relative rule needs at least this score
+    baseline_pct: float = 15.0         # (tune) percentile that defines the baseline
+    track_iou: float = 0.45            # (tune) minimum overlap to continue a face track
+    # Rows written before this version have boxes in an unknown frame and are re-detected.
+    schema_version: int = 1
 
 
 class TaxonomySettings(BaseSettings):
@@ -182,6 +214,7 @@ class CuratorConfig(BaseSettings):
     device: DeviceSettings = Field(default_factory=DeviceSettings)
     quality: QualityThresholds = Field(default_factory=QualityThresholds)
     burst: BurstThresholds = Field(default_factory=BurstThresholds)
+    face: FaceSettings = Field(default_factory=FaceSettings)
     taxonomy: TaxonomySettings = Field(default_factory=TaxonomySettings)
 
     # Trash staging: junk moves into <root>/<trash_dir_name>/<txn>/ and is purged later.
@@ -198,7 +231,6 @@ class CuratorConfig(BaseSettings):
     allowed_hosts: str = ""  # PCUR_ALLOWED_HOSTS: comma-separated override list
     collision_policy: str = "sequence"  # sequence, date_suffix, skip
     auto_db_backup: bool = True
-    burst_gap_seconds: float = 2.0
 
     @field_validator("collision_policy", mode="before")
     @classmethod

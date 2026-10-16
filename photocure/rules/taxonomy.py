@@ -41,6 +41,7 @@ class CategoryType(str, Enum):
     NEAR_DUPLICATE = "near_duplicate"  # perceptual-hash match
     UNREADABLE = "unreadable"      # decode failed
     BURST_ALTERNATE = "burst_alternate"
+    JUNK_BLINKS = "junk_blinks"    # burst alternates with closed eyes, set by "Reject All Blinks"
     CUSTOM = "custom"              # user-defined YAML class
     UNKNOWN = "unknown"
 
@@ -67,6 +68,7 @@ class CategoryType(str, Enum):
             CategoryType.NEAR_DUPLICATE: "Junk_Review/Near_Duplicates",
             CategoryType.UNREADABLE: "Junk_Review/Unreadable",
             CategoryType.BURST_ALTERNATE: "Bursts",
+            CategoryType.JUNK_BLINKS: "Junk_Review/Blinks",
             CategoryType.CUSTOM: "Custom",
             CategoryType.UNKNOWN: "Unknown_Date",
         }[self]
@@ -77,7 +79,7 @@ class CategoryType(str, Enum):
             CategoryType.SCREENSHOT, CategoryType.DOCUMENT,
             CategoryType.GRAPHIC, CategoryType.ACCIDENTAL,
             CategoryType.DUPLICATE, CategoryType.NEAR_DUPLICATE,
-            CategoryType.UNREADABLE,
+            CategoryType.UNREADABLE, CategoryType.JUNK_BLINKS,
         )
 
     @property

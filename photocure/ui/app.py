@@ -10,7 +10,7 @@ Endpoints:
     GET  /api/images/{id}/similar          embedding neighbours
     GET  /api/thumbnail/{id}               cached JPEG thumbnail
     GET  /api/bursts | /api/burst/{id}
-    GET  /api/events | /api/people         clusters
+    GET  /api/events                       clusters
     GET  /api/transactions                 ledger summary (+ latest undoable)
     GET  /api/transactions/{tid}/verify    re-hash committed targets
     GET  /api/jobs/{id}                    background apply/undo job + live log
@@ -19,7 +19,6 @@ Endpoints:
     POST /api/plan/rebuild | /api/plan/diff | /api/plan/apply
     POST /api/undo | /api/repair | /api/learn | /api/settings
     POST /api/events/cluster | /api/events/{id}/rename
-    POST /api/people/cluster | /api/people/{id}/rename
 """
 from __future__ import annotations
 
@@ -27,6 +26,7 @@ import hashlib
 import inspect
 import logging
 import os
+import re
 import shutil
 import threading
 import time
@@ -352,6 +352,7 @@ def _item(r: M.ImageRecord, cfg: CuratorConfig | None = None) -> dict:
         "is_too_dark": bool(qm.is_too_dark) if qm else False,
         "is_overexposed": bool(qm.is_overexposed) if qm else False,
         "face_count": len(r.faces or []),
+        "has_blinks": bool(r.has_blinks), "blink_count": int(r.blink_count or 0),
         "top2": sem.top2_category if sem else None,
         "top2_score": round(sem.top2_score, 3) if sem else None,
     }
@@ -659,7 +660,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 info = {"device": "cpu", "semantic_backend": "stub", "face_backend": "stub"}
         sem = info.get("semantic_backend", "stub")
         info.setdefault("semantic_is_stub", sem == "stub")
-        info.setdefault("face_is_fallback", info.get("face_backend") != "insightface")
+        info.setdefault("face_is_fallback", info.get("face_backend") != "yunet")
         info.setdefault("hint", 'pip install torch torchvision open-clip-torch')
         info.setdefault("stub_rows", 0)
         return info
@@ -774,7 +775,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
         min_aesthetic: float | None = Query(None),
         locked: bool | None = Query(None),
         event_id: int | None = Query(None),
-        person_id: int | None = Query(None),
         limit: int = Query(200, ge=1, le=1000),
         offset: int = Query(0, ge=0),
     ):
@@ -799,9 +799,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
             conds.append(I.locked == locked)
         if event_id is not None:
             conds.append(I.event_id == event_id)
-        if person_id is not None:
-            conds.append(I.id.in_(select(M.FaceDetection.image_id).where(
-                M.FaceDetection.person_id == person_id)))
         need_sem = highlights or min_aesthetic is not None
         if need_sem:
             conds.append(M.SemanticScore.aesthetic.is_not(None))
@@ -865,6 +862,114 @@ def create_app(db_path: str | None = None) -> FastAPI:
         tmp.write_bytes(data)
         os.replace(tmp, cache)
         return Response(data, media_type="image/jpeg")
+
+    _FP_RE = re.compile(r"^[0-9a-f]{10,64}$")
+
+    def _fingerprint(rec: M.ImageRecord) -> str:
+        """Identifies this version of the photo; derived only from the database row."""
+        return hashlib.sha256(f"{rec.quick_hash}|{rec.sha256}|{rec.file_size}|{rec.filename}"
+                              .encode()).hexdigest()[:16]
+
+    @app.get("/api/images/{image_id}/faces")
+    def image_faces(image_id: int):
+        with get_session(dbp) as s:
+            rec = s.get(M.ImageRecord, image_id)
+            if rec is None:
+                raise HTTPException(404, "image not found")
+            fp = _fingerprint(rec)
+            faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == image_id)
+                           .order_by(M.FaceDetection.id)).all()
+            return {"image_id": image_id, "items": [{
+                "id": f.id, "confidence": round(f.confidence, 3),
+                "box": [f.x1, f.y1, f.x2, f.y2] if f.x1 is not None else None,
+                "eye_status": f.eye_status, "is_blink": bool(f.is_blink),
+                "eye_closed_score": (round(f.eye_closed_score, 3)
+                                     if f.eye_closed_score is not None else None),
+                "sharpness": round(f.face_sharpness, 1) if f.face_sharpness is not None else None,
+                "url": f"/api/faces/{f.id}.jpg?v={fp}" if f.x1 is not None else None,
+            } for f in faces]}
+
+    @app.get("/api/faces/{face_name}")
+    def face_crop(face_name: str, v: str | None = Query(None)):
+        """JPEG crop of one face. The path comes from the database row, never from the request;
+        ``v`` is only a cache-buster and must look like a hex fingerprint."""
+        if v is not None and not _FP_RE.fullmatch(v):
+            raise HTTPException(400, "invalid cache key")
+        stem, dot, ext = face_name.rpartition(".")
+        if ext != "jpg" or not stem.isdigit():
+            raise HTTPException(404, "face not found")
+        face_id = int(stem)
+        with get_session(dbp) as s:
+            face = s.get(M.FaceDetection, face_id)
+            rec = s.get(M.ImageRecord, face.image_id) if face is not None else None
+            if face is None or rec is None:
+                raise HTTPException(404, "face not found")
+            if face.x1 is None:
+                raise HTTPException(404, "this photo needs to be analysed again")
+            box = (face.x1, face.y1, face.x2, face.y2)
+            fp = _fingerprint(rec)
+            cands = [p for p in (rec.path, rec.target_path) if p]
+            orientation = rec.orientation
+        faces_dir = cfg.cache_dir / "faces"
+        cache = faces_dir / f"{face_id}_{fp}.jpg"
+        headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+        if cache.exists():
+            return FileResponse(cache, media_type="image/jpeg", headers=headers)
+        path = next((p for p in cands if os.path.exists(p)), None)
+        if path is None:
+            raise HTTPException(404, "image file not found on disk")
+        try:
+            import cv2
+
+            from ..inference.face_engine import crop_face, shrink_to
+            from ..quality.image_loader import load_image
+            full = load_image(path, max_side=None, orientation=orientation)
+            crop = shrink_to(crop_face(full.bgr, box, app.state.cfg.face.crop_margin), 512)
+            ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if not ok:
+                raise RuntimeError("could not encode the crop")
+        except Exception as e:
+            raise HTTPException(500, f"face crop failed: {e}")
+        faces_dir.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_suffix(f".{uuid.uuid4().hex[:6]}.tmp")
+        tmp.write_bytes(buf.tobytes())
+        os.replace(tmp, cache)
+        return Response(buf.tobytes(), media_type="image/jpeg", headers=headers)
+
+    @app.post("/api/bursts/{burst_id}/reject-blinks", dependencies=auth)
+    def reject_blinks(burst_id: int):
+        """Send the closed-eyed alternates of a burst to Junk_Review/Blinks. Reversible; no file moves."""
+        with get_session(dbp) as s:
+            if s.get(M.BurstGroup, burst_id) is None:
+                raise HTTPException(404, "burst not found")
+            members = s.exec(select(M.ImageRecord).where(
+                M.ImageRecord.burst_id == burst_id)).all()
+            if members and all(m.has_blinks for m in members):
+                return {"ok": True, "moved": 0, "ids": [],
+                        "note": "Every frame has a blink, so the best one is kept."}
+            repo = PhotoRepository(s)
+            ids = []
+            for m in members:
+                if m.is_best_shot or m.locked or not m.has_blinks:
+                    continue  # the best shot, locked photos and non-blinking frames stay put
+                if m.manual_bucket == "junk_blinks":
+                    continue
+                repo.set_manual_bucket(m.id, "junk_blinks")
+                ids.append(m.id)
+            return {"ok": True, "moved": len(ids), "ids": ids}
+
+    @app.post("/api/bursts/{burst_id}/restore-blinks", dependencies=auth)
+    def restore_blinks(burst_id: int):
+        with get_session(dbp) as s:
+            if s.get(M.BurstGroup, burst_id) is None:
+                raise HTTPException(404, "burst not found")
+            repo = PhotoRepository(s)
+            ids = []
+            for m in s.exec(select(M.ImageRecord).where(M.ImageRecord.burst_id == burst_id,
+                                                        M.ImageRecord.manual_bucket == "junk_blinks")).all():
+                repo.set_manual_bucket(m.id, None)
+                ids.append(m.id)
+            return {"ok": True, "restored": len(ids), "ids": ids}
 
     @app.get("/api/preview/{image_id}")
     def preview(image_id: int):
@@ -1014,9 +1119,20 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     "sharpness_norm": round(qm.sharpness_norm, 3) if qm else None,
                     "face_count": len(faces),
                     "face_confidence": round(best_face.confidence, 3) if best_face else None,
-                    "ear": best_face.eye_aspect_ratio if best_face else None,
+                    "has_blinks": bool(r.has_blinks), "blink_count": int(r.blink_count or 0),
+                    "eye_closed": (round(best_face.eye_closed_score, 3)
+                                   if best_face and best_face.eye_closed_score is not None else None),
+                    "manual_bucket": r.manual_bucket,
                 })
-            return {"burst": bg.name, "members": items}
+            blinkers = [m for m in members if m.has_blinks]
+            movable = [m for m in blinkers if not m.is_best_shot and not m.locked
+                       and m.manual_bucket != "junk_blinks"]
+            # Offered only when some frames blink and some do not: if every frame blinks the
+            # best one is still kept and there is nothing sensible to reject.
+            can_reject = bool(movable) and len(blinkers) < len(members)
+            return {"burst": bg.name, "members": items, "can_reject_blinks": can_reject,
+                    "reject_count": len(movable) if can_reject else 0,
+                    "rejected_blinks": sum(1 for m in members if m.manual_bucket == "junk_blinks")}
 
     @app.get("/api/events")
     def events():
@@ -1031,20 +1147,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 "end": e.end.isoformat() if e.end else None,
                 "cover_id": covers.get(e.id),
             } for e in rows]}
-
-    @app.get("/api/people")
-    def people():
-        with get_session(dbp) as s:
-            covers = dict(s.exec(select(M.FaceDetection.person_id,
-                                        func.min(M.FaceDetection.image_id))
-                                 .where(M.FaceDetection.person_id.is_not(None))
-                                 .group_by(M.FaceDetection.person_id)).all())
-            rows = s.exec(select(M.PersonCluster).order_by(
-                M.PersonCluster.face_count.desc(), M.PersonCluster.id)).all()
-            return {"count": len(rows), "items": [{
-                "id": p.id, "name": p.name, "face_count": p.face_count,
-                "cover_id": covers.get(p.id),
-            } for p in rows]}
 
     @app.get("/api/transactions")
     def transactions():
@@ -1577,24 +1679,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
             ev.label = body.name.strip() or None
             return {"ok": True, "id": event_id, "label": ev.label}
 
-    @app.post("/api/people/cluster", dependencies=auth)
-    def cluster_people_ep():
-        try:
-            from ..clustering.people import cluster_people
-        except ImportError:
-            raise _not_impl("people clustering")
-        with exclusive(), get_session(dbp) as s:
-            return {"ok": True, "people": int(cluster_people(s))}
-
-    @app.post("/api/people/{person_id}/rename", dependencies=auth)
-    def rename_person(person_id: int, body: RenameReq):
-        with get_session(dbp) as s:
-            p = s.get(M.PersonCluster, person_id)
-            if p is None:
-                raise HTTPException(404, "person not found")
-            p.name = body.name.strip() or None
-            return {"ok": True, "id": person_id, "name": p.name}
-
     # ---------------------------------------------------------------- static
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -1603,6 +1687,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
         pid_file = _pid_file(cfg.port)
         pid_file.parent.mkdir(parents=True, exist_ok=True)
         pid_file.write_text(str(os.getpid()))
+        from .. import models as bundled
+        for m in bundled.load_manifest():
+            if not bundled.verify_model(m["file"]):
+                logging.getLogger("photocure.ui").warning(
+                    "bundled model %s is missing or does not match MANIFEST.json; "
+                    "the feature that uses it is switched off", m["file"])
         for t in orphaned_rows():
             logging.getLogger("photocure.ui").warning(
                 "incomplete transaction %s (%d pending actions) from an unexpected shutdown",

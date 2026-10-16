@@ -20,7 +20,7 @@ def test_package_and_entry_points():
     scripts = meta["project"]["scripts"]
     assert scripts["photocure"] == "photocure.cli:cli"
     assert scripts["photo-curator"] == "photocure.cli:cli"      # old command still works
-    assert meta["tool"]["setuptools"]["package-data"] == {"photocure": ["ui/static/*"]}
+    assert meta["tool"]["setuptools"]["package-data"] == {"photocure": ["ui/static/*", "models/*"]}
     assert not (ROOT / "photo_curator").exists()
 
 

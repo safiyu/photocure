@@ -72,7 +72,6 @@ MUTATING = [
     ("/api/plan/rebuild", {"output_dir": "/x"}), ("/api/plan/diff", {"output_dir": "/x"}),
     ("/api/plan/apply", {"output_dir": "/x"}), ("/api/undo", {}), ("/api/repair", {}),
     ("/api/events/cluster", {}), ("/api/events/1/rename", {"name": "n"}),
-    ("/api/people/cluster", {}), ("/api/people/1/rename", {"name": "n"}),
     ("/api/learn", {}), ("/api/stop", {}), ("/api/reset", {}),
 ]
 
@@ -138,7 +137,7 @@ def test_images_filters(env):
     assert c.get("/api/images?group=bogus").status_code == 422
 
 
-def test_near_dup_highlights_event_person_filters(env):
+def test_near_dup_highlights_event_filters(env):
     ids = [i["id"] for i in env.client.get("/api/images").json()["items"]]
     with get_session(env.db) as s:
         a, b = s.get(M.ImageRecord, ids[0]), s.get(M.ImageRecord, ids[1])
@@ -148,18 +147,12 @@ def test_near_dup_highlights_event_person_filters(env):
         s.flush()
         a.event_id = ev.id
         b.event_id = ev.id
-        pc = M.PersonCluster(name="Ada", face_count=1)
-        s.add(pc)
-        s.flush()
-        s.add(M.FaceDetection(image_id=a.id, bbox_x1=0, bbox_y1=0, bbox_x2=1, bbox_y2=1,
-                              confidence=0.9, person_id=pc.id))
         for i, val in zip(ids, (1.0, 2.0, 7.5, 3.0)):
             s.get(M.ImageRecord, i).semantic.aesthetic = val
-        eid, pid = ev.id, pc.id
+        eid = ev.id
     c = env.client
     assert [i["id"] for i in c.get("/api/images?near_dup=true").json()["items"]] == [ids[1]]
     assert c.get(f"/api/images?event_id={eid}").json()["total"] == 2
-    assert [i["id"] for i in c.get(f"/api/images?person_id={pid}").json()["items"]] == [ids[0]]
     h = c.get("/api/images?highlights=true").json()
     assert [i["id"] for i in h["items"]] == [ids[2], ids[3], ids[1], ids[0]]
     assert [i["id"] for i in c.get("/api/images?min_aesthetic=5").json()["items"]] == [ids[2]]
@@ -412,25 +405,10 @@ def test_events_endpoints(env, monkeypatch):
     assert env.client.post("/api/events/999/rename", json={"name": "x"}).status_code == 404
 
 
-def test_people_endpoints(env, monkeypatch):
-    iid = env.client.get("/api/images").json()["items"][0]["id"]
-
-    def fake_people(session):
-        pc = M.PersonCluster(name=None, face_count=1)
-        session.add(pc)
-        session.flush()
-        session.add(M.FaceDetection(image_id=iid, bbox_x1=0, bbox_y1=0, bbox_x2=1,
-                                    bbox_y2=1, confidence=0.9, person_id=pc.id))
-        return 1
-    _fake(monkeypatch, "photocure.clustering.people", cluster_people=fake_people)
-    assert env.client.post("/api/people/cluster", json={}).json() == {"ok": True, "people": 1}
-    p = env.client.get("/api/people").json()
-    assert p["count"] == 1 and p["items"][0]["cover_id"] == iid
-    pid = p["items"][0]["id"]
-    assert env.client.post(f"/api/people/{pid}/rename", json={"name": "Ada"}).json()["name"] == "Ada"
-    members = env.client.get(f"/api/images?person_id={pid}").json()
-    assert [i["id"] for i in members["items"]] == [iid]
-    assert env.client.post("/api/people/999/rename", json={"name": "x"}).status_code == 404
+def test_identity_clustering_endpoints_are_gone(env):
+    assert env.client.get("/api/people").status_code == 404
+    assert env.client.post("/api/people/cluster", json={}).status_code == 404
+    assert env.client.post("/api/people/1/rename", json={"name": "x"}).status_code == 404
 
 
 # ------------------------------------------------------- verify and repair

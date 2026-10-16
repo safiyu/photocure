@@ -359,7 +359,7 @@ ACCEL = [
     {"id": "cpu", "label": "CPU", "name": "x86 (8 threads)", "kind": "cpu",
      "memory_gb": None, "available": True, "reason": "", "install_hint": ""},
 ]
-INFO = {"device": "cuda", "semantic_backend": "clip", "face_backend": "insightface",
+INFO = {"device": "cuda", "semantic_backend": "clip", "face_backend": "yunet",
         "semantic_is_stub": False, "face_is_fallback": False, "hint": "",
         "selected": "cuda", "requested": "auto", "fallback_reason": ""}
 

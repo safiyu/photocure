@@ -100,7 +100,7 @@ class BackendState:
     torch: object | None
     cuda_available: bool
     memory_fraction: float
-    # Face backend: "insightface" | "cv2" | "stub"
+    # Face backend: "yunet" | "stub"
     face_backend: str
     # Semantic backend: "clip" | "stub"
     semantic_backend: str
@@ -424,14 +424,12 @@ def detect_backend(config: CuratorConfig | None = None) -> BackendState:
         threads = resolve_torch_threads(cfg, accelerator)
         apply_thread_settings(torch, threads)
 
-        # Force override (PCUR_BACKEND=cpu / cuda / stub / insightface / clip).
+        # Force override (PCUR_BACKEND=cpu / cuda / stub / clip).
         force = _force_env()
 
         # Face backend.
         if force in ("stub", "off"):
             face_backend = "stub"
-        elif force == "insightface":
-            face_backend = "insightface" if _have_insightface() else "cv2"
         else:
             face_backend = _pick_face_backend(device)
 
@@ -503,7 +501,8 @@ def describe_backend(state: BackendState | None = None) -> dict:
         "semantic_backend": bs.semantic_backend,
         "face_backend": bs.face_backend,
         "semantic_is_stub": stub,
-        "face_is_fallback": bs.face_backend != "insightface",
+        "face_is_fallback": bs.face_backend != "yunet",
+        "blink_available": bs.face_backend == "yunet" and _have_mediapipe(),
         "hint": hint,
         "accelerators": list_accelerators(bs.torch, bs.device_index),
         "selected": bs.accelerator,
@@ -512,11 +511,12 @@ def describe_backend(state: BackendState | None = None) -> dict:
     }
 
 
-def _have_insightface() -> bool:
+def _have_mediapipe() -> bool:
+    """MediaPipe is an optional extra; without it eye state stays unknown."""
+    import importlib.util
     try:
-        import insightface  # noqa: F401
-        return True
-    except Exception:
+        return importlib.util.find_spec("mediapipe") is not None
+    except (ImportError, ValueError):
         return False
 
 
@@ -529,14 +529,15 @@ def _have_open_clip() -> bool:
 
 
 def _pick_face_backend(device: str) -> str:
-    """Prefer InsightFace (SCRFD); fall back to OpenCV Haar; then stub."""
-    if _have_insightface():
-        return "insightface"
+    """YuNet when OpenCV can run it and the bundled model is intact; otherwise the stub."""
     try:
-        import cv2  # noqa: F401
-        return "cv2"
+        import cv2
+        from .. import models
+        if hasattr(cv2, "FaceDetectorYN") and models.verify_model(models.YUNET):
+            return "yunet"
     except Exception:
-        return "stub"
+        pass
+    return "stub"
 
 
 def _pick_semantic_backend(device: str) -> str:

@@ -16,9 +16,10 @@ from .conftest import make_image
 runner = CliRunner()
 ROOT = Path(__file__).resolve().parent.parent
 
-STUB = {"device": "cpu", "semantic_backend": "stub", "face_backend": "cv2",
+STUB = {"device": "cpu", "semantic_backend": "stub", "face_backend": "stub",
         "semantic_is_stub": True, "face_is_fallback": True, "hint": "x"}
-REAL = {"device": "mps", "semantic_backend": "clip", "face_backend": "insightface",
+REAL = {"device": "mps", "semantic_backend": "clip", "face_backend": "yunet",
+        "blink_available": True,
         "semantic_is_stub": False, "face_is_fallback": False, "hint": ""}
 
 
@@ -52,8 +53,7 @@ def test_doctor_without_model_says_placeholder_and_how_to_fix(monkeypatch, tmp_p
 
 
 def test_doctor_with_model_is_ready(monkeypatch, tmp_path):
-    versions = {"torch": "2.4", "open_clip_torch": "2.26", "insightface": "0.7",
-                "onnxruntime": "1.18"}
+    versions = {"torch": "2.4", "open_clip_torch": "2.26", "mediapipe": "0.10"}
     patch_doctor(monkeypatch, REAL, versions, True)
     r = runner.invoke(app, ["doctor", "--db", str(tmp_path / "none.db")])
     out = flat(r.stdout)
@@ -74,7 +74,7 @@ def test_doctor_flags_missing_weights_and_old_stub_rows(monkeypatch, tmp_path):
         repo = PhotoRepository(s)
         repo.upsert_semantic(SemanticScore(image_id=w.ids[0], backend="stub"))
         repo.upsert_semantic(SemanticScore(image_id=w.ids[1], backend="clip"))
-    versions = {"torch": "2.4", "open_clip_torch": "2.26", "insightface": "0.7"}
+    versions = {"torch": "2.4", "open_clip_torch": "2.26", "mediapipe": "0.10"}
     patch_doctor(monkeypatch, REAL, versions, False)
     r = runner.invoke(app, ["doctor", "--db", str(w.db)])
     out = flat(r.stdout)
@@ -235,8 +235,9 @@ def test_pyproject_extras():
     names = lambda key: {r.split(">")[0].split("[")[0] for r in extras[key]}  # noqa: E731
     assert {"torch", "torchvision", "open-clip-torch"} <= names("ml")
     assert not names("ml") & {"onnxruntime-gpu", "insightface"}
-    assert {"insightface", "onnxruntime"} == names("faces")
-    assert names("ml") <= names("gpu") and "onnxruntime-gpu" in names("gpu")
+    assert names("faces") == {"mediapipe"}
+    assert names("ml") <= names("gpu")
+    assert not any("insightface" in r for rows in extras.values() for r in rows)
 
 
 def test_no_em_dashes_in_docs_and_packaging():

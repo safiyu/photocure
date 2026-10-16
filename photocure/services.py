@@ -23,6 +23,7 @@ from sqlmodel import select
 from rich.table import Table
 
 from .clustering.best_shot_selector import BestShotSelector, _candidate_from_record
+from .clustering.blinks import apply_blinks
 from .clustering.burst_detector import BurstDetector
 from .config import (
     DEVICE_CHOICES,
@@ -65,7 +66,7 @@ def describe_backends(cfg: CuratorConfig) -> dict:
             "semantic_backend": bs.semantic_backend,
             "face_backend": bs.face_backend,
             "semantic_is_stub": bs.semantic_backend == "stub",
-            "face_is_fallback": bs.face_backend != "insightface",
+            "face_is_fallback": bs.face_backend != "yunet",
             "hint": (f'No AI model is installed. Run: {bk.ml_install_cmd()}'
                      if bs.semantic_backend == "stub" else ""),
         }
@@ -281,13 +282,19 @@ class Planner:
 
         burst_results = BurstDetector(self.cfg).cluster_records(records)
         by_id = {r.id: r for r in records}
-        burst_count = 0
+        groups = []
         for res in burst_results:
             members = [by_id[m] for m in res.image_ids if m in by_id]
-            if len(members) < self.cfg.burst.min_group_size:
-                continue
+            if len(members) >= self.cfg.burst.min_group_size:
+                groups.append(members)
+        # Blinks are judged per burst (a subject's own frames set their baseline) before the
+        # best shot is chosen, so the selector sees the closed-eye counts.
+        apply_blinks(records, groups, self.cfg.face)
+        burst_count = 0
+        for members in groups:
             best_id = BestShotSelector(self.cfg).pick_best_shot(
-                [_candidate_from_record(m, self.cfg.taxonomy.face_confidence_min)
+                [_candidate_from_record(m, self.cfg.taxonomy.face_confidence_min,
+                                        self.cfg.burst.face_sharp_ref)
                  for m in members]).image_id
             earliest = min(members, key=lambda m: (m.taken_at is None,
                                                    m.taken_at or _EPOCH))

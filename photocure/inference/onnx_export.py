@@ -7,13 +7,10 @@ writes:
   output ``embedding`` (N,512, not normalized).
 - ``text_features.npy`` and ``classes.json``: the ensembled, normalized class
   text embeddings, so inference needs no text tower.
-- Copies of any InsightFace ``buffalo_l`` ONNX files found under
-  ``~/.insightface/models`` (they are already ONNX).
 """
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 from ..config import CuratorConfig
@@ -76,11 +73,4 @@ def export_models(out_dir: str | Path, cfg: CuratorConfig | None = None,
                             encoding="utf-8")
     artifacts["text_features"] = feats_path
     artifacts["classes"] = classes_path
-
-    face_src = Path.home() / ".insightface" / "models" / "buffalo_l"
-    if face_src.is_dir():
-        for onnx in sorted(face_src.glob("*.onnx")):
-            dst = out / onnx.name
-            shutil.copy2(onnx, dst)
-            artifacts[f"insightface_{onnx.stem}"] = dst
     return artifacts

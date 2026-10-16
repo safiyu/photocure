@@ -25,8 +25,30 @@ jobs:
           pip install -e . pytest httpx ruff
       - name: Lint (syntax errors and undefined names)
         run: ruff check photocure tests --select E9,F63,F7,F82
+      - name: No InsightFace in code or at import time
+        run: |
+          python -c "import sys, photocure; assert 'insightface' not in sys.modules"
+          ! git grep -iq "insightface" -- . ':!tests' ':!CHANGELOG*' ':!implementation_plan.md' ':!NOTICE' ':!docs' ':!.github/workflows/ci.yml'
       - name: Tests
         run: pytest -q
       - name: Virtual grid tests
         run: |
           if [ -f tests/virtual_grid.test.mjs ]; then node tests/virtual_grid.test.mjs; else echo "virtual grid tests arrive with C4"; fi
+
+  faces:
+    name: Blink detection with MediaPipe
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install with the faces extra, then put the headless OpenCV back
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[faces]" pytest httpx
+          pip uninstall -y opencv-contrib-python opencv-python
+          pip install --force-reinstall --no-deps opencv-python-headless
+      - name: Face tests with the real landmarker
+        run: pytest -q tests/test_c3_faces.py tests/test_bench_c3.py

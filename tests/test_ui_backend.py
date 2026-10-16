@@ -77,7 +77,7 @@ def test_config_reports_backend_and_thresholds(env):
 
 
 def test_config_uses_planner_backend_info(env, monkeypatch):
-    fake = {"device": "mps", "semantic_backend": "clip", "face_backend": "insightface",
+    fake = {"device": "mps", "semantic_backend": "clip", "face_backend": "yunet",
             "semantic_is_stub": False, "face_is_fallback": False, "hint": "x", "stub_rows": 7}
     monkeypatch.setattr(Planner, "backend_info", lambda self: dict(fake), raising=False)
     b = env.client.get("/api/config").json()["backend"]

@@ -14,7 +14,7 @@
   const state = {
     tab: "library", cats: [], junk: new Set(), byId: {}, busy: false, taskRunning: false,
     triageSel: -1, triageGrid: null, undo: [], picks: new Set(), lastPick: null,
-    overview: null, eventId: null, personId: null,
+    overview: null, eventId: null,
     backend: null, thresholds: null, manualCount: 0,
     settings: null, draft: { device: "auto", device_index: 0 },
   };
@@ -25,7 +25,6 @@
     bursts: ["Bursts", "Shots taken seconds apart. The best one of each group is kept."],
     highlights: ["Highlights", "Your most appealing photos first."],
     events: ["Events", "Photos grouped by when and where they were taken."],
-    people: ["People", "Faces grouped by the person they belong to."],
     junk: ["Junk review", "Screenshots, documents, duplicates and accidents. Move anything that does not belong."],
     uncertain: ["Needs a look", "The analysis was not sure about these. Choose a category for each."],
     settings: ["Settings", "Choose what runs the analysis and how many workers it uses."],
@@ -213,6 +212,7 @@
     if (it.is_duplicate) out.push('<span class="badge warn">Duplicate</span>');
     if (it.near_dup_of != null) out.push('<span class="badge warn">Near duplicate</span>');
     if (it.is_alternate) out.push('<span class="badge">Alternate</span>');
+    if (it.has_blinks) out.push('<span class="badge warn">Blink</span>');
     if (it.is_blurry) out.push('<span class="badge">Blurry</span>');
     if (it.is_too_dark) out.push('<span class="badge">Dark</span>');
     if (it.is_overexposed) out.push('<span class="badge">Overexposed</span>');
@@ -416,11 +416,6 @@
       el: "#eventdetail", more: "#eventdetail-more",
       params: () => "event_id=" + num(state.eventId),
       empty: { icon: "cal", title: "This event has no photos" },
-    });
-    makeGrid("person", {
-      el: "#peopledetail", more: "#peopledetail-more",
-      params: () => "person_id=" + num(state.personId),
-      empty: { icon: "users", title: "This person has no photos" },
     });
   }
 
@@ -907,84 +902,143 @@
     await showBurst(data.items[0].id);
   }
 
+  // Tight face crops with the eye state, built from DOM nodes only.
+  async function showFaces(imageId, host) {
+    const data = await api(`/api/images/${num(imageId)}/faces`);
+    host.replaceChildren();
+    if (!data.items.length) {
+      const p = document.createElement("p");
+      p.className = "help";
+      p.textContent = "No faces were found in this photo.";
+      host.appendChild(p);
+      return;
+    }
+    const wording = { open: "Eyes open", possible: "Eyes may be closing", closed: "Eyes closed", unknown: "Eyes not measured" };
+    data.items.forEach((f) => {
+      const chip = document.createElement("figure");
+      chip.className = "facechip" + (f.is_blink ? " blink" : "");
+      if (f.url) {
+        const img = document.createElement("img");
+        img.loading = "lazy";
+        img.alt = "Face crop";
+        img.src = f.url;
+        chip.appendChild(img);
+      }
+      const cap = document.createElement("figcaption");
+      const score = f.eye_closed_score != null ? " (" + num(f.eye_closed_score).toFixed(2) + ")" : "";
+      cap.textContent = (wording[f.eye_status] || wording.unknown) + score;
+      chip.appendChild(cap);
+      host.appendChild(chip);
+    });
+  }
+
+  async function rejectBlinks(burstId, count) {
+    const yes = await showConfirmDialog({
+      title: "Reject all blinks?",
+      message: `${fmtN(count)} alternate${count === 1 ? "" : "s"} with closed eyes will go to Junk review. The best shot stays where it is. No files are moved, and you can restore them.`,
+      confirmText: "Reject blinks", variant: "warning" });
+    if (!yes) return;
+    try {
+      const r = await post(`/api/bursts/${num(burstId)}/reject-blinks`, {});
+      toast(r.moved ? `Sent ${fmtN(r.moved)} to Junk review` : (r.note || "Nothing to reject"), "ok");
+      await showBurst(burstId);
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  async function restoreBlinks(burstId) {
+    try {
+      const r = await post(`/api/bursts/${num(burstId)}/restore-blinks`, {});
+      toast(`Restored ${fmtN(r.restored)}`, "ok");
+      await showBurst(burstId);
+    } catch (e) { toast(e.message, "err"); }
+  }
+
   async function showBurst(id) {
     $$(".burstrow", $("#burstlist")).forEach((r) => r.classList.toggle("on", num(r.dataset.burst) === id));
     const data = await api("/api/burst/" + num(id));
-    $("#burstdetail").innerHTML = `<h3>${esc(data.burst)}</h3><div class="burstgrid">` +
+    $("#burstdetail").innerHTML = `<h3>${esc(data.burst)}</h3>
+      <div class="btn-row" id="blinkbar"></div>
+      <div class="burstgrid">` +
       data.members.map((m) => {
         const bits = [];
         if (m.sharpness_norm != null) bits.push("sharpness " + num(m.sharpness_norm).toFixed(2));
         if (m.face_confidence != null) bits.push("face " + num(m.face_confidence).toFixed(2));
-        if (m.ear != null) bits.push("eyes " + num(m.ear).toFixed(2));
+        if (m.eye_closed != null) bits.push("eyes closed " + num(m.eye_closed).toFixed(2));
         return `<figure class="card${m.is_best_shot ? " best" : ""}" data-id="${num(m.id)}" tabindex="0">
           <div class="thumb">
             <img loading="lazy" src="${thumbUrl(m.id)}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
-            <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}</div>
+            <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}</div>
           </div>
           <figcaption class="caption">
             <div class="fn">${esc(m.filename)}</div>
             <div class="meta">${num(m.width)}×${num(m.height)}${m.taken_at ? ", " + esc(String(m.taken_at).slice(11, 19)) : ""}</div>
             <div class="meta">${esc(bits.join(", "))}</div>
+            ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}">Inspect faces</button>` : ""}
           </figcaption>
         </figure>`;
-      }).join("") + "</div>";
+      }).join("") + `</div><div id="facepanel" class="facepanel"></div>`;
+    const bar = $("#blinkbar");
+    const addBtn = (label, fn) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn";
+      b.textContent = label;
+      b.onclick = fn;
+      bar.appendChild(b);
+    };
+    if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
+    if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
+    $$("[data-faces]", $("#burstdetail")).forEach((b) => {
+      b.onclick = () => showFaces(num(b.dataset.faces), $("#facepanel")).catch((e) => toast(e.message, "err"));
+    });
   }
 
-  // ------------------------------------------------------- events and people
-  function clusterRow(kind, c, on) {
-    const title = kind === "event"
-      ? (c.label || "Event " + num(c.id)) : (c.name || "Person " + num(c.id));
-    const sub = kind === "event"
-      ? `${fmtN(c.image_count)} photos, ${esc((c.start || "").slice(0, 10))} to ${esc((c.end || "").slice(0, 10))}`
-      : `${fmtN(c.face_count)} faces`;
+  // ------------------------------------------------------------------ events
+  function clusterRow(c, on) {
+    const title = c.label || "Event " + num(c.id);
+    const sub = `${fmtN(c.image_count)} photos, ${esc((c.start || "").slice(0, 10))} to ${esc((c.end || "").slice(0, 10))}`;
     const thumb = c.cover_id != null
       ? `<img class="rowthumb" loading="lazy" src="${thumbUrl(c.cover_id)}" alt="">` : "";
-    return `<div class="burstrow${on ? " on" : ""}" role="button" tabindex="0" data-kind="${kind}" data-cid="${num(c.id)}">
+    return `<div class="burstrow${on ? " on" : ""}" role="button" tabindex="0" data-cid="${num(c.id)}">
       <div class="rowmain">${thumb}<div style="min-width:0"><div class="name">${esc(title)}</div>
         <div class="info">${sub}</div></div></div>
-      <button class="mini" data-rename="${kind}:${num(c.id)}">Rename</button>
+      <button class="mini" data-rename="${num(c.id)}">Rename</button>
     </div>`;
   }
 
-  async function loadClusters(kind) {
-    const url = kind === "event" ? "/api/events" : "/api/people";
-    const listEl = $(kind === "event" ? "#eventlist" : "#peoplelist");
-    const cntEl = $(kind === "event" ? "#eventcount" : "#peoplecount");
-    const gridKey = kind === "event" ? "event" : "person";
-    const data = await api(url);
-    cntEl.textContent = fmtN(data.count) + (kind === "event" ? " events" : " people");
+  async function loadEvents() {
+    const listEl = $("#eventlist");
+    const data = await api("/api/events");
+    $("#eventcount").textContent = fmtN(data.count) + " events";
     if (!data.items.length) {
       listEl.innerHTML = "";
-      grids[gridKey].el.innerHTML = emptyHTML(kind === "event"
-        ? { icon: "cal", title: "No events yet", text: "Choose the gap and distance above, then find events. Photos need dates to be grouped." }
-        : { icon: "users", title: "No people yet", text: "Faces are grouped after analysis. Select Find people to start." });
-      grids[gridKey].more.innerHTML = "";
+      grids.event.el.innerHTML = emptyHTML({ icon: "cal", title: "No events yet",
+        text: "Choose the gap and distance above, then find events. Photos need dates to be grouped." });
+      grids.event.more.innerHTML = "";
       return;
     }
-    const cur = kind === "event" ? state.eventId : state.personId;
-    const selected = data.items.some((c) => c.id === cur) ? cur : data.items[0].id;
-    if (kind === "event") state.eventId = selected; else state.personId = selected;
-    listEl.innerHTML = data.items.map((c) => clusterRow(kind, c, c.id === selected)).join("");
-    grids[gridKey].reset();
+    const selected = data.items.some((c) => c.id === state.eventId) ? state.eventId : data.items[0].id;
+    state.eventId = selected;
+    listEl.innerHTML = data.items.map((c) => clusterRow(c, c.id === selected)).join("");
+    grids.event.reset();
     $$(".burstrow", listEl).forEach((row) => {
       const pick = (e) => {
         if (e.target.closest("[data-rename]")) return;
         $$(".burstrow", listEl).forEach((r) => r.classList.remove("on"));
         row.classList.add("on");
-        if (kind === "event") state.eventId = num(row.dataset.cid); else state.personId = num(row.dataset.cid);
-        grids[gridKey].reset();
+        state.eventId = num(row.dataset.cid);
+        grids.event.reset();
       };
       row.onclick = pick;
       row.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === row) { e.preventDefault(); pick(e); } };
     });
     $$("[data-rename]", listEl).forEach((b) => {
       b.onclick = async () => {
-        const [k, id] = b.dataset.rename.split(":");
         const name = prompt("New name:");
         if (name == null || !name.trim()) return;
         try {
-          await post(`/api/${k === "event" ? "events" : "people"}/${num(id)}/rename`, { name });
-          await loadClusters(k);
+          await post(`/api/events/${num(b.dataset.rename)}/rename`, { name });
+          await loadEvents();
         } catch (e) { toast(e.message, "err"); }
       };
     });
@@ -1566,8 +1620,7 @@
       if (g.total == null || g.stale) { g.stale = false; g.reset(); }
     }
     if (name === "bursts") renderBursts().catch((e) => toast(e.message, "err"));
-    if (name === "events") loadClusters("event").catch((e) => toast(e.message, "err"));
-    if (name === "people") loadClusters("person").catch((e) => toast(e.message, "err"));
+    if (name === "events") loadEvents().catch((e) => toast(e.message, "err"));
     if (name === "actions") loadTransactions().catch(() => {});
     if (name === "settings") refreshSettings(true);
     if (name === "uncertain") renderLegend();
@@ -1885,14 +1938,7 @@
           gap_hours: num($("#ev-gap").value) || 2, gps_km: num($("#ev-km").value) || 1,
         });
         toast(`Found ${fmtN(r.events)} events`, "ok");
-        await loadClusters("event");
-      } catch (e) { toast(e.message, "err"); }
-    };
-    $("#btn-people").onclick = async () => {
-      try {
-        const r = await post("/api/people/cluster", {});
-        toast(`Found ${fmtN(r.people)} people`, "ok");
-        await loadClusters("person");
+        await loadEvents();
       } catch (e) { toast(e.message, "err"); }
     };
 

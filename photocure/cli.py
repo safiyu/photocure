@@ -12,7 +12,6 @@ Commands:
     trash-purge  Delete trash staging older than the retention window.
     similar      Find images similar to one image.
     events       Group images into events.
-    people       Cluster faces into people.
     export-onnx  Export the models to ONNX.
     transactions List ledger transactions.
     stats        Show state-store statistics.
@@ -406,6 +405,8 @@ def infer(
         None, "--reanalyze/--no-reanalyze",
         help="Redo photos that were analyzed without an AI model. "
              "Default: on whenever the AI model is installed."),
+    faces: bool = typer.Option(True, "--faces/--no-faces",
+                               help="Find faces and blinks. --no-faces skips face analysis entirely."),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ):
     """Analyze photos: quality, faces and what each photo shows."""
@@ -417,6 +418,7 @@ def infer(
                       f"{', '.join(_DEVICES)}.[/red]")
         raise typer.Exit(2)
     cfg = _config(db)
+    cfg.face.enabled = faces
     if device:
         cfg.device.device = device
     if device_index is not None:
@@ -777,16 +779,6 @@ def events(
     console.print(f"[green]Grouped images into {n} events.[/green]")
 
 
-@app.command()
-def people(db: Path = typer.Option(DEFAULT_DB, "--db")):
-    """Cluster face embeddings into people."""
-    cluster_people = _lazy(".clustering.people", "cluster_people")
-    cfg = _config(db)
-    with get_session(cfg.db_path) as s:
-        n = cluster_people(s)
-    console.print(f"[green]Found {n} people clusters.[/green]")
-
-
 @app.command("export-onnx")
 def export_onnx(
     output_dir: Path = typer.Option(..., "--output-dir", "-o"),
@@ -834,9 +826,7 @@ def doctor(db: Path = typer.Option(DEFAULT_DB, "--db")):
     ver = {
         "torch": _pkg_version("torch"),
         "open_clip": _pkg_version("open_clip_torch", "open-clip-torch"),
-        "insightface": _pkg_version("insightface"),
-        "onnxruntime": _pkg_version("onnxruntime", "onnxruntime-gpu",
-                                    "onnxruntime-silicon"),
+        "mediapipe": _pkg_version("mediapipe"),
     }
     weights = _clip_weights_cached(cfg)
     stub_rows = None
@@ -854,7 +844,9 @@ def doctor(db: Path = typer.Option(DEFAULT_DB, "--db")):
               else "[yellow]placeholder (no AI model)[/yellow]")
     face = str(info.get("face_backend"))
     t.add_row("Face detection", face if not info.get("face_is_fallback")
-              else f"[yellow]{face} (basic fallback)[/yellow]")
+              else f"[yellow]{face} (no face detector)[/yellow]")
+    t.add_row("Blink detection", "ready" if info.get("blink_available")
+              else "[yellow]not installed (eye state unknown)[/yellow]")
     for name, v in ver.items():
         t.add_row(name, v if v else "[yellow]missing[/yellow]")
     t.add_row("CLIP weights cached",
@@ -879,8 +871,9 @@ def doctor(db: Path = typer.Option(DEFAULT_DB, "--db")):
     elif (not ver["torch"] or not ver["open_clip"] or info.get("semantic_is_stub")) \
             and not any(k not in usable for k in hardware):
         fixes.append(f"Install the AI model: {ml_install_cmd()}")
-    if not ver["insightface"]:
-        fixes.append('Better face detection (optional): pip install "photocure[faces]"')
+    if not ver["mediapipe"]:
+        faces_cmd = pip_install_cmd('"photocure[faces]"')
+        fixes.append(f"Blink detection (optional, eyes stay unmeasured without it): {faces_cmd}")
     if ver["open_clip"] and weights is False:
         fixes.append("The model weights download on first use (about 350 MB), "
                      "so connect to the internet once.")
@@ -1008,7 +1001,7 @@ def setup(
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8080, "--port", "-p"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask before downloading."),
-    faces: bool = typer.Option(True, "--faces/--no-faces", help="Also install face detection."),
+    faces: bool = typer.Option(True, "--faces/--no-faces", help="Also install blink detection (MediaPipe)."),
     serve_ui: bool = typer.Option(True, "--serve/--no-serve", help="Start the web UI when done."),
     open_ui: bool = typer.Option(True, "--open/--no-open", help="Open the browser automatically."),
     verify: bool | None = typer.Option(None, "--verify/--no-verify",
@@ -1039,17 +1032,17 @@ def setup(
 
     state = sc.probe_state()
     cfg = _config_no_init(db)
-    # A face package that failed to build is not retried on every restart.
+    # A blink-detection package that failed to install is not retried on every restart.
     faces_marker = Path(cfg.cache_dir) / "setup_faces_failed"
     if faces and faces_marker.exists() and not reinstall:
-        console.print("[dim]Skipping face detection: it failed to install earlier. "
+        console.print("[dim]Skipping blink detection: it failed to install earlier. "
                       "Use --reinstall to try again.[/dim]")
         faces = False
     steps = sc.plan_steps(kind, state, faces=faces, force=reinstall)
     weights = _clip_weights_cached(cfg)
     already = [f"PyTorch {state['version']}" if state.get("torch") and not sc.torch_needs_reinstall(kind, state) else None,
                f"OpenCLIP {state['open_clip']}" if state.get("open_clip") else None,
-               "InsightFace" if state.get("insightface") else None]
+               "MediaPipe" if state.get("mediapipe") else None]
     already = [a for a in already if a]
     if already:
         console.print("Already installed: " + ", ".join(already))
@@ -1084,7 +1077,7 @@ def setup(
         if not sc.run_step(st):
             if st.optional:
                 console.print(f"[yellow]Skipped: {escape(st.title)} did not install. "
-                              "Photocure will use OpenCV for this.[/yellow]")
+                              "Faces are still found; eye state stays unknown.[/yellow]")
                 try:
                     faces_marker.parent.mkdir(parents=True, exist_ok=True)
                     faces_marker.write_text("failed\n")
@@ -1109,11 +1102,6 @@ def setup(
                       f"(first load took {res.get('seconds')}s)")
     else:
         console.print("[green]Ready.[/green] The model is installed and cached.")
-
-    if faces and sc.probe_state().get("insightface") and not sc.face_weights_cached():
-        console.print("Fetching the face detection model")
-        if not sc.prefetch_faces():
-            console.print("[yellow]Face model download failed. OpenCV will be used for faces.[/yellow]")
 
     if not serve_ui:
         console.print("\nDone. Start the web UI any time with: [bold]photocure serve[/bold]")
@@ -1224,6 +1212,81 @@ def db_restore(
             contextlib.closing(sqlite3.connect(str(db))) as dst:
         src.backup(dst)
     console.print(f"[green]Restored {db} from {snapshot}.[/green]")
+
+
+bench_app = typer.Typer(help="Calibration and timing. Quote only the numbers these print.", no_args_is_help=True)
+app.add_typer(bench_app, name="bench")
+
+
+@bench_app.command("blinks")
+def bench_blinks(
+    labels: Path = typer.Option(Path("tests/fixtures/faces/labels.csv"), "--labels",
+                                help="CSV with columns path,label (open or closed); paths are relative to it."),
+):
+    """Precision, recall and a threshold sweep for eye-closed scores against your own labels."""
+    from . import bench
+    if not labels.exists():
+        console.print(f"[yellow]No labels at {labels}. Nothing to calibrate.[/yellow] "
+                      "Pass --labels with a CSV of path,label rows.")
+        raise typer.Exit(0)
+    items = bench.read_labels(labels)
+    if not items:
+        console.print("[yellow]The labels file has no usable rows (label must be open or closed).[/yellow]")
+        raise typer.Exit(1)
+    cfg = _config_no_init(DEFAULT_DB)
+    scored, no_face, unreadable = bench.score_labelled_photos(items, cfg)
+    measured = [x for x in scored if x[1] is not None]
+    console.print(f"{len(items)} labelled photos: {len(measured)} measured, "
+                  f"{len(scored) - len(measured)} eyes not measured, {no_face} without a face, "
+                  f"{unreadable} unreadable.")
+    if not measured:
+        console.print("[yellow]No eye scores to evaluate. Is MediaPipe installed? "
+                      "See: photocure doctor[/yellow]")
+        raise typer.Exit(1)
+    rows = bench.sweep(scored)
+    t = Table(title="Closed-eye threshold sweep (score >= threshold means closed)")
+    for c in ("threshold", "precision", "recall", "F1", "TP", "FP", "FN", "TN"):
+        t.add_column(c, justify="right")
+    fmt = lambda v: "-" if v is None else f"{v:.2f}"  # noqa: E731
+    for r in rows:
+        mark = "  <- closed_hi" if abs(r.threshold - cfg.face.closed_hi) < 1e-9 else ""
+        t.add_row(f"{r.threshold:.2f}{mark}", fmt(r.precision), fmt(r.recall), fmt(r.f1),
+                  str(r.tp), str(r.fp), str(r.fn), str(r.tn))
+    console.print(t)
+    best = bench.best_threshold(rows)
+    if best:
+        console.print(f"Best F1 on these labels: threshold {best.threshold:.2f} "
+                      f"(F1 {best.f1:.2f}). The setting in use is closed_hi={cfg.face.closed_hi}; "
+                      "change it with PCUR_FACE_CLOSED_HI.")
+
+
+@bench_app.command("pipeline")
+def bench_pipeline_cmd(
+    folder: Path = typer.Argument(..., exists=True, file_okay=False),
+    limit: int = typer.Option(50, "--limit", "-n", min=1, help="Photos to time."),
+    device: str | None = typer.Option(None, "--device", "-d", help="auto|cuda|rocm|xpu|mps|cpu"),
+):
+    """Time each stage (decode, faces, landmarks, CLIP, quality, database) on a folder of photos."""
+    from . import bench
+    cfg = _config_no_init(DEFAULT_DB)
+    if device:
+        if device.strip().lower() not in _DEVICES:
+            console.print(f"[red]Unknown device '{device}'. Choose one of: {', '.join(_DEVICES)}.[/red]")
+            raise typer.Exit(2)
+        cfg.device.device = device.strip().lower()
+    res = bench.bench_pipeline(folder, cfg, limit)
+    console.print(f"{res.photos} photos on [bold]{res.device}[/bold] "
+                  f"(faces: {res.face_backend}, classifier: {res.semantic_backend})")
+    t = Table(title="Time per photo (milliseconds)")
+    for c in ("stage", "n", "mean", "median", "p95"):
+        t.add_column(c, justify="left" if c == "stage" else "right")
+    for stage, n, mean, med, p95 in res.summary():
+        t.add_row(stage, str(n), f"{mean:.1f}", f"{med:.1f}", f"{p95:.1f}")
+    console.print(t)
+    for n in res.notes[:10]:
+        console.print(f"[yellow]{escape(n)}[/yellow]")
+    console.print("Run again with --device cpu and a GPU device to compare. "
+                  "Quote only numbers measured on your own photos.")
 
 
 @app.command()

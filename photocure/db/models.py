@@ -88,6 +88,12 @@ class ImageRecord(SQLModel, table=True):
     locked: bool = Field(default=False)
     event_id: int | None = Field(default=None, index=True)
 
+    # Blink flags (set by photocure.clustering.blinks); faces_schema_version tells which
+    # face pipeline produced the face rows (older rows are re-detected).
+    has_blinks: bool = Field(default=False, index=True)
+    blink_count: int = Field(default=0)
+    faces_schema_version: int = Field(default=0)
+
     # XMP sidecar tracking (schema v3, for C2).
     xmp_written_rating: int | None = Field(default=None)
     xmp_written_tags: str | None = Field(default=None)
@@ -149,9 +155,19 @@ class FaceDetection(SQLModel, table=True):
     # Normalized face embedding as JSON and its person cluster.
     embedding_json: str | None = Field(default=None)
     person_id: int | None = Field(default=None, index=True)
-    eye_aspect_ratio: float | None = None
+    eye_aspect_ratio: float | None = None  # legacy, no longer written
     # Laplacian variance of the face crop (proxy for focus).
     face_sharpness: float | None = None
+    # Box as fractions of the EXIF-oriented image (0..1). Null on rows from older versions.
+    x1: float | None = None
+    y1: float | None = None
+    x2: float | None = None
+    y2: float | None = None
+    # (eyeBlinkLeft + eyeBlinkRight) / 2 from MediaPipe, 0..1; null when it could not be measured.
+    eye_closed_score: float | None = None
+    # open | possible | closed | unknown. Unknown is never scored as open or closed.
+    eye_status: str = Field(default="unknown")
+    is_blink: bool = Field(default=False)
 
 
 class SemanticScore(SQLModel, table=True):

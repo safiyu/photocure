@@ -45,7 +45,7 @@ photocure setup
 |---|---|
 | `--dry-run` | Show what would be installed without downloading anything |
 | `--yes`, `-y` | Do not ask confirmation before downloading |
-| `--no-faces` | Skip face detection (InsightFace) |
+| `--no-faces` | Skip blink detection when installing (`setup`); skip face analysis entirely (`infer`) |
 | `--cpu-only` | Ignore any GPU and force CPU build |
 | `--reinstall` | Force reinstalling PyTorch (e.g. after changing GPU) |
 | `--no-open` | Start server without opening the browser |

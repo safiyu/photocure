@@ -23,7 +23,7 @@ backups/
 Organized/
 Organized_Drive/
 
-# Model weights (open_clip / insightface caches)
+# Model weights (open_clip caches)
 ~/.cache/
 *.gguf
 

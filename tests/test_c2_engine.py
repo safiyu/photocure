@@ -137,8 +137,10 @@ def test_older_database_gains_the_new_columns(tmp_path):
     con = sqlite3.connect(db)
     for col in ("actual_operation", "target_dev", "target_ino"):
         con.execute(f"ALTER TABLE action_ledger DROP COLUMN {col}")
-    for col in ("xmp_written_rating", "xmp_written_tags"):
+    for col in ("xmp_written_rating", "xmp_written_tags", "faces_schema_version", "blink_count"):
         con.execute(f"ALTER TABLE images DROP COLUMN {col}")
+    for col in ("eye_closed_score", "eye_status", "is_blink", "x1"):
+        con.execute(f"ALTER TABLE face_detections DROP COLUMN {col}")
     con.execute("PRAGMA user_version=3")
     con.commit()
     con.close()
@@ -147,5 +149,7 @@ def test_older_database_gains_the_new_columns(tmp_path):
     ledger = {r[1] for r in con.execute("PRAGMA table_info(action_ledger)")}
     images = {r[1] for r in con.execute("PRAGMA table_info(images)")}
     assert {"actual_operation", "target_dev", "target_ino"} <= ledger
-    assert {"xmp_written_rating", "xmp_written_tags"} <= images
-    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 4
+    faces = {r[1] for r in con.execute("PRAGMA table_info(face_detections)")}
+    assert {"xmp_written_rating", "xmp_written_tags", "faces_schema_version", "blink_count"} <= images
+    assert {"eye_closed_score", "eye_status", "is_blink", "x1"} <= faces
+    assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
