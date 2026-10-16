@@ -347,6 +347,52 @@ try {
     await shot("10-faces");
   });
 
+  await scenario("clicking a card's category label moves that photo, or the whole selection, from the grid", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click()");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length >= 3", 15000, "category cards");
+    await settle();
+    const card = (i) => `document.querySelectorAll('#grid .vg-window .card')[${i}]`;
+    const idOf = (i) => page.eval(`Number(${card(i)}.dataset.id)`);
+    const edited = (id) => page.eval(`!!document.querySelector('#grid .card[data-id="${id}"] .catline .tag')`);
+    const label = (id) => page.eval(`document.querySelector('#grid .card[data-id="${id}"] .catpick .t').textContent`);
+    const menuOpen = () => page.eval("!!document.querySelector('.catmenu')");
+    const target = () => page.eval("(() => { const b = document.querySelector('.catmenu-item:not(.current)'); return b ? [b.dataset.catitem, b.textContent] : null; })()");
+    const openFor = (i) => page.eval(`${card(i)}.querySelector('.catpick').click()`);
+
+    // One photo: open, close with Escape, reopen, choose.
+    const a = await idOf(0);
+    await openFor(0);
+    await page.waitFor("!!document.querySelector('.catmenu')", 5000, "picker opens");
+    check((await page.eval("document.querySelectorAll('.catmenu-item').length")) >= 5, "picker lists too few categories");
+    check((await page.eval("document.querySelector('.catmenu-head').textContent")) === "Move to", "single-photo header is wrong");
+    check(await page.eval("document.activeElement.classList.contains('catmenu-item')"), "focus did not enter the picker");
+    await press("Escape");
+    await page.waitFor("!document.querySelector('.catmenu')", 5000, "Escape closes the picker");
+    check(await page.eval(`document.activeElement === ${card(0)}.querySelector('.catpick')`), "focus did not return to the label");
+    check(!(await edited(a)), "Escape changed the category");
+    await openFor(0);
+    await page.waitFor("!!document.querySelector('.catmenu')", 5000, "picker reopens");
+    await shot("11-category-picker");
+    const [cat, text] = await target();
+    await page.eval("document.querySelector('.catmenu-item:not(.current)').click()");
+    await page.waitFor("!document.querySelector('.catmenu')", 5000, "picker closes after a choice");
+    await page.waitFor(`!!document.querySelector('#grid .card[data-id="${a}"] .catline .tag')`, 8000, "photo marked edited");
+    check((await label(a)) === text.trim(), `label is ${await label(a)}, wanted ${text}`);
+    await shot("11-quick-category");
+
+    // A selection: choosing from a selected card moves every selected photo.
+    const b = await idOf(1), c = await idOf(2);
+    for (const id of [b, c]) await page.eval(`document.querySelector('#grid .card[data-id="${id}"] .pick').click()`);
+    await page.waitFor("!document.querySelector('#bulkbar').hidden", 5000, "bulk bar shows");
+    await openFor(1);
+    await page.waitFor("!!document.querySelector('.catmenu')", 5000, "picker opens for a selection");
+    check((await page.eval("document.querySelector('.catmenu-head').textContent")) === "Move 2 selected", "bulk header is wrong");
+    await page.eval("document.querySelector('.catmenu-item:not(.current)').click()");
+    await page.waitFor(`document.querySelector('#grid .card[data-id="${b}"] .catline .tag') && document.querySelector('#grid .card[data-id="${c}"] .catline .tag')`, 8000, "both selected photos edited");
+    check(await page.eval("document.querySelector('#bulkbar').hidden"), "selection was not cleared");
+    check(!(await menuOpen()), "picker is still open");
+  });
+
   await scenario("the page raised no script errors", async () => {
     check(page.errors.length === 0, "script errors: " + page.errors.join(" | ").slice(0, 400));
   });

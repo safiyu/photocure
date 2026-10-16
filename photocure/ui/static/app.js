@@ -285,7 +285,10 @@
       el("div", { class: "fn", title: it.relative_path || it.filename, text: it.filename }),
       showReason ? el("div", { class: "reason", title: it.uncertain_reason.text, text: shortReason(it) }) : null,
       el("div", { class: "meta", text: meta.join(", ") }),
-      el("div", { class: "catline", style: catStyle(rawCat) }, el("i"), el("span", { class: "t", text: catLabel(rawCat) }),
+      el("div", { class: "catline", style: catStyle(rawCat) },
+        el("button", { class: "catpick", type: "button", "data-catpick": id, title: "Change category",
+          "aria-haspopup": "listbox", "aria-label": `Category ${catLabel(rawCat)}, change` },
+        el("i"), el("span", { class: "t", text: catLabel(rawCat) })),
         it.manual_bucket ? [el("span", { class: "tag", text: "edited" }),
           el("button", { class: "x", "data-clear": id, title: "Back to the AI choice",
             "aria-label": "Back to the AI choice", html: icon("x", "sm") })] : null));
@@ -588,6 +591,76 @@
     clearPicks();
   }
 
+  // --------------------------------------------------- quick category picker
+  let catPicker = null;
+
+  function closeCatPicker(restoreFocus = true) {
+    if (!catPicker) return;
+    const { node, anchor, off } = catPicker;
+    catPicker = null;
+    off();
+    node.remove();
+    if (restoreFocus && document.contains(anchor)) anchor.focus({ preventScroll: true });
+  }
+
+  async function pickCategory(id, bucket, current) {
+    closeCatPicker();
+    if (bucket === current && !state.picks.has(id)) return;
+    try {
+      if (state.picks.has(id)) { await bulkReassign(bucket); return; }
+      const prev = await reassign(id, bucket);
+      state.undo.push({ id, prev });
+      toast("Moved to " + catLabel(bucket), "ok");
+      loadStats();
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  function openCatPicker(anchor, id) {
+    if (catPicker && catPicker.anchor === anchor) { closeCatPicker(); return; }
+    closeCatPicker(false);
+    const current = eff(state.byId[id] || {});
+    const many = state.picks.has(id) && state.picks.size > 1;
+    const items = state.cats.map((c) => el("button", {
+      class: "catmenu-item" + (c === current ? " current" : ""), type: "button", role: "option",
+      "aria-selected": String(c === current), "data-catitem": c, style: catStyle(c),
+    }, el("i"), el("span", { text: catLabel(c) })));
+    const node = el("div", { class: "catmenu", role: "listbox", "aria-label": "Move to category" },
+      el("div", { class: "catmenu-head", text: many ? `Move ${fmtN(state.picks.size)} selected` : "Move to" }), items);
+    document.body.append(node);
+
+    const r = anchor.getBoundingClientRect();
+    const w = node.offsetWidth, h = node.offsetHeight;
+    const below = window.innerHeight - r.bottom - 8, above = r.top - 8;
+    const top = below >= Math.min(h, 240) || below >= above ? r.bottom + 4 : Math.max(8, r.top - h - 4);
+    node.style.top = Math.max(8, Math.min(top, window.innerHeight - h - 8)) + "px";
+    node.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + "px";
+
+    items.forEach((b) => { b.onclick = () => pickCategory(id, b.dataset.catitem, current); });
+    node.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();  // keep rating and grid shortcuts out while the menu is open
+      const i = items.indexOf(document.activeElement);
+      if (ev.key === "Escape") { ev.preventDefault(); closeCatPicker(); }
+      else if (ev.key === "Tab") closeCatPicker(false);
+      else if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+        ev.preventDefault();
+        const d = ev.key === "ArrowDown" ? 1 : -1;
+        items[(i + d + items.length) % items.length].focus();
+      }
+    });
+    const onDown = (ev) => { if (!node.contains(ev.target) && !anchor.contains(ev.target)) closeCatPicker(false); };
+    const onAway = (ev) => { if (!(ev.target instanceof Node && node.contains(ev.target))) closeCatPicker(false); };
+    document.addEventListener("mousedown", onDown, true);
+    window.addEventListener("scroll", onAway, true);
+    window.addEventListener("resize", onAway);
+    const off = () => {
+      document.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("scroll", onAway, true);
+      window.removeEventListener("resize", onAway);
+    };
+    catPicker = { node, anchor, off };
+    (items.find((b) => b.classList.contains("current")) || items[0]).focus();
+  }
+
   // ----------------------------------------------------------- card actions
   async function reassign(id, bucket) {
     const prev = (state.byId[id] || {}).manual_bucket || null;
@@ -637,10 +710,11 @@
   function bindDelegates() {
     document.addEventListener("click", async (ev) => {
       const t = ev.target.closest && ev.target.closest(
-        "[data-pick],[data-clear],[data-lock],[data-similar],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
+        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-similar],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
       if (!t) return;
       try {
         if (t.dataset.pick) await togglePick(num(t.dataset.pick), ev.shiftKey);
+        else if (t.dataset.catpick) openCatPicker(t, num(t.dataset.catpick));
         else if (t.dataset.clear) {
           const id = num(t.dataset.clear);
           const prev = await reassign(id, null);
@@ -1278,7 +1352,7 @@
         const j = await api(`/api/jobs/${encodeURIComponent(jobId)}?since=${since}`);
         j.log.forEach((l) => logLine(l.msg, l.level));
         since = j.next;
-        if (j.status !== "running") {
+        if (j.status !== "running" && j.status !== "stopping") {
           if (j.status === "error") throw new Error(j.error || label + " failed");
           return j.result;
         }

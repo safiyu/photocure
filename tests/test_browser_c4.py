@@ -95,5 +95,5 @@ def test_the_expected_scenarios_all_ran(outcome):
     names = {r["name"] for r in outcome["results"]}
     for needle in ("one-time code", "sign-in box", "DOM stays within 100 cards", "recycled", "arrow keys move",
                    "keys rate", "XMP sidecar", "edited elsewhere", "page boundary", "filters agree",
-                   "date scrubber", "resize", "WebP", "Reject all blinks", "Inspect faces", "no script errors"):
+                   "date scrubber", "resize", "WebP", "Reject all blinks", "Inspect faces", "category label", "no script errors"):
         assert any(needle in n for n in names), f"no scenario mentions {needle!r}: {sorted(names)}"
