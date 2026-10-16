@@ -231,6 +231,13 @@ class CuratorConfig(BaseSettings):
     allowed_hosts: str = ""  # PCUR_ALLOWED_HOSTS: comma-separated override list
     collision_policy: str = "sequence"  # sequence, date_suffix, skip
     auto_db_backup: bool = True
+    # Ratings and rejects are also written to XMP sidecars next to the photos. Turn off for a
+    # read-only library mount.
+    write_sidecars: bool = True
+    sidecar_debounce_seconds: float = 1.5  # (tune) wait this long after the last change, then write
+    # Offline reverse geocoding of GPS positions (needs photocure[geo]).
+    geocode: bool = True
+    geocode_batch: int = 500
 
     @field_validator("collision_policy", mode="before")
     @classmethod

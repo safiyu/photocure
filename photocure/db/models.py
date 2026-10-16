@@ -53,7 +53,13 @@ class ImageRecord(SQLModel, table=True):
     taken_at_source: str = Field(default="")
     gps_lat: float | None = None
     gps_lon: float | None = None
-    camera_model: str = Field(default="")
+    camera_model: str = Field(default="", index=True)
+    # Filled from the GPS position by the optional offline geocoder (photocure[geo]).
+    city: str = Field(default="")
+    region: str = Field(default="")
+    country_code: str = Field(default="", index=True)
+    # Local favourite. Never written to a sidecar.
+    is_favorite: bool = Field(default=False, index=True)
 
     # Scan state machine.
     scan_status: str = Field(default="scanned", index=True)
@@ -82,8 +88,8 @@ class ImageRecord(SQLModel, table=True):
     near_dup_of: int | None = Field(default=None)
     # Minutes east of UTC for the camera-local taken_at, when known.
     tz_offset_minutes: int | None = Field(default=None)
-    # Star rating 0-5 from XMP sidecars.
-    rating: int | None = Field(default=None)
+    # Star rating: 1-5 stars, -1 rejected, None or 0 unrated (from XMP sidecars or set in the UI).
+    rating: int | None = Field(default=None, index=True)
     # Human-locked rows are never re-routed by automatic passes.
     locked: bool = Field(default=False)
     event_id: int | None = Field(default=None, index=True)

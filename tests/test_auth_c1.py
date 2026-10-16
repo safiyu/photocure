@@ -20,7 +20,7 @@ def app(tmp_path, monkeypatch):
 def test_api_and_media_routes_need_auth(app):
     c = TestClient(app)
     assert c.get("/api/images").status_code == 401
-    assert c.get("/api/thumbnail/1").status_code == 401
+    assert c.get("/thumbnail/1").status_code == 401
     assert c.get("/healthz").status_code == 200
     assert c.get("/").status_code == 200
 

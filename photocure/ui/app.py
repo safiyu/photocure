@@ -8,7 +8,7 @@ Endpoints:
     GET  /api/stats | /api/progress | /api/plan
     GET  /api/images                       filtered + paginated listing
     GET  /api/images/{id}/similar          embedding neighbours
-    GET  /api/thumbnail/{id}               cached JPEG thumbnail
+    GET  /thumbnail/{id}?tier=&v=          cached WebP thumbnail (micro, medium, preview)
     GET  /api/bursts | /api/burst/{id}
     GET  /api/events                       clusters
     GET  /api/transactions                 ledger summary (+ latest undoable)
@@ -32,7 +32,8 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from datetime import time as dtime
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -50,7 +51,6 @@ from ..db import models as M
 from ..engine.locks import LEDGER_WRITING as _LEDGER_WRITING
 from ..db.repository import PhotoRepository
 from ..db.session import get_session, init_db, snapshot_database
-from ..quality.image_loader import load_image, to_thumbnail_jpg
 from ..rules.organizer import OrganizeMode
 from ..rules.taxonomy import CategoryType
 from ..services import Planner
@@ -333,7 +333,7 @@ def _item(r: M.ImageRecord, cfg: CuratorConfig | None = None) -> dict:
     sem = r.semantic
     qm = r.quality
     out = {
-        "id": r.id, "filename": r.filename, "relative_path": r.relative_path,
+        "id": r.id, "fp": _fingerprint(r), "filename": r.filename, "relative_path": r.relative_path,
         "path": r.path, "category": r.category, "manual_bucket": r.manual_bucket,
         "route_status": r.route_status, "target_path": r.target_path,
         "is_duplicate": r.is_duplicate, "is_alternate": r.is_alternate,
@@ -353,6 +353,8 @@ def _item(r: M.ImageRecord, cfg: CuratorConfig | None = None) -> dict:
         "is_overexposed": bool(qm.is_overexposed) if qm else False,
         "face_count": len(r.faces or []),
         "has_blinks": bool(r.has_blinks), "blink_count": int(r.blink_count or 0),
+        "is_favorite": bool(r.is_favorite), "city": r.city, "region": r.region,
+        "country_code": r.country_code,
         "top2": sem.top2_category if sem else None,
         "top2_score": round(sem.top2_score, 3) if sem else None,
     }
@@ -372,41 +374,27 @@ def _load_items(s, ids: list[int], cfg: CuratorConfig | None = None) -> list[dic
     return [_item(by_id[i], cfg) for i in ids if i in by_id]
 
 
-def _make_thumb(path: str, ext: str, orientation: int, max_side: int = 384) -> bytes:
-    """Fast thumbnail: JPEG draft mode, RAW embedded preview, generic fallback."""
-    import io
+_FP_RE = re.compile(r"^[0-9a-f]{10,64}$")
 
-    from PIL import Image, ImageOps
 
-    ext = ext.lower()
-    img = None
-    if ext in (".jpg", ".jpeg"):
-        with Image.open(path) as im:
-            im.draft("RGB", (max_side * 2, max_side * 2))
-            img = ImageOps.exif_transpose(im).convert("RGB")
-    elif ext in (".cr2", ".nef", ".arw", ".dng"):
-        try:
-            import rawpy
-            with rawpy.imread(path) as raw:
-                try:
-                    th = raw.extract_thumb()
-                    if th.format == rawpy.ThumbFormat.JPEG:
-                        with Image.open(io.BytesIO(th.data)) as im:
-                            img = ImageOps.exif_transpose(im).convert("RGB")
-                    else:
-                        img = Image.fromarray(th.data).convert("RGB")
-                except Exception:
-                    rgb = raw.postprocess(half_size=True, use_camera_wb=True)
-                    img = Image.fromarray(rgb)
-        except Exception:
-            img = None
-    if img is not None:
-        img.thumbnail((max_side, max_side))
-        buf = io.BytesIO()
-        img.save(buf, "JPEG", quality=82)
-        return buf.getvalue()
-    frame = load_image(path, max_side=max_side, orientation=orientation)
-    return to_thumbnail_jpg(frame.bgr, max_side=max_side)
+def _fingerprint(rec: M.ImageRecord) -> str:
+    """Identifies this version of the photo; derived only from the database row."""
+    return hashlib.sha256(f"{rec.quick_hash}|{rec.sha256}|{rec.file_size}|{rec.filename}"
+                          .encode()).hexdigest()[:16]
+
+
+class RatingReq(BaseModel):
+    rating: int = Field(ge=0, le=5)  # 0 clears
+    overwrite: bool = False
+
+
+class RejectReq(BaseModel):
+    reject: bool = True
+    overwrite: bool = False
+
+
+class FavoriteReq(BaseModel):
+    favorite: bool | None = None  # omitted: toggle
 
 
 class MkdirReq(BaseModel):
@@ -467,6 +455,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
     app.state.auth_mgr = auth_mgr
     app.state.token = auth_mgr.token
     app.state.allowed_hosts = build_allowed_hosts(cfg.host, cfg.port, cfg.allowed_hosts)
+    from ..sidecar_queue import SidecarQueue
+    app.state.sidecars = SidecarQueue(dbp, cfg.sidecar_debounce_seconds)
     progress_mgr = ProgressManager()
     app.state.progress = progress_mgr
     jobs: dict[str, dict] = {}
@@ -775,6 +765,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
         min_aesthetic: float | None = Query(None),
         locked: bool | None = Query(None),
         event_id: int | None = Query(None),
+        camera: str | None = Query(None, max_length=200),
+        rating: int | None = Query(None, ge=-1, le=5),
+        min_rating: int | None = Query(None, ge=1, le=5),
+        country: str | None = Query(None, min_length=2, max_length=2),
+        favorite: bool | None = Query(None),
+        date_from: date | None = Query(None),
+        date_to: date | None = Query(None),
+        sort: Literal["id", "taken"] = Query("id"),
         limit: int = Query(200, ge=1, le=1000),
         offset: int = Query(0, ge=0),
     ):
@@ -799,6 +797,22 @@ def create_app(db_path: str | None = None) -> FastAPI:
             conds.append(I.locked == locked)
         if event_id is not None:
             conds.append(I.event_id == event_id)
+        # Every value below reaches SQL as a bound parameter, never as text.
+        if camera:
+            conds.append(I.camera_model == camera)
+        if rating is not None:
+            conds.append(func.coalesce(I.rating, 0) == rating)  # null counts as unrated (0)
+        if min_rating is not None:
+            conds.append(I.rating >= min_rating)
+        if country:
+            conds.append(I.country_code == country.upper())
+        if favorite is not None:
+            conds.append(I.is_favorite == favorite)
+        # taken_at is stored as UTC, so a date range is a range of UTC calendar days.
+        if date_from is not None:
+            conds.append(I.taken_at >= datetime.combine(date_from, dtime.min, tzinfo=timezone.utc))
+        if date_to is not None:
+            conds.append(I.taken_at < datetime.combine(date_to, dtime.min, tzinfo=timezone.utc) + timedelta(days=1))
         need_sem = highlights or min_aesthetic is not None
         if need_sem:
             conds.append(M.SemanticScore.aesthetic.is_not(None))
@@ -814,11 +828,81 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         with get_session(dbp) as s:
             total = s.exec(apply(select(func.count()).select_from(I))).one()
-            order = [M.SemanticScore.aesthetic.desc(), I.id] if highlights else [I.id]
+            if highlights:
+                order = [M.SemanticScore.aesthetic.desc(), I.id]
+            elif sort == "taken":
+                order = [I.taken_at.asc().nulls_last(), I.id]
+            else:
+                order = [I.id]
             ids = s.exec(apply(select(I.id)).order_by(*order)
                          .offset(offset).limit(limit)).all()
             return {"total": int(total), "offset": offset, "limit": limit,
                     "items": _load_items(s, list(ids), app.state.cfg)}
+
+    @app.get("/api/facets")
+    def facets():
+        """What the library contains, for the filter controls and the date scrubber."""
+        I = M.ImageRecord
+        with get_session(dbp) as s:
+            cams = s.exec(select(I.camera_model, func.count()).where(I.camera_model != "")
+                          .group_by(I.camera_model).order_by(func.count().desc(), I.camera_model)).all()
+            rated = dict(s.exec(select(func.coalesce(I.rating, 0), func.count())
+                                .group_by(func.coalesce(I.rating, 0))).all())
+            places = s.exec(select(I.country_code, func.count()).where(I.country_code != "")
+                            .group_by(I.country_code).order_by(func.count().desc(), I.country_code)).all()
+            lo, hi = s.exec(select(func.min(I.taken_at), func.max(I.taken_at))
+                            .where(I.taken_at.is_not(None))).one()
+            favs = s.exec(select(func.count()).select_from(I).where(I.is_favorite == True)).one()  # noqa: E712
+            total = s.exec(select(func.count()).select_from(I)).one()
+        return {
+            "total": int(total), "favorites": int(favs),
+            "cameras": [{"name": n, "count": int(c)} for n, c in cams],
+            "ratings": {str(k): int(rated.get(k, 0)) for k in (-1, 0, 1, 2, 3, 4, 5)},
+            "countries": [{"code": c, "count": int(n)} for c, n in places],
+            "taken_min": str(lo)[:10] if lo else None, "taken_max": str(hi)[:10] if hi else None,
+        }
+
+    def _set_rating(image_id: int, value: int | None, overwrite: bool):
+        """Change a photo's rating. Over a sidecar edited outside Photocure this asks first."""
+        from ..sidecar_sync import foreign_state
+        # The queue's lock keeps this comparison from seeing a half-finished background write.
+        with app.state.sidecars.io_lock, get_session(dbp) as s:
+            rec = s.get(M.ImageRecord, image_id)
+            if rec is None:
+                raise HTTPException(404, "image not found")
+            if app.state.cfg.write_sidecars and not overwrite:
+                state = foreign_state(rec)
+                if state:
+                    return JSONResponse({
+                        "ok": False, "needs_confirmation": True, "reason": state,
+                        "message": "This photo's sidecar was modified outside Photocure."}, status_code=409)
+            rec.rating = value
+            rec.updated_at = datetime.now(timezone.utc)
+            s.flush()
+        if app.state.cfg.write_sidecars:
+            app.state.sidecars.schedule(image_id, overwrite)
+        with get_session(dbp) as s:
+            return {"ok": True, "item": _load_items(s, [image_id], app.state.cfg)[0]}
+
+    @app.post("/api/images/{image_id}/rating", dependencies=auth)
+    def rate_image(image_id: int, body: RatingReq):
+        return _set_rating(image_id, body.rating or None, body.overwrite)
+
+    @app.post("/api/images/{image_id}/reject", dependencies=auth)
+    def reject_image(image_id: int, body: RejectReq = RejectReq()):
+        return _set_rating(image_id, -1 if body.reject else None, body.overwrite)
+
+    @app.post("/api/images/{image_id}/favorite", dependencies=auth)
+    def favorite_image(image_id: int, body: FavoriteReq = FavoriteReq()):
+        with get_session(dbp) as s:
+            rec = s.get(M.ImageRecord, image_id)
+            if rec is None:
+                raise HTTPException(404, "image not found")
+            rec.is_favorite = (not rec.is_favorite) if body.favorite is None else body.favorite
+            rec.updated_at = datetime.now(timezone.utc)
+            s.flush()
+        with get_session(dbp) as s:
+            return {"ok": True, "item": _load_items(s, [image_id], app.state.cfg)[0]}
 
     @app.get("/api/images/{image_id}/similar")
     def similar(image_id: int, k: int = Query(12, ge=1, le=100)):
@@ -836,39 +920,38 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 it["score"] = round(score.get(it["id"], 0.0), 4)
             return {"id": image_id, "items": items}
 
-    @app.get("/api/thumbnail/{image_id}")
-    def thumbnail(image_id: int):
+    @app.get("/thumbnail/{image_id}")
+    def thumbnail(image_id: int, tier: Literal["micro", "medium", "preview"] = Query("micro"),
+                  v: str | None = Query(None)):
+        """WebP thumbnail in one of three sizes. The file is chosen from the database row only;
+        ``v`` is a cache-buster and must look like a hex fingerprint."""
+        if v is not None and not _FP_RE.fullmatch(v):
+            raise HTTPException(400, "invalid cache key")
         with get_session(dbp) as s:
             rec = s.get(M.ImageRecord, image_id)
             if rec is None:
                 raise HTTPException(404, "image not found")
             cands = [p for p in (rec.path, rec.target_path) if p]
-            fp = hashlib.sha1(f"{rec.quick_hash}|{rec.sha256}|{rec.file_size}|{rec.filename}"
-                              .encode()).hexdigest()[:10]
+            fp = _fingerprint(rec)
             ext, orientation = rec.extension, rec.orientation
-        thumb_dir = cfg.cache_dir / "thumbs"
-        thumb_dir.mkdir(parents=True, exist_ok=True)
-        cache = thumb_dir / f"{db_fp}_{image_id:09d}_{fp}.jpg"
+        tier_dir = cfg.cache_dir / "thumbs" / tier
+        cache = tier_dir / f"{db_fp}_{image_id}_{fp}.webp"
+        headers = {"Cache-Control": "public, max-age=31536000, immutable"}
         if cache.exists():
-            return FileResponse(cache, media_type="image/jpeg")
+            return FileResponse(cache, media_type="image/webp", headers=headers)
         path = next((p for p in cands if os.path.exists(p)), None)
         if path is None:
             raise HTTPException(404, "image file not found on disk")
+        from ..thumbs import render_tier
         try:
-            data = _make_thumb(path, ext or Path(path).suffix, orientation)
+            data = render_tier(path, ext or Path(path).suffix, orientation, tier)
         except Exception as e:
             raise HTTPException(500, f"thumbnail decode failed: {e}")
+        tier_dir.mkdir(parents=True, exist_ok=True)
         tmp = cache.with_suffix(f".{uuid.uuid4().hex[:6]}.tmp")
         tmp.write_bytes(data)
         os.replace(tmp, cache)
-        return Response(data, media_type="image/jpeg")
-
-    _FP_RE = re.compile(r"^[0-9a-f]{10,64}$")
-
-    def _fingerprint(rec: M.ImageRecord) -> str:
-        """Identifies this version of the photo; derived only from the database row."""
-        return hashlib.sha256(f"{rec.quick_hash}|{rec.sha256}|{rec.file_size}|{rec.filename}"
-                              .encode()).hexdigest()[:16]
+        return Response(data, media_type="image/webp", headers=headers)
 
     @app.get("/api/images/{image_id}/faces")
     def image_faces(image_id: int):
@@ -970,34 +1053,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 repo.set_manual_bucket(m.id, None)
                 ids.append(m.id)
             return {"ok": True, "restored": len(ids), "ids": ids}
-
-    @app.get("/api/preview/{image_id}")
-    def preview(image_id: int):
-        """Large (1600 px) JPEG for the lightbox, cached like thumbnails."""
-        with get_session(dbp) as s:
-            rec = s.get(M.ImageRecord, image_id)
-            if rec is None:
-                raise HTTPException(404, "image not found")
-            cands = [p for p in (rec.path, rec.target_path) if p]
-            fp = hashlib.sha1(f"{rec.quick_hash}|{rec.sha256}|{rec.file_size}|{rec.filename}"
-                              .encode()).hexdigest()[:10]
-            ext, orientation = rec.extension, rec.orientation
-        prev_dir = cfg.cache_dir / "previews"
-        prev_dir.mkdir(parents=True, exist_ok=True)
-        cache = prev_dir / f"{db_fp}_{image_id:09d}_{fp}.jpg"
-        if cache.exists():
-            return FileResponse(cache, media_type="image/jpeg")
-        path = next((p for p in cands if os.path.exists(p)), None)
-        if path is None:
-            raise HTTPException(404, "image file not found on disk")
-        try:
-            data = _make_thumb(path, ext or Path(path).suffix, orientation, max_side=1600)
-        except Exception as e:
-            raise HTTPException(500, f"preview decode failed: {e}")
-        tmp = cache.with_suffix(f".{uuid.uuid4().hex[:6]}.tmp")
-        tmp.write_bytes(data)
-        os.replace(tmp, cache)
-        return Response(data, media_type="image/jpeg")
 
     @app.get("/api/overview")
     def overview():
@@ -1700,6 +1755,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.on_event("shutdown")
     async def shutdown_event():
+        app.state.sidecars.close()  # write anything still waiting out its debounce
         _pid_file(cfg.port).unlink(missing_ok=True)
 
     @app.get("/", response_class=HTMLResponse)

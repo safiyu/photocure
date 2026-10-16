@@ -93,6 +93,6 @@ def test_overview_and_preview(client):
     assert client.post("/api/infer", json={"device": "cpu"}).status_code == 200
     ov = client.get("/api/overview").json()
     assert ov["total"] == 2 and sum(ov["by_category"].values()) == 2
-    r = client.get("/api/preview/1")
-    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
-    assert client.get("/api/preview/9999").status_code == 404
+    r = client.get("/thumbnail/1?tier=preview")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/webp"
+    assert client.get("/thumbnail/9999?tier=preview").status_code == 404

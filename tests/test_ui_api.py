@@ -288,7 +288,7 @@ def test_apply_job_log_transactions_and_undo(env):
 
     # Moved images still serve thumbnails.
     iid = c.get("/api/images").json()["items"][0]["id"]
-    assert c.get(f"/api/thumbnail/{iid}").status_code == 200
+    assert c.get(f"/thumbnail/{iid}").status_code == 200
 
     u = c.post("/api/undo", json={})
     assert u.status_code == 202
@@ -340,12 +340,12 @@ def test_latest_undoable_skips_fully_rolled_back(env):
 # -------------------------------------------------------------- thumbnails
 def test_thumbnail_ok_cached_and_fingerprinted(env):
     iid = env.client.get("/api/images").json()["items"][0]["id"]
-    r = env.client.get(f"/api/thumbnail/{iid}")
-    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
-    cached = list((env.app.state.cfg.cache_dir / "thumbs").glob(f"*_{iid:09d}_*.jpg"))
+    r = env.client.get(f"/thumbnail/{iid}")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/webp"
+    cached = list((env.app.state.cfg.cache_dir / "thumbs" / "micro").glob(f"*_{iid}_*.webp"))
     assert len(cached) == 1
-    assert env.client.get(f"/api/thumbnail/{iid}").status_code == 200
-    assert env.client.get("/api/thumbnail/99999").status_code == 404
+    assert env.client.get(f"/thumbnail/{iid}").status_code == 200
+    assert env.client.get("/thumbnail/99999").status_code == 404
 
 
 def test_thumbnail_missing_file_404(env):
@@ -354,17 +354,7 @@ def test_thumbnail_missing_file_404(env):
         rec = s.get(M.ImageRecord, iid)
         Path(rec.path).unlink()
         rec.quick_hash = "changed"  # new fingerprint avoids any cached copy
-    assert env.client.get(f"/api/thumbnail/{iid}").status_code == 404
-
-
-def test_make_thumb_jpeg_draft_and_size(tmp_path):
-    from io import BytesIO
-
-    from PIL import Image
-    p = make_image(tmp_path / "big.jpg", size=(2000, 3000))
-    data = ui_app._make_thumb(str(p), ".jpg", 1)
-    with Image.open(BytesIO(data)) as im:
-        assert max(im.size) <= 384
+    assert env.client.get(f"/thumbnail/{iid}").status_code == 404
 
 
 # ------------------------------------------------------- similar / clusters

@@ -60,6 +60,7 @@ class ScanResult:
     skipped_known: int = 0
     duplicates: int = 0
     near_duplicates: int = 0
+    geocoded: int = 0
     missing: int = 0
     errors: int = 0
     duration_s: float = 0.0
@@ -297,6 +298,10 @@ class FileScanner:
             if prune_missing:
                 self._prune(session, root, {str(p) for p in files}, known, result)
 
+            if self.cfg.geocode:
+                from .geo import geocode_pending
+                result.geocoded = geocode_pending(session, self.cfg.geocode_batch)
+
         result.scanned = len(files)
         result.duration_s = time.monotonic() - t0
         return result
@@ -322,6 +327,7 @@ class FileScanner:
                 row.category = None
                 row.subcategory = None
                 row.target_path = None
+                row.city = row.region = row.country_code = ""  # the GPS may have changed
                 row.scan_status = "scanned"
                 row.quality = None
                 row.faces = []

@@ -54,7 +54,7 @@ def get_engine(db_path: Path | str = "photocure.db", echo: bool = False):
     return engine
 
 
-SCHEMA_VERSION = 5  # 5: blink/face columns; 4: xmp_written_* and ledger provenance
+SCHEMA_VERSION = 6  # 6: geo/favourite columns and indexes; 5: blink/face columns; 4: xmp_written_*
 
 
 def _sql_type(col) -> str:
@@ -92,6 +92,13 @@ def migrate(engine) -> int:
                        f"{_sql_type(col)}{_default_clause(col)}")
                 conn.exec_driver_sql(ddl)
                 added += 1
+        # Columns added above are not indexed by create_all on an existing table, so create any
+        # index the models declare that the database does not have yet.
+        for table in SQLModel.metadata.sorted_tables:
+            if not conn.exec_driver_sql(f'PRAGMA table_info("{table.name}")').fetchall():
+                continue
+            for index in table.indexes:
+                index.create(conn, checkfirst=True)
         conn.exec_driver_sql(f"PRAGMA user_version={SCHEMA_VERSION}")
     return added
 
