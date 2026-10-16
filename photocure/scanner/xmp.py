@@ -122,3 +122,24 @@ def update_xmp_sidecar(
     except OSError as e:
         log.warning(f"Failed to write {sidecar}: {e}")
         return (False, f"write failed: {e}")
+
+
+def get_on_disk_rating(photo_path: Path) -> int | None:
+    """Extract xmp:Rating from disk sidecar, if it exists (per spec §3.2).
+    
+    Returns None if no sidecar or parse fails.
+    """
+    sidecar = _find_sidecar_path(Path(photo_path))
+    if sidecar is None or not sidecar.exists():
+        return None
+    try:
+        tree = etree.parse(str(sidecar))
+        desc = tree.find(".//{http://www.w3.org/1999/02/22-rdf-syntax-ns#}Description")
+        if desc is None:
+            return None
+        rating_elem = desc.find("{http://ns.adobe.com/xap/1.0/}Rating")
+        if rating_elem is not None and rating_elem.text:
+            return int(rating_elem.text)
+    except Exception:
+        pass
+    return None
