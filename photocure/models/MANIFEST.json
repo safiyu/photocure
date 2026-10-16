@@ -1,0 +1,20 @@
+{
+  "models": [
+    {
+      "file": "face_detection_yunet_2023mar.onnx",
+      "name": "YuNet face detector",
+      "purpose": "Finds faces in a photo",
+      "license": "MIT",
+      "upstream_url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+      "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+    },
+    {
+      "file": "face_landmarker.task",
+      "name": "MediaPipe Face Landmarker",
+      "purpose": "Measures how closed each eye is",
+      "license": "Apache-2.0",
+      "upstream_url": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+      "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+    }
+  ]
+}
