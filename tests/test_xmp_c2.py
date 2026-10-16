@@ -4,7 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from photocure.scanner.xmp import update_xmp_sidecar, get_on_disk_rating, _find_sidecar_path
+from lxml import etree
+
+from photocure.scanner.xmp import update_xmp_sidecar, get_on_disk_rating
+
+
+def _rating(path):
+    root = etree.fromstring(Path(path).read_bytes())
+    el = root.find(".//{http://ns.adobe.com/xap/1.0/}Rating")
+    return int(el.text)
 
 
 class TestXMPSidecarWriter:
@@ -19,7 +27,7 @@ class TestXMPSidecarWriter:
             assert success, msg
             sidecar = Path(tmpdir) / "IMG_0001.JPG.xmp"
             assert sidecar.exists()
-            assert b"<xmp:Rating>3</xmp:Rating>" in sidecar.read_bytes()
+            assert _rating(sidecar) == 3
 
     def test_prefer_ext_sidecar(self):
         """Acceptance: use <filename>.<ext>.xmp if it exists (preferred form)."""
@@ -30,7 +38,7 @@ class TestXMPSidecarWriter:
             ext_sidecar.write_text('<?xml version="1.0"?><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about=""/></rdf:RDF>')
             success, msg = update_xmp_sidecar(photo, rating=2)
             assert success
-            assert b"<xmp:Rating>2</xmp:Rating>" in ext_sidecar.read_bytes()
+            assert _rating(ext_sidecar) == 2
 
     def test_use_legacy_sidecar(self):
         """Acceptance: use <filename>.xmp (legacy) if it's the only one."""
@@ -41,8 +49,8 @@ class TestXMPSidecarWriter:
             legacy.write_text('<?xml version="1.0"?><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about=""/></rdf:RDF>')
             success, msg = update_xmp_sidecar(photo, rating=1)
             assert success
-            assert not Path(tmpdir / "IMG_0001.JPG.xmp").exists()
-            assert b"<xmp:Rating>1</xmp:Rating>" in legacy.read_bytes()
+            assert not (Path(tmpdir) / "IMG_0001.JPG.xmp").exists()
+            assert _rating(legacy) == 1
 
     def test_dual_sidecar_guard(self):
         """Acceptance: refuse to write if both .xmp and .<ext>.xmp exist (spec §3.1)."""
@@ -53,7 +61,7 @@ class TestXMPSidecarWriter:
             (Path(tmpdir) / "IMG_0001.JPG.xmp").touch()
             success, msg = update_xmp_sidecar(photo, rating=4)
             assert not success
-            assert "dual sidecar" in msg.lower()
+            assert msg == "sidecar_skipped_dual"
 
     def test_element_preservation(self):
         """Acceptance: round-trip preserves non-Photocure elements (spec §3.1)."""
@@ -124,7 +132,7 @@ class TestHardlinkFallback:
             dst = Path(tmpdir) / "dst.txt"
             from photocure.engine.action_engine import ExecutionReport, ActionEngine
             rep = ExecutionReport(transaction_id="TX_test")
-            op, dev, ino = ActionEngine._link_or_copy(src, dst, rep)
+            op = ActionEngine._link_or_copy(src, dst, rep)
             assert op == "hardlink"
             assert dst.exists()
             assert src.stat().st_ino == dst.stat().st_ino, "Hardlink should have same inode"

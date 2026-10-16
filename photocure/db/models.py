@@ -207,6 +207,10 @@ class ActionLedger(SQLModel, table=True):
     prev_relative_path: str = Field(default="")
     sha256: str = Field(default="")
     file_size: int = 0
+    # What really happened on disk (a requested hardlink may have become a copy).
+    actual_operation: str = Field(default="")
+    target_dev: int | None = Field(default=None)
+    target_ino: int | None = Field(default=None)
     # "pending", "committed", "rolled_back", "failed".
     status: str = Field(default="pending", index=True)
     error: str | None = Field(default=None)

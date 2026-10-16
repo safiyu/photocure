@@ -3,7 +3,7 @@
 Covers:
 - Dry-run: no filesystem mutation.
 - Move / copy / hardlink execution with transactional ledger (PENDING → COMMITTED).
-- Collision rename (_dup<sha6>).
+- Collision rename (sequence policy: name (1).ext).
 - Rollback: move-back, copy-removal, hardlink-removal, symlink-removal.
 - Rollback hash verification (refuses on mismatch).
 - Rollback idempotency.
@@ -228,9 +228,9 @@ def test_collision_renames_target(cfg, seeded_repo, tmp_path):
     assert rep.collisions >= 1
     # The pre-existing file must be untouched.
     assert victim.read_bytes() == b"pre-existing content"
-    # The moved file got a _dup suffix.
+    # The moved file got a sequence suffix.
     moved = [p for p in target.iterdir() if p.name != records[0].filename and p.is_file()]
-    assert any("_dup" in p.name for p in moved), f"no _dup rename found in {list(target.iterdir())}"
+    assert any(" (1)" in p.name for p in moved), f"no sequence rename found in {list(target.iterdir())}"
 
 
 # ---------------------------------------------------------------------------

@@ -27,3 +27,4 @@ onnxruntime-gpu>=1.16
 # Dev / tests
 pytest>=7.0
 httpx>=0.26
+lxml>=5.0
