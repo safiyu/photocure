@@ -1404,6 +1404,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
             raise HTTPException(409, "another task is already running")
 
         def work(job: dict) -> dict:
+            # Pre-execution backup (C1 §2.5).
+            if cfg.auto_db_backup:
+                try:
+                    snapshot_database(dbp, keep=10)
+                    jlog(job, "database snapshot created")
+                except Exception as e:
+                    jlog(job, f"database snapshot failed (non-fatal): {e}", "warn")
             progress_mgr.start("Apply", "Building plan", 0, "Building plan...")
             jlog(job, "building plan")
             p = build(planner, body, root, persist=True)

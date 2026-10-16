@@ -200,6 +200,14 @@ class CuratorConfig(BaseSettings):
     auto_db_backup: bool = True
     burst_gap_seconds: float = 2.0
 
+    @field_validator("collision_policy", mode="before")
+    @classmethod
+    def _check_collision_policy(cls, v: object) -> str:
+        policy = str(v).strip().lower()
+        if policy not in ("sequence", "date_suffix", "skip"):
+            raise ValueError(f"Unknown collision_policy '{v}'. Choose one of: sequence, date_suffix, skip.")
+        return policy
+
     @model_validator(mode="after")
     def _resolve_scan_workers(self) -> CuratorConfig:
         # The scanner hands this straight to a thread pool, so never leave 0 in place.
