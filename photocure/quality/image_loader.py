@@ -26,11 +26,11 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 class DecodeError(Exception):
     """The file cannot be decoded into a usable frame."""
 
-try:
-    import pillow_heif
-    pillow_heif.register_heif_opener()
-except ImportError:  # HEIC support becomes a no-op
-    pillow_heif = None
+# Decoded through rawpy; everything else goes through Pillow.
+RAW_EXTS = frozenset({".cr2", ".nef", ".arw", ".dng", ".rw2", ".orf", ".raf"})
+HEIF_EXTS = frozenset({".heic", ".heif"})
+
+from ..heif import pillow_heif  # registers the HEIF opener, once
 
 try:
     import rawpy
@@ -107,8 +107,7 @@ def load_image(path: Path | str,
     path = Path(path)
     ext = path.suffix.lower()
 
-    raw_exts = {".cr2", ".nef", ".arw", ".dng", ".rw2", ".orf", ".raf"}
-    heif_exts = {".heic", ".heif"}
+    raw_exts, heif_exts = RAW_EXTS, HEIF_EXTS
     warning = ""
     # True when the decoder already rotated the pixels per the file's metadata.
     pre_oriented = False
@@ -139,7 +138,7 @@ def load_image(path: Path | str,
         pre_oriented = ext in heif_exts and pillow_heif is not None
 
     if orientation and orientation != 1 and not pre_oriented:
-        bgr = _apply_orientation(img.bgr, orientation)
+        bgr = apply_exif_orientation(img.bgr, orientation)
         img.bgr, img.width, img.height = bgr, bgr.shape[1], bgr.shape[0]
         if orientation in (5, 6, 7, 8):
             img.orig_width, img.orig_height = img.orig_height, img.orig_width
@@ -173,23 +172,49 @@ def _load_pillow(path: Path, max_side: int | None = None) -> tuple[np.ndarray, i
         raise DecodeError(str(e)) from e
 
 
-def _apply_orientation(bgr: np.ndarray, orientation: int) -> np.ndarray:
-    """Apply the 8 EXIF orientation values to a BGR array."""
+# EXIF orientation 2..8 as Pillow transposes (the same table ImageOps.exif_transpose uses).
+_PIL_TRANSPOSE = {
+    2: Image.Transpose.FLIP_LEFT_RIGHT, 3: Image.Transpose.ROTATE_180,
+    4: Image.Transpose.FLIP_TOP_BOTTOM, 5: Image.Transpose.TRANSPOSE,
+    6: Image.Transpose.ROTATE_270, 7: Image.Transpose.TRANSVERSE,
+    8: Image.Transpose.ROTATE_90,
+}
+
+
+def _orient_bgr(bgr: np.ndarray, orientation: int) -> np.ndarray:
     if orientation == 2:
         return cv2.flip(bgr, 1)
     if orientation == 3:
         return cv2.rotate(bgr, cv2.ROTATE_180)
     if orientation == 4:
         return cv2.flip(bgr, 0)
-    if orientation == 5:
-        return cv2.flip(cv2.rotate(bgr, cv2.ROTATE_90_COUNTERCLOCKWISE), 1)
+    if orientation == 5:  # transpose: mirror across the main diagonal
+        return cv2.transpose(bgr)
     if orientation == 6:
         return cv2.rotate(bgr, cv2.ROTATE_90_CLOCKWISE)
-    if orientation == 7:
-        return cv2.flip(cv2.rotate(bgr, cv2.ROTATE_90_CLOCKWISE), 1)
+    if orientation == 7:  # transverse: mirror across the other diagonal
+        return cv2.rotate(cv2.transpose(bgr), cv2.ROTATE_180)
     if orientation == 8:
         return cv2.rotate(bgr, cv2.ROTATE_90_COUNTERCLOCKWISE)
     return bgr
+
+
+def apply_exif_orientation(image, orientation):
+    """Rotate or flip ``image`` so it looks the way the camera meant (EXIF orientation 1 to 8).
+
+    The one place orientation is applied: decoding, thumbnails, inference and face boxes all go
+    through it, so their pixel spaces always agree. Takes a Pillow image or a BGR array and
+    returns the same kind. 1, None and unknown values leave the image unchanged.
+    """
+    try:
+        o = int(orientation or 1)
+    except (TypeError, ValueError):
+        return image
+    if o < 2 or o > 8:
+        return image
+    if isinstance(image, Image.Image):
+        return image.transpose(_PIL_TRANSPOSE[o])
+    return _orient_bgr(image, o)
 
 
 def to_thumbnail_jpg(bgr: np.ndarray, max_side: int = 384, quality: int = 82) -> bytes:
