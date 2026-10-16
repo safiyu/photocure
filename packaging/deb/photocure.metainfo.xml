@@ -32,6 +32,10 @@
   <url type="bugtracker">https://github.com/safiyu/photocure/issues</url>
   <content_rating type="oars-1.1" />
   <icon type="stock">io.github.safiyu.photocure</icon>
+  <categories>
+    <category>Graphics</category>
+    <category>Photography</category>
+  </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
     <release version="0.1.0" type="development" date="2026-10-16">

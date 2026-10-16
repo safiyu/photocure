@@ -104,14 +104,29 @@ class FaceEngine:
         if self._landmarker is not None or self._landmarker_failed:
             return self._landmarker
         path = models.model_path(models.LANDMARKER)
+        if path is None:
+            self._landmarker_failed = True
+            self._landmarker_error = "face_landmarker.task is missing or altered"
+            log.warning("%s; eye state will be reported as unknown", self._landmarker_error)
+            return None
         try:
-            if path is None:
-                raise FileNotFoundError("face_landmarker.task is missing or altered")
             import mediapipe as mp  # optional extra
             from mediapipe.tasks.python import BaseOptions, vision
+        except (ImportError, ModuleNotFoundError) as e:
+            self._landmarker_failed = True
+            self._landmarker_error = f"{e.__class__.__name__}: {e}"
+            log.info("Eye state will be reported as unknown (%s: %s)", e.__class__.__name__, e)
+            return None
+
+        try:
             f = self.cfg.face
+            buf = path.read_bytes()
+            try:
+                base_opts = BaseOptions(model_asset_buffer=buf)
+            except Exception:
+                base_opts = BaseOptions(model_asset_path=str(path))
             opts = vision.FaceLandmarkerOptions(
-                base_options=BaseOptions(model_asset_path=str(path)),
+                base_options=base_opts,
                 running_mode=vision.RunningMode.IMAGE,
                 num_faces=f.landmark_num_faces,
                 output_face_blendshapes=True,
@@ -121,7 +136,8 @@ class FaceEngine:
             self._mp = mp
         except Exception as e:
             self._landmarker_failed = True
-            log.info("Eye state will be reported as unknown (%s: %s)", e.__class__.__name__, e)
+            self._landmarker_error = f"{e.__class__.__name__}: {e}"
+            log.warning("Landmarker failed to initialize (%s: %s)", e.__class__.__name__, e)
         return self._landmarker
 
     @property

@@ -1,11 +1,13 @@
 """Regression tests for the scanner/db review findings (XMP, sync, watcher, mtime, migrate)."""
 from __future__ import annotations
 
+import importlib.util
 import os
 import sqlite3
 import threading
 import time
 
+import pytest
 from sqlmodel import select
 
 from photocure.db.models import ImageRecord
@@ -148,6 +150,8 @@ def _paths(db):
         return {r.path: r.scan_status for r in s.exec(select(ImageRecord)).all()}
 
 
+@pytest.mark.skipif(importlib.util.find_spec("watchdog") is None,
+                    reason="watchdog not installed")
 def test_watchdog_marks_deleted_and_moved_away_files_missing(cfg, tmp_db, tmp_path):
     root = tmp_path / "inbox"
     a = make_image(root / "a.jpg", rng_seed=1)
@@ -168,6 +172,8 @@ def test_watchdog_marks_deleted_and_moved_away_files_missing(cfg, tmp_db, tmp_pa
         t.join(timeout=10)
 
 
+@pytest.mark.skipif(importlib.util.find_spec("watchdog") is None,
+                    reason="watchdog not installed")
 def test_watchdog_ingests_folder_moved_into_root(cfg, tmp_db, tmp_path):
     root = tmp_path / "inbox"
     root.mkdir()

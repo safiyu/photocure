@@ -70,7 +70,8 @@ def test_bench_blinks_uses_the_real_models_when_available(tmp_path, monkeypatch)
     reset_backend_cache()
     try:
         import mediapipe  # noqa: F401
-        assert r.exit_code == 0 and "Closed-eye threshold sweep" in r.output
+        assert r.exit_code == 0, f"bench blinks failed (code {r.exit_code}): {r.output}"
+        assert "Closed-eye threshold sweep" in r.output
     except ImportError:
         assert r.exit_code == 1 and "No eye scores" in r.output
 

@@ -44,6 +44,9 @@ def test_metainfo_structure():
     assert tree.find("developer").get("id")
     assert tree.find("icon").get("type") == "stock"
     assert tree.findtext("launchable") == "io.github.safiyu.photocure.desktop"
+    cats = [c.text for c in tree.findall("categories/category")]
+    assert "Graphics" in cats
+    assert "Photography" in cats
 
 
 def test_systemd_service_exists():

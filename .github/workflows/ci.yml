@@ -25,7 +25,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e . pytest httpx ruff
+          pip install -e ".[watch]" pytest httpx ruff
       - name: Lint (syntax errors and undefined names)
         run: ruff check photocure tests --select E9,F63,F7,F82
       - name: No InsightFace in code or at import time
@@ -53,7 +53,7 @@ jobs:
           pip uninstall -y opencv-contrib-python opencv-python
           pip install --force-reinstall --no-deps opencv-python-headless
       - name: Face tests with the real landmarker
-        run: pytest -q tests/test_c3_faces.py tests/test_bench_c3.py
+        run: pytest -v tests/test_c3_faces.py tests/test_bench_c3.py
 
   packaging:
     name: Debian packaging and validation
