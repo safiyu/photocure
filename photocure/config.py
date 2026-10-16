@@ -105,6 +105,8 @@ class QualityThresholds(BaseSettings):
     # Percent of pixels clipped in the extreme tails.
     black_clip_pct: float = 0.60   # >60% near-black pixels
     white_clip_pct: float = 0.50   # >50% near-white pixels
+    # Clipped whites only count as blown-out when the remaining pixels are bright too.
+    white_clip_rest_mean: float = 170.0
     # Quality verdicts that force review routing.
     force_review_quality: bool = True
     # RMS contrast below this is flagged low-contrast.

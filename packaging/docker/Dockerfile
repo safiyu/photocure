@@ -10,15 +10,16 @@ COPY packaging/deb/photocure-wrapper /usr/bin/photocure
 COPY packaging/deb/bootstrap.py /opt/photocure/bootstrap.py
 COPY packaging/docker/entrypoint.sh /entrypoint.sh
 
-# If building from source, build the wheel
+# Build the wheel from source; a failure must fail the image build.
 COPY . /src
-RUN cd /src && python3 -m pip wheel --no-deps -w /opt/photocure/wheels . >/dev/null 2>&1 || true
+RUN cd /src && python3 -m pip wheel --no-deps -w /opt/photocure/wheels .
 
 RUN chmod +x /usr/bin/photocure /entrypoint.sh /opt/photocure/bootstrap.py
 
 VOLUME /data
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD /usr/bin/photocure --version >/dev/null 2>&1 || exit 1
+# The first start installs the AI libraries (up to a few GB), so allow it plenty of time.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=1800s --retries=3 \
+    CMD python3 -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"
 
 ENTRYPOINT ["/entrypoint.sh"]

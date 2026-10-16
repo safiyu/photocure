@@ -25,7 +25,9 @@
       <li>Optional offline reverse geocoding</li>
     </ul>
   </description>
-  <developer_name>Safiyu</developer_name>
+  <developer id="io.github.safiyu">
+    <name>Safiyu</name>
+  </developer>
   <url type="homepage">https://github.com/safiyu/photocure</url>
   <url type="bugtracker">https://github.com/safiyu/photocure/issues</url>
   <content_rating type="oars-1.1" />

@@ -52,6 +52,8 @@ class ExecutionReport:
     errors: list = field(default_factory=list)
     copy_fallbacks: int = 0  # hardlinks that fell back to a copy
     skipped_collisions: int = 0  # collision_policy=skip leftovers (not errors)
+    filtered: int = 0  # skipped by the only_category filter
+    in_place: int = 0  # target already is this photo (re-apply no-op)
     # image_id -> final on-disk target actually used (after collision rename).
     resolved_targets: dict = field(default_factory=dict)
     # Dry-run diff: what an apply would cost.
@@ -174,13 +176,22 @@ class ActionEngine:
                     break
                 if wanted is not None and _cat_value(action) not in wanted:
                     rep.skipped += 1
+                    rep.filtered += 1
                     continue
                 entry = None
+                mutated = False
+                action.collides = False  # drop flags left by dry_run
                 sha = action.sha256 or ""
                 size = action.file_size or 0
                 try:
                     if trash and action.operation == "move" and _is_junk(action):
                         action.target = self._trash_target(action, root, txn)
+                    if self._is_in_place(action, repo):
+                        self._mark_in_place(action, repo, root)
+                        session.commit()
+                        rep.skipped += 1
+                        rep.in_place += 1
+                        continue
                     if not os.path.lexists(action.source):
                         raise FileNotFoundError(f"source missing: {action.source}")
                     if not sha:
@@ -207,6 +218,7 @@ class ActionEngine:
 
                     # 3. Filesystem mutation.
                     entry.actual_operation = self._apply(action, target, sha)
+                    mutated = True
                     st = os.lstat(target)
                     entry.target_dev, entry.target_ino = st.st_dev, st.st_ino
 
@@ -230,7 +242,8 @@ class ActionEngine:
                     rep.failures += 1
                     rep.errors.append(f"{action.source}: {e}")
                     session.rollback()
-                    if entry is not None:
+                    # After a successful mutation leave the row pending so reconcile recovers it.
+                    if entry is not None and not mutated:
                         try:
                             repo.ledger_fail(entry, str(e))
                             session.commit()
@@ -249,6 +262,40 @@ class ActionEngine:
         except ValueError:
             rel = Path(action.target.name)
         return trash_root / rel
+
+    @staticmethod
+    def _is_in_place(action: PlannedAction, repo) -> bool:
+        """True when the target already is this photo (same file, or its own earlier apply)."""
+        target = action.target
+        if not os.path.lexists(target):
+            return False
+        try:
+            if os.path.samefile(action.source, target):
+                return True
+        except OSError:
+            pass  # source gone: fall back to the ledger
+        if not action.image_id:
+            return False
+        from sqlmodel import select
+        from ..db.models import ActionLedger
+        prior = repo.s.exec(select(ActionLedger).where(
+            ActionLedger.image_id == action.image_id,
+            ActionLedger.status == "committed",
+            ActionLedger.target_path == str(target))).first()
+        if prior is None or not prior.sha256:
+            return False
+        return file_sha256(target) == prior.sha256
+
+    @staticmethod
+    def _mark_in_place(action: PlannedAction, repo, root: Path | None) -> None:
+        img = repo.get_by_id(action.image_id) if action.image_id else None
+        if img is None:
+            return
+        img.target_path = str(action.target)
+        img.route_status = "executed"
+        if action.operation == "move":
+            img.path = str(action.target)
+            img.relative_path = _rel(action.target, root)
 
     def _prepare_target(self, action: PlannedAction, repo) -> Path | None:
         """Create the destination dir and resolve a name collision per ``collision_policy``.

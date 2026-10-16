@@ -25,20 +25,29 @@ services:
       PCUR_DEVICE_DEVICE: auto
       PCUR_AUTH_TOKEN: ${PCUR_AUTH_TOKEN:-}
       PCUR_ALLOWED_HOSTS: ${PCUR_ALLOWED_HOSTS:-}
+      # Set to cuda, rocm, xpu or cpu to skip detection.
       PCUR_ACCEL: ${PCUR_ACCEL:-}
+      # Set to 0 to stop installing at start (offline or pre-baked images).
       PCUR_AUTO_SETUP: ${PCUR_AUTO_SETUP:-1}
-      PUID: ${PUID:-1000}
-      PGID: ${PGID:-1000}
     volumes:
+      # Hardlinks only work inside one filesystem. To organize with hardlinks instead of copies,
+      # mount a common parent (for example -v /mnt/storage:/media with /media/raw and
+      # /media/curated) rather than two unrelated folders; otherwise files are copied and
+      # Photocure says so after the apply.
+      # Use :ro instead of :rw if you only want to scan and copy, never move originals.
       - ${PHOTOS_DIR:-./photos}:/photos:rw
       - ${OUTPUT_DIR:-./output}:/output:rw
       - curator-data:/data
+    # Files are written as this user; match your host user if moves fail with permission errors.
+    user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
+    # The first start installs the AI libraries (a few GB), so allow it plenty of time.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
       interval: 30s
-      timeout: 3s
+      timeout: 5s
       retries: 3
+      start_period: 1800s
 
 volumes:
   curator-data:

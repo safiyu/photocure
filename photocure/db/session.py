@@ -54,7 +54,7 @@ def get_engine(db_path: Path | str = "photocure.db", echo: bool = False):
     return engine
 
 
-SCHEMA_VERSION = 6  # 6: geo/favourite columns and indexes; 5: blink/face columns; 4: xmp_written_*
+SCHEMA_VERSION = 7  # 7: file_mtime; 6: geo/favourite columns and indexes; 5: blink/face columns; 4: xmp_written_*
 
 
 def _sql_type(col) -> str:
@@ -73,7 +73,26 @@ def _default_clause(col) -> str:
         return f" DEFAULT {d}"
     if isinstance(d, str):
         return " DEFAULT '" + d.replace("'", "''") + "'"
+    if callable(d) and not col.nullable:
+        return " DEFAULT " + _callable_default_literal(col, d)
     return ""
+
+
+def _callable_default_literal(col, fn) -> str:
+    """SQL literal for a callable default, evaluated once for existing rows."""
+    try:
+        v = fn(None) if fn.__code__.co_argcount else fn()
+    except Exception:
+        v = None
+    if isinstance(v, datetime):
+        return "'" + v.strftime("%Y-%m-%d %H:%M:%S.%f") + "'"
+    if isinstance(v, bool):
+        return str(int(v))
+    if isinstance(v, (int, float)):
+        return str(v)
+    if isinstance(v, str):
+        return "'" + v.replace("'", "''") + "'"
+    return "''" if "CHAR" in _sql_type(col).upper() or "TEXT" in _sql_type(col).upper() else "0"
 
 
 def migrate(engine) -> int:

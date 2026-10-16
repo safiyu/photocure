@@ -69,7 +69,8 @@ def _to_uint8(arr: np.ndarray) -> np.ndarray:
     if lo >= 0.0 and hi <= 255.0:
         return a.round().astype(np.uint8)
     if lo >= 0.0 and hi <= 65535.0:
-        return (a / 257.0).round().astype(np.uint8)
+        full = next(m for m in (1023.0, 4095.0, 16383.0, 65535.0) if hi <= m)  # 10/12/14/16-bit
+        return (a * (255.0 / full)).round().astype(np.uint8)
     if hi - lo < 1e-12:
         return np.zeros(a.shape, dtype=np.uint8)
     return ((a - lo) * (255.0 / (hi - lo))).round().astype(np.uint8)

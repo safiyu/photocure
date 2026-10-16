@@ -37,6 +37,8 @@ class ImageRecord(SQLModel, table=True):
     mime_type: str = Field(default="")
 
     file_size: int = 0
+    # st_mtime seen at scan time; None on rows scanned before this column existed.
+    file_mtime: float | None = None
     # Tier-1 quick fingerprint (size + head/tail xxh64) as hex.
     quick_hash: str = Field(default="", index=True)
     # Tier-2 definitive hash.

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import socket
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -59,19 +60,37 @@ class AuthManager:
         """Return the session token for a valid single-use OTC or the persistent token."""
         if not code:
             return None
-        if self._otc and secrets.compare_digest(code, self._otc):
+        if self._otc and _same(code, self._otc):
             self._otc = None
             return self.token
-        if secrets.compare_digest(code, self.token):
+        if _same(code, self.token):
             return self.token
         return None
 
     def validate(self, token: str | None) -> bool:
-        return bool(token) and secrets.compare_digest(token, self.token)
+        return bool(token) and _same(token, self.token)
+
+
+def _same(a: str, b: str) -> bool:
+    # compare_digest raises TypeError on non-ASCII str, so compare bytes
+    return secrets.compare_digest(a.encode("utf-8", "surrogatepass"),
+                                  b.encode("utf-8", "surrogatepass"))
 
 
 def new_otc() -> str:
     return secrets.token_urlsafe(32)
+
+
+def _local_names() -> set[str]:
+    """This machine's own hostname and addresses, used when binding to all interfaces."""
+    names: set[str] = set()
+    try:
+        hostname = socket.gethostname()
+        names.add(hostname)
+        names.update(a for a in socket.gethostbyname_ex(hostname)[2] if not a.startswith("127."))
+    except OSError:
+        pass
+    return {n for n in names if n}
 
 
 def build_allowed_hosts(host: str, port: int, extra: str = "") -> set[str]:
@@ -79,6 +98,9 @@ def build_allowed_hosts(host: str, port: int, extra: str = "") -> set[str]:
                f"localhost:{port}", f"127.0.0.1:{port}", f"[::1]:{port}"}
     if host and host not in ("0.0.0.0", "::"):
         allowed |= {host, f"{host}:{port}"}
+    else:
+        for h in _local_names():
+            allowed |= {h, f"{h}:{port}"}
     for h in (x.strip() for x in extra.split(",")):
         if h:
             allowed |= {h, f"{h}:{port}"}

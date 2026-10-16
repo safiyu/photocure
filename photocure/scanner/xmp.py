@@ -164,9 +164,14 @@ def _sub(parent, uri_tag: str, prefix: str):
     return etree.SubElement(parent, uri_tag, nsmap=nsmap)
 
 
+def _reader_view_sidecar(photo: Path) -> Path | None:
+    """Sidecar Photocure reads values from; the one the scanner sees when both forms exist."""
+    return _writer_sidecar(photo) or find_sidecar(photo)
+
+
 def get_on_disk_rating(photo_path: Path | str) -> int | None:
     """xmp:Rating currently on disk for this photo, or None."""
-    sc = _writer_sidecar(Path(photo_path))
+    sc = _reader_view_sidecar(Path(photo_path))
     if sc is None or not sc.exists():
         return None
     try:
@@ -178,7 +183,7 @@ def get_on_disk_rating(photo_path: Path | str) -> int | None:
 
 def get_on_disk_owned_tags(photo_path: Path | str) -> set[str]:
     """photocure-* tags currently in the sidecar's dc:subject (other tags are not ours)."""
-    sc = _writer_sidecar(Path(photo_path))
+    sc = _reader_view_sidecar(Path(photo_path))
     if sc is None or not sc.exists():
         return set()
     try:
@@ -206,51 +211,68 @@ def update_xmp_sidecar(photo_path: Path | str, *, rating: int | None = None,
         except Exception as e:
             log.warning("sidecar_skipped (%s): %s", sidecar, e)
             return False, "sidecar_skipped"
-        desc = root.find(f".//{_RDF}Description")
-        if desc is None:
+        descs = list(root.iter(f"{_RDF}Description"))
+        if not descs:
             return False, "sidecar_skipped"
     else:
         root = etree.Element(f"{_RDF}RDF", nsmap={"rdf": _RDF[1:-1]})
         desc = etree.SubElement(root, f"{_RDF}Description", nsmap={"xmp": _XMP[1:-1], "dc": _DC[1:-1]})
         desc.set(f"{_RDF}about", "")
+        descs = [desc]
+    first = descs[0]
 
     if rating is not None:
-        if f"{_XMP}Rating" in desc.attrib:
-            desc.set(f"{_XMP}Rating", str(rating))
-        else:
-            el = desc.find(f"{_XMP}Rating")
-            if el is None:
-                el = _sub(desc, f"{_XMP}Rating", "xmp")
-            el.text = str(rating)
+        found = False
+        for d in descs:
+            if f"{_XMP}Rating" in d.attrib:
+                d.set(f"{_XMP}Rating", str(rating))
+                found = True
+            for el in d.findall(f"{_XMP}Rating"):
+                el.text = str(rating)
+                found = True
+        if not found:
+            _sub(first, f"{_XMP}Rating", "xmp").text = str(rating)
 
     add = {t for t in add_tags if t.startswith(OWNED_TAG_PREFIX)}
     rem = {t for t in remove_tags if t.startswith(OWNED_TAG_PREFIX)}
     if add or rem:
-        subject = desc.find(f"{_DC}subject")
-        if subject is None:
-            subject = _sub(desc, f"{_DC}subject", "dc")
-        bag = subject.find(f"{_RDF}Bag")
-        if bag is None:
-            bag = etree.SubElement(subject, f"{_RDF}Bag")
+        bags = []
+        for d in descs:
+            for subject in d.findall(f"{_DC}subject"):
+                bag = subject.find(f"{_RDF}Bag")
+                if bag is None:
+                    bag = etree.SubElement(subject, f"{_RDF}Bag")
+                bags.append(bag)
+        if not bags:
+            subject = _sub(first, f"{_DC}subject", "dc")
+            bags.append(etree.SubElement(subject, f"{_RDF}Bag"))
         have = set()
-        for li in list(bag.findall(f"{_RDF}li")):
-            if li.text in rem:
-                bag.remove(li)
-            else:
-                have.add(li.text)
+        for bag in bags:
+            for li in list(bag.findall(f"{_RDF}li")):
+                if li.text in rem:
+                    bag.remove(li)
+                else:
+                    have.add(li.text)
         for t in sorted(add - have):
-            etree.SubElement(bag, f"{_RDF}li").text = t
+            etree.SubElement(bags[0], f"{_RDF}li").text = t
 
     if label is not None:
-        el = desc.find(f"{_XMP}Label")
-        if label:
-            if el is None:
-                el = _sub(desc, f"{_XMP}Label", "xmp")
-            el.text = label
-        elif el is not None:
-            desc.remove(el)
-        if f"{_XMP}Label" in desc.attrib and not label:
-            del desc.attrib[f"{_XMP}Label"]
+        found = False
+        for d in descs:
+            els = d.findall(f"{_XMP}Label")
+            if label:
+                if f"{_XMP}Label" in d.attrib:
+                    d.set(f"{_XMP}Label", label)
+                    found = True
+                for el in els:
+                    el.text = label
+                    found = True
+            else:
+                for el in els:
+                    d.remove(el)
+                d.attrib.pop(f"{_XMP}Label", None)
+        if label and not found:
+            _sub(first, f"{_XMP}Label", "xmp").text = label
 
     tmp = sidecar.with_name(f"{sidecar.name}.tmp.{os.getpid()}")
     try:

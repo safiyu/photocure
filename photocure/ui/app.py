@@ -218,6 +218,14 @@ class ProgressManager:
 
 
 # --------------------------------------------------------------------- helpers
+def _restart_args(orig_argv: list[str]) -> list[str]:
+    """Original command line for a restart, forced to --no-open so no second tab appears."""
+    args = [a for a in orig_argv[1:] if a != "--open"]
+    if "--no-open" not in args and any(a in ("serve", "start", "setup") for a in args):
+        args.append("--no-open")
+    return args
+
+
 def _accepts(fn, name: str) -> bool:
     try:
         return name in inspect.signature(fn).parameters
@@ -534,7 +542,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def jlog(job: dict, msg: str, level: str = ""):
         job["log"].append({"t": time.time(), "level": level, "msg": msg})
 
-    def spawn(kind: str, fn) -> dict:
+    def spawn(kind: str, fn, cancellable: bool = True) -> dict:
         """Run fn(job) in a thread; the caller already holds _BUSY, released here."""
         job = {"id": uuid.uuid4().hex[:10], "kind": kind, "status": "running",
                "log": [], "result": None, "error": None}
@@ -545,7 +553,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         def run():
             try:
                 job["result"] = fn(job)
-                if progress_mgr.is_stopped() or job.get("status") == "stopping":
+                if cancellable and (progress_mgr.is_stopped() or job.get("status") == "stopping"):
                     job["status"] = "stopped"
                     jlog(job, "stopped by user", "warn")
                     progress_mgr.stop("Process stopped by user")
@@ -1017,7 +1025,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if v is not None and not _FP_RE.fullmatch(v):
             raise HTTPException(400, "invalid cache key")
         stem, dot, ext = face_name.rpartition(".")
-        if ext != "jpg" or not stem.isdigit():
+        if ext != "jpg" or not re.fullmatch(r"[0-9]+", stem):
             raise HTTPException(404, "face not found")
         face_id = int(stem)
         with get_session(dbp) as s:
@@ -1064,7 +1072,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             if s.get(M.BurstGroup, burst_id) is None:
                 raise HTTPException(404, "burst not found")
             members = s.exec(select(M.ImageRecord).where(
-                M.ImageRecord.burst_id == burst_id)).all()
+                M.ImageRecord.burst_id == burst_id,
+                M.ImageRecord.infer_status == "inferred")).all()
             if members and all(m.has_blinks for m in members):
                 return {"ok": True, "moved": 0, "ids": [],
                         "note": "Every frame has a blink, so the best one is kept."}
@@ -1330,7 +1339,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         def restart_daemon():
             import sys
             time.sleep(0.25)
-            os.execv(sys.executable, [sys.executable, *sys.orig_argv[1:]])
+            os.execv(sys.executable, [sys.executable, *_restart_args(sys.orig_argv)])
         threading.Thread(target=restart_daemon, daemon=True).start()
         return {"ok": True, "message": "Server restarting..."}
 
@@ -1521,7 +1530,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 counts = repo.clear_library(keep_ledger=False)
             thumb_dir = cfg.cache_dir / "thumbs"
             if thumb_dir.exists():
-                for th in thumb_dir.glob(f"{db_fp}_*.jpg"):
+                stale = [*thumb_dir.glob(f"*/{db_fp}_*.webp"), *thumb_dir.glob(f"{db_fp}_*.jpg")]
+                for th in stale:
                     try:
                         th.unlink(missing_ok=True)
                     except OSError:
@@ -1743,7 +1753,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             jlog(job, f"updated {int(res.get('updated', 0))}, moved {moved} out of uncertain")
             return {"ok": True, **res}
 
-        job = spawn("learn", work)
+        job = spawn("learn", work, cancellable=False)
         return {"ok": True, "job_id": job["id"]}
 
     @app.post("/api/repair", dependencies=auth)

@@ -225,7 +225,8 @@ class DecisionMatrix:
         best_face = max(faces, key=lambda f: f.confidence, default=None)
         has_face = best_face is not None and best_face.confidence > \
             self.tax.face_confidence_min
-        if has_face:
+        # A confident screenshot can contain avatars or thumbnails; the face must not win.
+        if has_face and not confident_screen:
             return Decision(
                 CategoryType.PEOPLE,
                 reason=f"face conf {best_face.confidence:.2f}",

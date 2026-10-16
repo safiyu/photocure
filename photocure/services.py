@@ -436,7 +436,8 @@ class Planner:
                             r.manual_bucket, r.id)
             else:
                 return Decision(cat, reason="manual override", subcategory="manual",
-                                needs_date=cat.is_date_grouped)
+                                needs_date=cat.is_date_grouped,
+                                is_alternate=cat == CategoryType.BURST_ALTERNATE)
         if r.locked and r.category:
             try:
                 cat = CategoryType(r.category)
@@ -444,7 +445,8 @@ class Planner:
                 pass
             else:
                 return Decision(cat, reason="locked", subcategory=r.subcategory or "",
-                                needs_date=cat.is_date_grouped)
+                                needs_date=cat.is_date_grouped,
+                                is_alternate=cat == CategoryType.BURST_ALTERNATE)
         return matrix.evaluate_record(r)
 
     # --------------------------------------------------------- persistence
@@ -545,12 +547,20 @@ class Planner:
                              only_category=only_category, trash=trash,
                              cancel_check=cancel_check)
         if rep.executed:
+            partial = rep.filtered > 0 or (
+                rep.executed + rep.failures + rep.skipped) < len(plan.actions)
             with get_session(self.db_path) as session:
                 rec = session.exec(select(PlanRecord).where(
                     PlanRecord.plan_id == plan.plan_id)).first()
-                if rec is not None:
+                if rec is not None and not partial:
                     rec.applied_transaction = rep.transaction_id
-            plan.applied_transaction = rep.transaction_id
+                elif rec is not None and plan.input_hash:
+                    # Partial apply moved files: rebase the drift hash so the rest applies without force.
+                    fresh = compute_inputs_hash(PhotoRepository(session).all_images())
+                    rec.input_hash = fresh
+                    plan.input_hash = fresh
+            if not partial:
+                plan.applied_transaction = rep.transaction_id
         return rep
 
     def dry_run(self, plan: Plan | str) -> ExecutionReport:
@@ -693,11 +703,13 @@ class Planner:
         return res
 
     def _mark_purged(self, trash_txn_dir: Path) -> None:
-        prefix = str(trash_txn_dir) + os.sep
+        base = trash_txn_dir.resolve()
         with get_session(self.db_path) as session:
-            rows = session.exec(select(ActionLedger).where(
+            candidates = session.exec(select(ActionLedger).where(
                 ActionLedger.status == "committed",
-                ActionLedger.target_path.startswith(prefix))).all()  # type: ignore[attr-defined]
+                ActionLedger.transaction_id == trash_txn_dir.name)).all()
+            rows = [e for e in candidates
+                    if Path(e.target_path).resolve().is_relative_to(base)]
             repo = PhotoRepository(session)
             for e in rows:
                 e.status = "purged"

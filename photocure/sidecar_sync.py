@@ -37,6 +37,11 @@ def foreign_state(img: ImageRecord) -> str | None:
     if img.xmp_written_rating is None and img.xmp_written_tags is None:
         return EXISTING_FOREIGN if disk_rating is not None else None
     written_tags = set(filter(None, (img.xmp_written_tags or "").split(",")))
+    if img.xmp_written_rating is None:
+        # We never wrote a rating, so a rating on disk is still the foreign one we kept.
+        if disk_tags != written_tags:
+            return EDITED_ELSEWHERE
+        return EXISTING_FOREIGN if disk_rating is not None else None
     if disk_rating != img.xmp_written_rating or disk_tags != written_tags:
         return EDITED_ELSEWHERE
     return None

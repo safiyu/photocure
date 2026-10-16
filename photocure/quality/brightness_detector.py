@@ -43,10 +43,15 @@ def compute_luminance_metrics(bgr: np.ndarray,
         sample = g
 
     black_pct = float(np.mean(sample <= black_thr))
-    white_pct = float(np.mean(sample >= white_thr))
+    white_mask = sample >= white_thr
+    white_pct = float(np.mean(white_mask))
+    # High-key shots (white backdrop, dark subject) have clipped whites but well-exposed detail.
+    rest = sample[~white_mask]
+    rest_mean = float(rest.mean()) if rest.size else 255.0
 
     is_dark = (mean < t.brightness_min) or (black_pct >= t.black_clip_pct)
-    is_over = (mean > t.brightness_max) or (white_pct >= t.white_clip_pct)
+    is_over = (mean > t.brightness_max) or (
+        white_pct >= t.white_clip_pct and rest_mean >= t.white_clip_rest_mean)
     # Flat / low-contrast: treat very small RMS as featureless.
     is_low_contrast = rms < float(getattr(t, "low_contrast_rms", 6.0))
 

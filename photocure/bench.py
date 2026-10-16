@@ -73,6 +73,14 @@ def best_threshold(rows: Sequence[SweepRow]) -> SweepRow | None:
     return max(scored, key=lambda r: (r.f1, r.threshold)) if scored else None
 
 
+def _orientation(path: Path) -> int:
+    from .scanner.exif_reader import extract_exif
+    try:
+        return extract_exif(path).orientation or 1
+    except Exception:
+        return 1
+
+
 def score_labelled_photos(items: Sequence[tuple[Path, str]], cfg: CuratorConfig) -> tuple[list, int, int]:
     """Measure the largest face of each labelled photo. Returns (scored, no_face, unreadable)."""
     from .inference.backends import detect_backend
@@ -85,7 +93,7 @@ def score_labelled_photos(items: Sequence[tuple[Path, str]], cfg: CuratorConfig)
     try:
         for path, label in items:
             try:
-                img = load_image(path, max_side=None).bgr
+                img = load_image(path, max_side=None, orientation=_orientation(path)).bgr
             except Exception:
                 unreadable += 1
                 continue
@@ -152,15 +160,17 @@ def bench_pipeline(folder: Path, cfg: CuratorConfig, limit: int = 50,
     blink_ok = False
     faces_engine, sem, quality = FaceEngine(cfg, backend=bs), SemanticEngine(cfg, backend=bs), QualityEngine(cfg.quality)
     if files and bs.face_backend != "stub":  # keep model loading out of the timings
-        faces_engine.detect_faces_batch([load_image(files[0], max_side=cfg.device.face_max_side).bgr])
+        faces_engine.detect_faces_batch([load_image(files[0], max_side=cfg.device.face_max_side,
+                                             orientation=_orientation(files[0])).bgr])
         blink_ok = faces_engine.blink_available
     with tempfile.TemporaryDirectory() as tmp:
         db = Path(tmp) / "bench.db"
         init_db(db)
         for i, path in enumerate(files):
+            orient = _orientation(path)
             try:
                 t = clock()
-                small = load_image(path, max_side=cfg.device.face_max_side)
+                small = load_image(path, max_side=cfg.device.face_max_side, orientation=orient)
                 res.add("decode", clock() - t)
             except Exception as e:
                 res.notes.append(f"{path.name}: unreadable ({e.__class__.__name__})")
@@ -171,7 +181,7 @@ def bench_pipeline(folder: Path, cfg: CuratorConfig, limit: int = 50,
                 faces = faces_engine.detect_faces_batch([small.bgr])[0]
                 res.add("face detection", clock() - t)
                 if faces:
-                    full = load_image(path, max_side=None).bgr
+                    full = load_image(path, max_side=None, orientation=orient).bgr
                     t = clock()
                     from .inference.face_engine import crop_face, shrink_to, standardized_sharpness
                     for f in faces:
@@ -185,7 +195,7 @@ def bench_pipeline(folder: Path, cfg: CuratorConfig, limit: int = 50,
                     # analyze_faces repeats the crop work, so subtract it to isolate the landmarker.
                     crop_cost = res.samples["crop + sharpness"][-1] / 1000.0
                     res.add("landmarks", max(0.0, clock() - t - crop_cost))
-            clip = load_image(path, max_side=cfg.device.clip_max_side)
+            clip = load_image(path, max_side=cfg.device.clip_max_side, orientation=orient)
             t = clock()
             sem.classify_and_embed([clip.bgr])
             res.add("CLIP", clock() - t)

@@ -22,7 +22,7 @@ import os
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import timezone
 from pathlib import Path
 
 from rich.progress import (
@@ -47,8 +47,6 @@ from .phash import DEFAULT_THRESHOLD, NearDupIndex, compute_phash
 
 log = logging.getLogger("photocure.scanner")
 
-# Newer schemas may store the file mtime; older ones fall back to created_at.
-_HAS_MTIME = hasattr(ImageRecord, "file_mtime")
 _IN_CHUNK = 400
 
 
@@ -121,6 +119,7 @@ class _Known:
     size: int
     stamp: float | None
     status: str
+    created: float | None = None
 
 
 class FileScanner:
@@ -148,7 +147,7 @@ class FileScanner:
             if cancel_check and cancel_check():
                 raise InterruptedError("Scan cancelled by user")
             dirnames[:] = [d for d in dirnames if d.lower() not in skip_dirs
-                           and not d.startswith(".")]
+                           and not d.startswith(".") and not _is_library_bundle(d)]
             for fn in filenames:
                 if cancel_check and cancel_check():
                     raise InterruptedError("Scan cancelled by user")
@@ -210,7 +209,8 @@ class FileScanner:
             except (ValueError, OSError):
                 continue
             rel = p.relative_to(root).parts
-            if any(part.startswith(".") for part in rel) or p.suffix.lower() not in exts:
+            if (any(part.startswith(".") or _is_library_bundle(part) for part in rel)
+                    or p.suffix.lower() not in exts):
                 continue
             if p.is_file():
                 files.append(p)
@@ -218,28 +218,51 @@ class FileScanner:
                          show_progress, False, compute_phashes, settle_s,
                          near_dup_threshold, cancel_check=cancel_check)
 
+    def expand_dir(self, directory: Path | str) -> list[Path]:
+        """Indexable files under ``directory`` (used when a whole folder appears)."""
+        return list(self.iter_files(directory))
+
+    def mark_missing(self, root: Path | str, paths: Iterable[Path | str],
+                     db_path: Path | str | None = None) -> int:
+        """Mark records at or under each vanished path as missing; returns the count."""
+        root = Path(root).expanduser().resolve()
+        prefix = str(root) + os.sep
+        targets = [str(p) for p in paths]
+        db = db_path or self.cfg.db_path
+        init_db(db)
+        gone: list[int] = []
+        with get_session(db) as session:
+            for path, k in self._known_rows(session).items():
+                if k.status == "missing" or not path.startswith(prefix):
+                    continue
+                if any(path == t or path.startswith(t + os.sep) for t in targets) \
+                        and not os.path.exists(path):
+                    gone.append(k.id)
+            for chunk in _chunks(gone, _IN_CHUNK):
+                for row in session.exec(sselect(ImageRecord).where(
+                        ImageRecord.id.in_(chunk))).all():  # type: ignore[attr-defined]
+                    row.scan_status = "missing"
+                    row.updated_at = utcnow()
+        return len(gone)
+
     # ------------------------------------------------------------------- run
     def _known_rows(self, session: Session) -> dict[str, _Known]:
         cols = [ImageRecord.path, ImageRecord.id, ImageRecord.file_size,
-                ImageRecord.scan_status]
-        cols.append(ImageRecord.file_mtime if _HAS_MTIME else ImageRecord.created_at)
+                ImageRecord.scan_status, ImageRecord.file_mtime, ImageRecord.created_at]
         out: dict[str, _Known] = {}
-        for path, iid, size, status, stamp in session.exec(sselect(*cols)).all():
-            if stamp is not None and not _HAS_MTIME:
-                stamp = _as_utc_ts(stamp)
-            out[path] = _Known(iid, size or 0, stamp, status)
+        for path, iid, size, status, mtime, created in session.exec(sselect(*cols)).all():
+            out[path] = _Known(iid, size or 0, mtime, status,
+                               _as_utc_ts(created) if created is not None else None)
         return out
 
     @staticmethod
     def _is_modified(k: _Known, st: os.stat_result) -> bool:
         if st.st_size != k.size:
             return True
-        if k.stamp is None:
-            return False
-        if _HAS_MTIME:
+        if k.stamp is not None:
             return abs(st.st_mtime - k.stamp) > 1e-3
-        # No stored mtime: anything written after the row was created is newer.
-        return st.st_mtime > k.stamp + 0.5
+        # Row predates stored mtimes: anything written after it was created is newer.
+        return k.created is not None and st.st_mtime > k.created + 0.5
 
     def _run(self, root: Path, files: list[Path], result: ScanResult,
              db_path, on_progress, show_progress: bool, prune_missing: bool,
@@ -427,12 +450,7 @@ class FileScanner:
             rec.camera_model = exif.camera_model
             rec.rating = exif.rating
             rec.phash = wr.phash
-            if _HAS_MTIME:
-                rec.file_mtime = wr.mtime
-            else:
-                # Stamp the scan time, never earlier than a skewed future mtime.
-                rec.created_at = datetime.fromtimestamp(
-                    max(time.time(), wr.mtime), timezone.utc)
+            rec.file_mtime = wr.mtime
 
         def build_record(wr: _WorkerResult, existing_id: int | None) -> ImageRecord | None:
             """Main-thread: turn a worker result into a persisted/pending row."""
@@ -623,6 +641,14 @@ def _chunks(seq, n: int):
     seq = list(seq)
     for i in range(0, len(seq), n):
         yield seq[i:i + n]
+
+
+_LIBRARY_BUNDLE_SUFFIXES = (".photoslibrary", ".aplibrary", ".migratedphotolibrary", ".lrdata")
+
+
+def _is_library_bundle(name: str) -> bool:
+    # Managed photo-app libraries hold derivatives and must not be indexed or moved.
+    return name.lower().endswith(_LIBRARY_BUNDLE_SUFFIXES)
 
 
 def _os_walk(root: Path, skip_dirs: set[str], errors: list | None = None):
