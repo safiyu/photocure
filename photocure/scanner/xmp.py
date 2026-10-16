@@ -143,3 +143,23 @@ def get_on_disk_rating(photo_path: Path) -> int | None:
     except Exception:
         pass
     return None
+
+
+# C2 Divergence Tracking Notes (spec §3.2):
+# 
+# ImageRecord tracks xmp_written_rating and xmp_written_tags to guard against
+# overwriting externally-authored metadata.
+#
+# First-run baseline:
+#   When xmp_written_rating is None (first time Photocure sees the photo) and
+#   the on-disk sidecar already has an xmp:Rating, Photocure preserves the
+#   existing rating and marks the photo as existing_foreign_rating (execution report).
+#
+# Automated vs. user actions:
+#   - Automated batch (organize/apply): skip photos with divergent on-disk vs stored ratings
+#   - Explicit user action (1-5 star press): override external edits after confirmation
+#
+# Integration points:
+#   1. Scanner: on first ingest, check on-disk rating via get_on_disk_rating()
+#   2. Apply: before writing sidecar, verify xmp_written_rating == on-disk rating
+#   3. UI: showConfirmDialog when user tries to rate a foreign_foreign_rating photo
