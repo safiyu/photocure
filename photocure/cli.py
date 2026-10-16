@@ -1133,7 +1133,6 @@ def stop(
     """Stop a running Photocure server on the given port."""
     import os
     import signal
-    import subprocess
     import time
 
     from .lifecycle import pid_file_path
@@ -1156,18 +1155,10 @@ def stop(
         pid_file.unlink(missing_ok=True)
         raise typer.Exit(0)
 
-    # Verify it's photocure via cmdline.
-    try:
-        if platform.system() == "Linux":
-            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode().replace("\0", " ")
-        else:
-            result = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=2)
-            cmdline = result.stdout.strip()
-        if "photocure" not in cmdline:
-            console.print(f"[red]PID {pid} is not a photocure process. Aborting.[/red]")
-            raise typer.Exit(1)
-    except (OSError, subprocess.TimeoutExpired):
-        console.print(f"[red]Cannot verify PID {pid} is photocure. Aborting.[/red]")
+    from .lifecycle import is_photocure_server, process_cmdline
+    if not is_photocure_server(process_cmdline(pid)):
+        console.print(f"[red]PID {pid} is not a Photocure server (stale PID file?). Nothing was stopped.[/red]")
+        pid_file.unlink(missing_ok=True)
         raise typer.Exit(1)
 
     console.print(f"[cyan]Terminating Photocure (PID {pid})...[/cyan]")
@@ -1178,18 +1169,18 @@ def stop(
         try:
             os.kill(pid, 0)
         except OSError:
-            console.print(f"[green]Process stopped.[/green]")
+            console.print("[green]Process stopped.[/green]")
             pid_file.unlink(missing_ok=True)
             raise typer.Exit(0)
 
     if force:
-        console.print(f"[yellow]Process did not stop. Sending SIGKILL...[/yellow]")
+        console.print("[yellow]Process did not stop. Sending SIGKILL...[/yellow]")
         os.kill(pid, signal.SIGKILL)
         time.sleep(0.5)
         pid_file.unlink(missing_ok=True)
-        console.print(f"[green]Process killed.[/green]")
+        console.print("[green]Process killed.[/green]")
     else:
-        console.print(f"[red]Process did not stop. Try --force.[/red]")
+        console.print("[red]Process did not stop. Try --force.[/red]")
         raise typer.Exit(1)
 
 
@@ -1199,6 +1190,41 @@ def kill(
 ):
     """Kill a running Photocure server on the given port (alias: stop --force)."""
     stop(port=port, force=True)
+
+
+db_app = typer.Typer(help="Database maintenance.", no_args_is_help=True)
+app.add_typer(db_app, name="db")
+
+
+@db_app.command("restore")
+def db_restore(
+    snapshot: Path = typer.Argument(..., exists=True, dir_okay=False, help="A backups/*.bak.db file."),
+    db: Path = typer.Option(DEFAULT_DB, "--db"),
+):
+    """Replace the database with a snapshot taken before an apply."""
+    import contextlib
+    import sqlite3
+
+    from .db.session import close_engine
+    from .lifecycle import running_servers
+
+    live = running_servers()
+    if live:
+        console.print(f"[red]Photocure is running on port {live[0]}. Run 'photocure stop' first.[/red]")
+        raise typer.Exit(1)
+    with contextlib.closing(sqlite3.connect(f"file:{snapshot}?mode=ro", uri=True)) as con:
+        if con.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+            console.print("[red]That snapshot failed its integrity check. Nothing was changed.[/red]")
+            raise typer.Exit(1)
+    close_engine(db)
+    if db.exists():
+        keep = db.with_name(db.name + ".pre-restore")
+        shutil.copy2(db, keep)
+        console.print(f"Current database kept as {keep}")
+    with contextlib.closing(sqlite3.connect(str(snapshot))) as src, \
+            contextlib.closing(sqlite3.connect(str(db))) as dst:
+        src.backup(dst)
+    console.print(f"[green]Restored {db} from {snapshot}.[/green]")
 
 
 @app.command()
