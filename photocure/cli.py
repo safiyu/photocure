@@ -43,7 +43,7 @@ from .config import (
 )
 from .db.session import get_session, init_db
 from .db.repository import PhotoRepository
-from .inference.backends import detect_backend, reset_backend_cache
+from .inference.backends import detect_backend, ml_install_cmd, pip_install_cmd, reset_backend_cache
 from .services import (
     PlanDriftError,
     Planner,
@@ -140,7 +140,6 @@ def _human(n: int) -> str:
     return f"{n} B"
 
 
-ML_INSTALL = 'pip install "photocure[ml]"'
 _DEVICES = DEVICE_CHOICES
 TORCH_INDEX = {
     "cuda": "https://download.pytorch.org/whl/cu124",
@@ -160,7 +159,7 @@ def _stub_warning(info: dict) -> Panel:
     return Panel(
         "[bold]No AI model is installed, so photos cannot be recognised.[/bold]\n"
         "Most photos will end up as Uncertain until you install it:\n"
-        f"  [cyan]{escape(ML_INSTALL)}[/cyan]\n"
+        f"  [cyan]{escape(ml_install_cmd())}[/cyan]\n"
         "Then run [cyan]photocure infer --reanalyze[/cyan] to redo photos that were "
         "analyzed without it.",
         title="Placeholder classifier in use", border_style="yellow")
@@ -240,12 +239,12 @@ def _detect_hardware() -> list[str]:
 
 def _install_steps(kind: str) -> list[str]:
     if kind == "mps":
-        steps = ["pip install torch   (the Apple GPU works with the default wheel)"]
+        steps = [pip_install_cmd("torch") + "   (the Apple GPU works with the default wheel)"]
     else:
-        steps = [f"pip install torch --index-url {TORCH_INDEX[kind]}"]
+        steps = [pip_install_cmd(f"torch --index-url {TORCH_INDEX[kind]}")]
         if kind == "cuda":
             steps[0] += "   (cu124 may need changing to match your NVIDIA driver)"
-    return steps + [ML_INSTALL]
+    return steps + [ml_install_cmd()]
 
 
 def _usable_kinds(accels: list[dict], info: dict) -> set[str]:
@@ -481,7 +480,7 @@ def infer(
                       "again.[/yellow]")
     elif stub:
         console.print("[yellow]These results came from the placeholder classifier. "
-                      f"Install the AI model ({escape(ML_INSTALL)}) and run "
+                      f"Install the AI model ({escape(ml_install_cmd())}) and run "
                       "infer again.[/yellow]")
 
 
@@ -879,7 +878,7 @@ def doctor(db: Path = typer.Option(DEFAULT_DB, "--db")):
                      "Run: unset PCUR_BACKEND")
     elif (not ver["torch"] or not ver["open_clip"] or info.get("semantic_is_stub")) \
             and not any(k not in usable for k in hardware):
-        fixes.append(f"Install the AI model: {ML_INSTALL}")
+        fixes.append(f"Install the AI model: {ml_install_cmd()}")
     if not ver["insightface"]:
         fixes.append('Better face detection (optional): pip install "photocure[faces]"')
     if ver["open_clip"] and weights is False:

@@ -97,3 +97,4 @@ known-first-party = ["photocure"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["real_venv_detection: do not pin in_venv() for this test"]

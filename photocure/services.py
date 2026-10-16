@@ -66,7 +66,7 @@ def describe_backends(cfg: CuratorConfig) -> dict:
             "face_backend": bs.face_backend,
             "semantic_is_stub": bs.semantic_backend == "stub",
             "face_is_fallback": bs.face_backend != "insightface",
-            "hint": ('No AI model is installed. Run: pip install "photocure[ml]"'
+            "hint": (f'No AI model is installed. Run: {bk.ml_install_cmd()}'
                      if bs.semantic_backend == "stub" else ""),
         }
     except Exception as e:  # keep the UI and CLI alive if torch is broken

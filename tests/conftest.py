@@ -93,3 +93,12 @@ def make_image(path: Path, size=(480, 320), rng_seed: int = 0,
     ok = cv2.imwrite(str(path), img, [cv2.IMWRITE_JPEG_QUALITY, 92])
     assert ok, f"could not write {path}"
     return path
+
+
+@pytest.fixture(autouse=True)
+def _pretend_in_venv(monkeypatch, request):
+    """Install hints depend on where Python runs; keep them stable unless a test says otherwise."""
+    if "real_venv_detection" in request.keywords:
+        return
+    from photocure.inference import backends
+    monkeypatch.setattr(backends, "in_venv", lambda: True)
