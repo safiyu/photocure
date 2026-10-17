@@ -553,6 +553,7 @@ body.has-picks .pick { opacity: 1; }
 .step-flow .chev { width: 16px; height: 16px; flex: none; }
 .step-flow .chev:nth-child(1) { animation: chev-flow 1.4s ease-in-out infinite; }
 .step-flow .chev:nth-child(2) { animation: chev-flow 1.4s ease-in-out .35s infinite; }
+.step-flow .chev:nth-child(3) { animation: chev-flow 1.4s ease-in-out .7s infinite; }
 @keyframes chev-flow {
   0%, 100% { opacity: .25; transform: translateX(-3px); }
   50% { opacity: 1; transform: translateX(2px); }

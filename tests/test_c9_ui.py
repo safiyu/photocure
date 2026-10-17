@@ -24,7 +24,7 @@ def test_step_flow_markup_inside_step1_and_step2():
     assert scan_block, "step-scan <li> not found"
     assert 'class="step-flow"' in scan_block.group(1), "step-scan must contain .step-flow"
     assert 'aria-hidden="true"' in scan_block.group(1), ".step-flow must be aria-hidden"
-    assert scan_block.group(1).count('class="chev"') == 2, "step-scan .step-flow must hold 2 chevrons"
+    assert scan_block.group(1).count('class="chev"') == 3, "step-scan .step-flow must hold 3 chevrons"
 
     infer_block = re.search(
         r'<li class="step" id="step-infer">(.*?)</li>', html, re.DOTALL
