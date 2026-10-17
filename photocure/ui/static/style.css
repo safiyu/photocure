@@ -264,7 +264,7 @@ button { cursor: pointer; }
 .gauge { position: relative; width: 150px; height: 88px; flex: none; }
 .gauge-svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .gauge-track, .gauge-arc { fill: none; stroke-width: 9; stroke-linecap: round; }
-.gauge-track { stroke: var(--well); }
+.gauge-track { stroke: color-mix(in srgb, var(--mut) 28%, transparent); }
 .gauge-arc {
   stroke: var(--accent-electric); stroke-dasharray: 0 100;
   transition: stroke-dasharray .35s ease, stroke .2s ease; filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.45));
@@ -567,7 +567,7 @@ body.has-picks .pick { opacity: 1; }
 .step { position: relative; }
 .step-flow {
   position: absolute; right: -14px; top: 50%; transform: translate(50%, -50%);
-  display: flex; gap: 2px; z-index: 2; pointer-events: none; color: var(--faint);
+  display: flex; gap: 2px; z-index: 4; pointer-events: none; color: var(--faint);
 }
 .step-flow .chev { width: 16px; height: 16px; flex: none; }
 .step-flow .chev:nth-child(1) { animation: chev-flow 1.4s ease-in-out infinite; }
@@ -612,6 +612,7 @@ body.has-picks .pick { opacity: 1; }
 }
 :root[data-theme="dark"] .step.active { background: linear-gradient(160deg, rgba(36, 44, 82, 0.9), rgba(18, 24, 44, 0.92)); }
 :root[data-theme="dark"] .side { background: linear-gradient(180deg, rgba(24, 30, 48, 0.92), rgba(14, 18, 30, 0.94)); }
+:root[data-theme="dark"] .version-pill { color: #fff; }
 
 .panel-title { font-size: 19px; margin: 8px 0 10px; }
 .action-log { display: flex; flex-direction: column; gap: 2px; font-size: 13px; max-height: 320px; overflow: auto; }

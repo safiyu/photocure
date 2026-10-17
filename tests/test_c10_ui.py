@@ -212,3 +212,30 @@ def test_dark_theme_has_gradient_background_and_glass_cards():
     )
     base_body = re.search(r"(?m)^body\s*\{([^}]*)\}", css)
     assert base_body and "var(--table)" in base_body.group(1), "light theme body stays flat"
+
+
+# ------------------------------------------------------------------ legibility fixes found in the browser
+
+def test_gauge_track_is_visible_against_dark_cards():
+    rule = re.search(r"(?m)^\.gauge-track\s*\{([^}]*)\}", _css())
+    assert rule, "dedicated .gauge-track rule not found"
+    assert "stroke" in rule.group(1) and "var(--well)" not in rule.group(1), (
+        "--well is nearly the card colour in dark mode, so the empty arc vanished"
+    )
+
+
+def test_version_pill_is_readable_in_dark_theme():
+    rule = re.search(r':root\[data-theme="dark"\]\s+\.version-pill\s*\{([^}]*)\}', _css())
+    assert rule and re.search(r"color:\s*#fff", rule.group(1)), (
+        "indigo text on the indigo dark pill is illegible; the hero makes it prominent"
+    )
+
+
+def test_chevrons_stay_above_the_raised_active_card():
+    css = _css()
+    flow = re.search(r"(?m)^\.step-flow\s*\{([^}]*)\}", css)
+    active = re.search(r"\.step\.active\s*\{([^}]*)\}", css)
+    assert flow and active
+    z_flow = int(re.search(r"z-index:\s*(\d+)", flow.group(1)).group(1))
+    z_active = int(re.search(r"z-index:\s*(\d+)", active.group(1)).group(1))
+    assert z_flow > z_active, "the raised active card hid two of the three chevrons leading into it"
