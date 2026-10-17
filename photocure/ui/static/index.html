@@ -31,6 +31,7 @@
     <symbol id="i-cpu" viewBox="0 0 24 24"><path d="M9 9h6v6H9z"/><path d="M5 5h14v14H5z"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
     <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><path d="M12 17a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><path d="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></symbol>
@@ -76,10 +77,7 @@
         <div class="navgroup" style="margin-top:18px">
           <h2>Review</h2>
           <button class="tab navitem" data-tab="uncertain"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><span>Needs a look</span><em class="count" data-count="uncertain"></em></button>
-          <button class="tab navitem" data-tab="junk"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Junk review</span><em class="count" data-count="junk"></em></button>
-        </div>
-        <div class="navgroup" style="margin-top:18px">
-          <h2>Finish</h2>
+          <button class="tab navitem" data-tab="junk"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Junk</span><em class="count" data-count="junk"></em></button>
           <button class="tab navitem" data-tab="actions"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg><span>Apply and undo</span><em class="count" data-count="actions"></em></button>
         </div>
       </nav>
@@ -88,35 +86,35 @@
         <button class="devchip" id="device-chip" data-goto="settings" title="Open Settings" type="button"><i class="dot"></i><span id="device-chip-text">Checking device</span></button>
         <button class="tab navitem" data-tab="settings"><svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg><span>Settings</span><em class="count"></em></button>
         <div class="foot-icons">
-          <label class="switch" id="theme-toggle" tabindex="0" title="Switch between light and dark"
-                 aria-label="Switch between light and dark">
-            <input type="checkbox" id="theme-switch" role="switch" aria-checked="false">
-            <span class="slider" aria-hidden="true"></span>
-          </label>
           <button class="icon-btn" id="btn-help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
+          <div class="theme-row">
+            <svg class="ic sm" aria-hidden="true"><use href="#i-moon"/></svg>
+            <span class="theme-text">Dark Mode</span>
+            <label class="switch" id="theme-toggle" tabindex="0" title="Switch between light and dark"
+                   aria-label="Switch between light and dark">
+              <input type="checkbox" id="theme-switch" role="switch" aria-checked="false">
+              <span class="slider" aria-hidden="true"></span>
+            </label>
+          </div>
         </div>
         <div class="sidebar-footer"><span class="app-credit">Photocure <span id="sidebar-version"></span> • by Safiyu</span></div>
       </div>
     </aside>
 
     <div class="content">
-      <header class="topbar">
+      <header class="topbar hero">
         <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open menu"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
         <div class="grow">
           <h1 id="page-title">Import</h1>
           <div class="sub" id="page-sub"></div>
         </div>
-        <button id="header-version-badge" class="version-pill" type="button" title="Click to view About Photocure" data-goto="settings"></button>
-        <div id="topbar-progress" class="pill" hidden role="status">
-          <span class="spinner" id="topbar-spinner"></span>
-          <span id="topbar-status-icon" hidden></span>
-          <span id="topbar-progress-text">Working</span>
-          <button id="btn-stop-topbar" class="stop-btn" title="Stop current process" style="display:none;margin-left:8px">Stop</button>
-          <div class="topbar-track"><div id="topbar-fill" class="topbar-fill"></div></div>
+        <div id="hero-gauge" class="gauge" hidden role="progressbar" aria-label="Overall progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <svg class="gauge-svg" viewBox="0 0 120 70" aria-hidden="true">
+            <path class="gauge-track" d="M10 62 A50 50 0 0 1 110 62" pathLength="100"/>
+            <path id="gauge-arc" class="gauge-arc" d="M10 62 A50 50 0 0 1 110 62" pathLength="100"/>
+          </svg>
+          <div class="gauge-text"><span id="gauge-phase" class="gauge-phase">Working</span><b id="gauge-pct">0%</b><span class="gauge-sub">Overall</span></div>
         </div>
-      </header>
-
-      <main id="main">
         <div id="progress-card" class="progress-card" hidden>
           <div class="progress-header">
             <div class="progress-task">
@@ -140,11 +138,13 @@
             <span id="progress-counts"></span>
           </div>
         </div>
+        <button id="header-version-badge" class="version-pill" type="button" title="Click to view About Photocure" data-goto="settings"></button>
+      </header>
 
+      <main id="main">
         <!-- IMPORT -->
         <section id="tab-library" class="panel active">
           <div class="banner-host"></div>
-          <div class="comp comp-host" data-target="categories"></div>
 
           <ol class="steps">
             <li class="step" id="step-scan">
@@ -166,6 +166,11 @@
               <div class="actions">
                 <button class="btn" id="btn-browse-scan" type="button"><svg class="ic sm" aria-hidden="true"><use href="#i-folder"/></svg>Browse Folder</button>
                 <button id="btn-scan" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-camera"/></svg>Scan</button>
+              </div>
+              <div class="step-flow" aria-hidden="true">
+                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
+                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
+                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
               </div>
             </li>
             <li class="step" id="step-infer">
@@ -193,6 +198,11 @@
               <div class="actions">
                 <button id="btn-infer" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Analyze Now</button>
               </div>
+              <div class="step-flow" aria-hidden="true">
+                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
+                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
+                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
+              </div>
             </li>
             <li class="step" id="step-cluster">
               <div class="step-head">
@@ -217,11 +227,18 @@
             </li>
           </ol>
 
-          <div class="runall">
-            <button id="btn-ingest-all" data-busy class="btn primary">Run all three steps</button>
-            <button id="btn-import-reset" data-busy class="btn danger" title="Clear all indexed photos from the database">Reset library</button>
-            <span id="library-status" class="muted">Choose a folder, then run all three steps. Nothing is moved until you apply a plan.</span>
+          <div class="dock" role="group" aria-label="Library summary and actions">
+            <div class="dock-summary">
+              <span class="dock-total" id="dock-total">0</span>
+              <span class="dock-label" id="dock-label">photos in your library</span>
+              <button class="btn dock-sort" id="btn-sort-dock" type="button" data-sortnow data-busy>Sort Photos</button>
+            </div>
+            <div class="dock-actions">
+              <button id="btn-ingest-all" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Run All Three Steps</button>
+              <button id="btn-import-reset" data-busy class="btn danger" title="Clear all indexed photos from the database"><svg class="ic sm" aria-hidden="true"><use href="#i-undo"/></svg>Reset Library</button>
+            </div>
           </div>
+          <p id="library-status" class="muted dock-status">Choose a folder, then run all three steps. Nothing is moved until you apply a plan.</p>
 
           <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity</h2>
           <div id="library-log" class="action-log"><div class="logline">Nothing has run yet.</div></div>

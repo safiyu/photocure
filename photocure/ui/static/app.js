@@ -1889,7 +1889,6 @@
 
   function renderProgress(p) {
     const card = $("#progress-card");
-    const topbar = $("#topbar-progress");
     const show = (el, on) => { if (el) el.hidden = !on; };
     const done = !p.active && !p.error && !p.stopped && p.percent === 100;
     const bad = !p.active && !!p.error;
@@ -1899,13 +1898,12 @@
     // C8: the equalizer spectrum (M5 CSS) animates only while #progress-card
     // is .active, so gate the eq-pulse keyframes on the live running state.
     card.classList.toggle("active", p.active);
-    show(topbar, visible);
+    show($("#hero-gauge"), visible);
     if (!visible) return;
     const pct = p.active ? Math.max(num(p.percent), 4) : 100;
     const cls = p.active ? "active" : (bad || stopped ? "error" : "done");
     show($("#progress-spinner"), p.active);
-    show($("#topbar-spinner"), p.active);
-    [$("#progress-status-icon"), $("#topbar-status-icon")].forEach((e) => {
+    [$("#progress-status-icon")].forEach((e) => {
       if (!e) return;
       e.hidden = p.active;
       e.innerHTML = icon(bad || stopped ? "alert" : "check", "sm");
@@ -1923,12 +1921,18 @@
     // C8: live tabular ratio (e.g. "135 / 3,194"); empty when there's no total,
     // which the :empty CSS rule uses to hide the element.
     $("#progress-ratio").textContent = p.total > 0 ? `${fmtN(p.done)} / ${fmtN(p.total)}` : "";
-    $("#topbar-progress-text").textContent = `${p.task || "Task"} ${bad ? "failed" : (stopped ? "stopped" : num(p.percent) + "%")}`;
-    $("#topbar-fill").className = "topbar-fill " + (p.active ? "" : cls);
-    $("#topbar-fill").style.width = pct + "%";
+    // Gauge: the arc is 100 units long (pathLength), so the dash length is the percent.
+    const gaugePct = p.active ? Math.max(num(p.percent), 2) : (done ? 100 : Math.max(num(p.percent), 0));
+    const phase = (String(p.message || "").match(/Phase\s+\d+\s*\/\s*\d+/i) || [""])[0];
+    const gauge = $("#hero-gauge");
+    gauge.setAttribute("aria-valuenow", String(Math.round(gaugePct)));
+    $("#gauge-arc").style.strokeDasharray = `${gaugePct} 100`;
+    $("#gauge-arc").setAttribute("class", "gauge-arc " + cls);
+    $("#gauge-phase").textContent = bad ? "Error" : (stopped ? "Stopped" : (phase || p.task || "Working"));
+    $("#gauge-pct").textContent = bad || stopped ? "-" : `${num(p.percent)}%`;
 
     const isBusy = p.active || p.busy;
-    [$("#btn-stop-progress"), $("#btn-stop-topbar")].forEach((btn) => {
+    [$("#btn-stop-progress")].forEach((btn) => {
       if (!btn) return;
       btn.style.display = isBusy ? "inline-flex" : "none";
       if (p.stopping) {
@@ -1947,7 +1951,8 @@
   function applyBusy(busy) {
     state.busy = busy;
     $$("[data-busy]").forEach((b) => {
-      b.disabled = busy || (b.id === "btn-cluster" && !state.inferred);
+      b.disabled = busy || (b.id === "btn-cluster" && !state.inferred)
+        || (b.id === "btn-sort-dock" && !(state.overview && state.overview.total));
       b.classList.toggle("busy", busy);
     });
     updateLearn();
@@ -2075,11 +2080,14 @@
     if (!st) { $("#device-chip-text").textContent = "Checking device"; return; }
     const acc = (st.accelerators || []).find((a) => a.id === st.selected);
     const label = acc ? accShort(acc) : String(st.selected || "cpu").toUpperCase();
-    $("#device-chip-text").textContent = "Running on " + label;
-    chip.classList.toggle("gpu", !!st.selected && st.selected !== "cpu");
+    const isGpu = !!st.selected && st.selected !== "cpu";
+    $("#device-chip-text").textContent = isGpu ? "GPU" : "CPU";
+    chip.classList.toggle("gpu", isGpu);
     chip.classList.toggle("on", !st.fallback_reason);
     chip.classList.toggle("warn", !!st.fallback_reason);
-    chip.title = st.fallback_reason ? `Using ${label}. ${st.fallback_reason}` : "Open Settings";
+    const detail = st.fallback_reason ? `Using ${label}. ${st.fallback_reason}` : `Running on ${label}. Open Settings`;
+    chip.title = detail;
+    chip.setAttribute("aria-label", detail);
   }
 
   function fillDeviceSelect() {
@@ -2262,6 +2270,12 @@
     const total = ov.total;
     const cats = Object.entries(ov.by_category).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
     const active = ($("#catfilter") || {}).value || "";
+    const dockTotal = $("#dock-total");
+    if (dockTotal) {
+      dockTotal.textContent = fmtN(total);
+      $("#dock-label").textContent = total === 1 ? "photo in your library" : "photos in your library";
+      $("#btn-sort-dock").disabled = !total;
+    }
     $$(".comp-host").forEach((host) => {
       const head = `<div class="comp-head"><span class="comp-total">${fmtN(total)}</span>
         <span class="comp-label">${total === 1 ? "photo" : "photos"} in your library${total ? "" : ". Import a folder to see it sorted here."}</span></div>`;
@@ -2395,7 +2409,7 @@
   }
 
   async function stopProcess() {
-    const btns = [$("#btn-stop-progress"), $("#btn-stop-topbar")];
+    const btns = [$("#btn-stop-progress")];
     btns.forEach((b) => {
       if (b) {
         b.disabled = true;
@@ -2423,6 +2437,7 @@
       confirmText: "Clear library", variant: "danger" });
     if (!okReset) return;
     const btns = [$("#btn-reset-library"), $("#btn-import-reset")];
+    const saved = btns.map((b) => b && b.innerHTML);
     btns.forEach((b) => {
       if (b) {
         b.disabled = true;
@@ -2445,10 +2460,10 @@
     } catch (e) {
       toast("Failed to reset library: " + e.message, "err");
     } finally {
-      btns.forEach((b) => {
+      btns.forEach((b, i) => {
         if (b) {
           b.disabled = false;
-          b.textContent = b.id === "btn-import-reset" ? "Reset library" : "Clear indexed library";
+          b.innerHTML = saved[i];
         }
       });
     }
@@ -2680,7 +2695,7 @@
     $("#junkfilter").addEventListener("change", () => grids.junk.reset());
     $("#minaes").addEventListener("change", () => grids.highlights.reset());
     $("#similar-close").onclick = () => { $("#similar-panel").hidden = true; };
-    $("#btn-dismiss-progress").onclick = () => { $("#progress-card").hidden = true; };
+    $("#btn-dismiss-progress").onclick = () => { $("#progress-card").hidden = true; $("#hero-gauge").hidden = true; };
 
     $("#btn-learn").onclick = learnNow;
     renderBanner();
@@ -2789,7 +2804,6 @@
     $("#btn-save-settings").onclick = saveSettings;
     $("#btn-reset-settings").onclick = () => { renderSettings(); };
     $("#btn-stop-progress").onclick = stopProcess;
-    $("#btn-stop-topbar").onclick = stopProcess;
     const btnResetLib = $("#btn-reset-library");
     if (btnResetLib) btnResetLib.onclick = resetLibrary;
     const btnImportReset = $("#btn-import-reset");

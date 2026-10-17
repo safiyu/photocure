@@ -221,7 +221,9 @@ button { cursor: pointer; }
 }
 .version-pill:hover { background: var(--accent); color: var(--accent-ink); }
 .version-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.foot-icons { display: flex; gap: 6px; padding: 0 4px; align-items: center; }
+.foot-icons { display: flex; gap: 10px; padding: 0 4px 0 6px; align-items: center; }
+.theme-row { display: flex; align-items: center; gap: 8px; margin-left: auto; color: var(--mut); font-size: 13px; }
+.theme-row .theme-text { white-space: nowrap; }
 /* Hardware-style theme switch (C8): visually hidden checkbox, sliding knob on .slider. */
 .switch {
   position: relative; display: inline-flex; align-items: center;
@@ -248,30 +250,36 @@ button { cursor: pointer; }
 .icon-btn:hover { background: var(--well); color: var(--ink); }
 
 .content { min-width: 0; }
+/* C10: the header is a hero card: title on the left, gauge and AI progress on the right while a task runs. */
 .topbar {
-  position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 14px;
-  padding: 16px 32px 14px; background: var(--table);
-  border-bottom: 1px solid transparent;
+  position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 14px 28px;
+  margin: 16px 32px 6px; max-width: 1416px; padding: 18px 28px;
+  background: var(--sheet); border: 1px solid var(--line); border-radius: 28px;
 }
-@supports (backdrop-filter: blur(10px)) {
-  .topbar { background: color-mix(in srgb, var(--table) 88%, transparent); backdrop-filter: blur(10px); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .topbar { background: var(--table); backdrop-filter: none; }
-}
-.topbar h1 { font-size: 28px; line-height: 1.15; }
+.topbar h1 { font-size: 30px; line-height: 1.15; }
 .topbar .sub { color: var(--mut); margin-top: 2px; max-width: 70ch; }
-.topbar .grow { flex: 1; min-width: 0; }
+.topbar .grow { flex: 1 1 260px; min-width: 0; }
 .menu-btn { display: none; }
 
-.pill {
-  display: flex; align-items: center; gap: 9px; padding: 6px 12px 6px 10px;
-  border-radius: 20px; background: var(--sheet); border: 1px solid var(--line); font-size: 13px;
+.gauge { position: relative; width: 150px; height: 88px; flex: none; }
+.gauge-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.gauge-track, .gauge-arc { fill: none; stroke-width: 9; stroke-linecap: round; }
+.gauge-track { stroke: color-mix(in srgb, var(--mut) 28%, transparent); }
+.gauge-arc {
+  stroke: var(--accent-electric); stroke-dasharray: 0 100;
+  transition: stroke-dasharray .35s ease, stroke .2s ease; filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.45));
 }
-.topbar-track { width: 84px; height: 5px; border-radius: 3px; background: var(--well); overflow: hidden; }
-.topbar-fill { height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width .25s ease; }
-.topbar-fill.done { background: var(--ok); }
-.topbar-fill.error { background: var(--err); }
+.gauge-arc.done { stroke: var(--ok-sage); filter: none; }
+.gauge-arc.error { stroke: var(--danger-crimson); filter: none; }
+.gauge-text { position: absolute; left: 0; right: 0; bottom: 2px; display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.gauge-phase, .gauge-sub { font-size: 11px; color: var(--mut); }
+.gauge-text b { font: 600 22px/1.1 var(--font-display); }
+
+.hero .progress-card { flex: 1 1 340px; max-width: 520px; min-width: 0; margin: 0; padding: 0; background: none; border: 0; gap: 8px; }
+.hero .progress-header { flex-direction: column; align-items: stretch; gap: 8px; }
+.hero .progress-task { min-width: 0; }
+.hero #progress-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hero .progress-track { height: 4px; }
 
 main { padding: 8px 32px 96px; max-width: 1480px; }
 .panel { display: none; }
@@ -484,13 +492,17 @@ body.has-picks .pick { opacity: 1; }
 .empty .btn { margin-top: 10px; }
 
 /* --------------------------------------------------------------- sections / steps */
-.sect { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 22px 24px; margin-bottom: 20px; }
-.sect > h2 { font-size: 19px; margin-bottom: 4px; }
+/* C9: .sect picks up step-card shape — padding matches .step and the header carries a left-accent bar. */
+.sect { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px 22px; margin-bottom: 20px; }
+.sect > h2 { font-size: 19px; margin-bottom: 4px; padding-left: 10px; border-left: 3px solid var(--accent-electric); }
 .sect > .lede { margin: 0 0 18px; color: var(--mut); max-width: 70ch; }
 .sect.danger { border-color: color-mix(in srgb, var(--err) 35%, var(--line)); }
+/* C9: danger-sect heading keeps the sect-shape accent bar but swaps colour so it does not fight the crimson border. */
+.sect.danger > h2 { border-left-color: var(--danger-crimson); }
 
 .steps { list-style: none; margin: 0 0 20px; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-.step { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+/* C10: asymmetric elliptical radii give each step card a soft, organic outline. */
+.step { background: var(--sheet); border: 1px solid var(--line); border-radius: 30px 46px 34px 42px / 36px 32px 44px 34px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
 .step-head { display: flex; align-items: center; gap: 12px; }
 .step-num {
   display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; flex: none;
@@ -534,20 +546,73 @@ body.has-picks .pick { opacity: 1; }
 .step .actions .btn .lock { width: 14px; height: 14px; color: var(--faint); }
 
 /* C8: step-card status states (M9). .active = focused/ready, .locked = pending. */
-.step.active { border: 1.5px solid var(--accent-electric); box-shadow: var(--accent-glow); }
+.step.active {
+  border: 1.5px solid var(--accent-electric); box-shadow: var(--accent-glow);
+  border-radius: 44px 60px 40px 56px / 48px 40px 56px 42px;
+  transform: translateY(-6px) scale(1.035); z-index: 3;
+}
+.step.active .actions .btn.primary {
+  flex: 1; height: 48px; font-size: 15px;
+  border-radius: 55% 55% 16px 16px / 70% 70% 16px 16px;
+  background: linear-gradient(180deg, #6070f2 0%, #3b3fd6 100%);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.18), var(--accent-glow);
+}
 .step.active .step-num { background: var(--accent-electric); border-color: var(--accent-electric); color: #fff; }
 .step.active .state { color: var(--accent-electric); background: var(--accent-pill); }
 .step.locked { opacity: 0.55; }
 .step.locked .step-num { color: var(--faint); }
 .step.locked .state { color: var(--faint); }
 
-.runall { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 26px; }
-.runall .btn { height: 38px; padding: 0 22px; border-radius: 20px; font-weight: 600; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
-.runall .btn.primary { background: var(--accent-electric); border-color: var(--accent-electric); color: #fff; box-shadow: var(--accent-glow); }
-.runall .btn.primary:hover { background: var(--accent-electric-hover); border-color: var(--accent-electric-hover); box-shadow: 0 0 24px rgba(59, 130, 246, 0.4); }
-.runall .btn.danger { background: var(--danger-crimson-bg); border-color: var(--danger-crimson-border); color: var(--danger-crimson); }
-.runall .btn.danger:hover { background: color-mix(in srgb, var(--danger-crimson) 20%, var(--danger-crimson-bg)); border-color: var(--danger-crimson); }
-.runall #library-status { color: var(--mut); font-size: 13px; line-height: 1.45; }
+/* C9: animated chevron connectors between step cards. Overlay the gap on desktop; rotate 90deg when stacked. */
+.step { position: relative; }
+.step-flow {
+  position: absolute; right: -14px; top: 50%; transform: translate(50%, -50%);
+  display: flex; gap: 2px; z-index: 4; pointer-events: none; color: var(--faint);
+}
+.step-flow .chev { width: 16px; height: 16px; flex: none; }
+.step-flow .chev:nth-child(1) { animation: chev-flow 1.4s ease-in-out infinite; }
+.step-flow .chev:nth-child(2) { animation: chev-flow 1.4s ease-in-out .35s infinite; }
+.step-flow .chev:nth-child(3) { animation: chev-flow 1.4s ease-in-out .7s infinite; }
+@keyframes chev-flow {
+  0%, 100% { opacity: .25; transform: translateX(-3px); }
+  50% { opacity: 1; transform: translateX(2px); }
+}
+.step.done .step-flow { color: var(--ok-sage); }
+.step:has(+ .step.active) .step-flow { color: var(--accent-electric); }
+
+/* C10: action and summary dock, a rounded bar under the step cards. */
+.dock {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap;
+  margin-bottom: 8px; padding: 10px 14px 10px 22px; border-radius: 32px;
+  background: var(--sheet); border: 1px solid var(--line);
+}
+.dock-summary { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-width: 0; }
+.dock-total { font: 600 26px/1 var(--font-display); letter-spacing: -.02em; }
+.dock-label { color: var(--mut); font-size: 14px; }
+.dock-sort { height: 32px; padding: 0 14px; border-radius: 16px; background: var(--well); }
+.dock-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dock-actions .btn { height: 38px; padding: 0 20px; border-radius: 20px; font-weight: 600; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
+.dock-actions .btn.primary { background: var(--accent-electric); border-color: var(--accent-electric); color: #fff; box-shadow: var(--accent-glow); }
+.dock-actions .btn.primary:hover { background: var(--accent-electric-hover); border-color: var(--accent-electric-hover); box-shadow: 0 0 24px rgba(59, 130, 246, 0.4); }
+.dock-actions .btn.danger { background: var(--danger-crimson-bg); border-color: var(--danger-crimson-border); color: var(--danger-crimson); }
+.dock-actions .btn.danger:hover { background: color-mix(in srgb, var(--danger-crimson) 20%, var(--danger-crimson-bg)); border-color: var(--danger-crimson); }
+.dock-status { margin: 0 0 26px 22px; color: var(--mut); font-size: 13px; line-height: 1.45; }
+
+/* C10: dark theme gets a gradient canvas and glass card fills (backgrounds only, so borders and glows stay intact). */
+:root[data-theme="dark"] body {
+  background-color: var(--canvas-bg);
+  background-image:
+    radial-gradient(1100px 520px at 72% -8%, rgba(70, 90, 190, 0.28), transparent 62%),
+    linear-gradient(180deg, #10152a 0%, var(--canvas-bg) 55%);
+  background-attachment: fixed;
+}
+:root[data-theme="dark"] .step, :root[data-theme="dark"] .sect,
+:root[data-theme="dark"] .topbar, :root[data-theme="dark"] .dock {
+  background: linear-gradient(160deg, rgba(28, 34, 54, 0.82), rgba(15, 20, 31, 0.86));
+}
+:root[data-theme="dark"] .step.active { background: linear-gradient(160deg, rgba(36, 44, 82, 0.9), rgba(18, 24, 44, 0.92)); }
+:root[data-theme="dark"] .side { background: linear-gradient(180deg, rgba(24, 30, 48, 0.92), rgba(14, 18, 30, 0.94)); }
+:root[data-theme="dark"] .version-pill { color: #fff; }
 
 .panel-title { font-size: 19px; margin: 8px 0 10px; }
 .action-log { display: flex; flex-direction: column; gap: 2px; font-size: 13px; max-height: 320px; overflow: auto; }
@@ -717,6 +782,7 @@ body.has-picks .pick { opacity: 1; }
 /* Motion-sensitivity guard: freeze the wave and keep the resting heights. */
 @media (prefers-reduced-motion: reduce) {
   .spectrum-bar, #progress-card.active .spectrum-bar { animation: none !important; }
+  .step-flow .chev { animation: none !important; opacity: .55; transform: none !important; }
 }
 
 /* ------------------------------------------------------------------ bulk bar */
@@ -810,13 +876,16 @@ body.has-picks .pick { opacity: 1; }
   body.nav-open .side { transform: none; }
   body.nav-open::after { content: ""; position: fixed; inset: 0; z-index: 65; background: var(--scrim); }
   .menu-btn { display: inline-grid; }
-  .topbar, main { padding-left: 18px; padding-right: 18px; }
+  main { padding-left: 18px; padding-right: 18px; }
+  .topbar { margin: 12px 18px 4px; padding: 14px 18px; }
   .topbar h1 { font-size: 23px; }
   .split { grid-template-columns: 1fr; }
   .burstlist { position: static; max-height: 260px; }
   .bulk { left: 50%; width: calc(100vw - 24px); flex-wrap: wrap; }
   /* C8: the 3-step workflow stacks into a single column on tablet/mobile. */
   .steps { grid-template-columns: 1fr; }
+  .step.active { transform: none; }
+  .step-flow { right: 50%; top: auto; bottom: -22px; transform: translate(50%, 50%) rotate(90deg); }
   .lb { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
   .lb-stage { padding: 56px 12px 12px; }
   .lb-nav { top: auto; bottom: 12px; transform: none; } .lb-nav.prev { left: 12px; } .lb-nav.next { right: 12px; }
@@ -831,8 +900,8 @@ body.has-picks .pick { opacity: 1; }
 /* C8: phone-width canvas refinements. The photo grid needs no rule here: it
    auto-fills --thumb-min, which the virtual grid reads from computed CSS. */
 @media (max-width: 640px) {
-  .topbar, main { padding-left: 14px; padding-right: 14px; }
-  .topbar { flex-wrap: wrap; gap: 10px; }
+  main { padding-left: 14px; padding-right: 14px; }
+  .topbar { margin: 10px 14px 4px; padding: 12px 14px; gap: 10px; border-radius: 22px; }
   .topbar h1 { font-size: 20px; }
   .sect { padding: 16px 16px; }
   .step { padding: 16px; }
@@ -879,7 +948,7 @@ body.has-picks .pick { opacity: 1; }
 
 /* ------------------------------------------------------------ device chip, settings */
 .devchip {
-  display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 14px; margin-bottom: 4px;
+  display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; padding: 5px 12px; margin: 0 0 4px 10px;
   border: 1px solid var(--line); border-radius: 20px; background: var(--well);
   color: var(--ink); font-size: 13px; font-weight: 500; text-align: left;
   transition: background .18s ease, border-color .18s ease;
@@ -948,6 +1017,8 @@ body.has-picks .pick { opacity: 1; }
 .gpu-index { max-width: 360px; margin-top: 12px; }
 
 .workers .field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+/* C9: each worker field is a mini step-card so Settings reads as the same system as the Import 3-up. */
+.form-grid.workers .field { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 14px 16px; }
 .eff { font-size: 12px; color: var(--mut); white-space: nowrap; }
 .field-error { margin: 0; font-size: 12px; color: var(--err); }
 .btn-row .help.ok { color: var(--ok); }
