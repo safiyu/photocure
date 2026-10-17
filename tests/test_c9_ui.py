@@ -121,3 +121,14 @@ def test_sect_danger_border_still_wins():
     sect_pos = re.search(r"\.sect\s*\{", css).start()
     danger_pos = re.search(r"\.sect\.danger\s*\{", css).start()
     assert danger_pos > sect_pos, ".sect.danger must come AFTER .sect so its border wins"
+
+
+def test_workers_fields_become_mini_cards():
+    css = _style()
+    rule = re.search(r"\.form-grid\.workers\s+\.field\s*\{([^}]*)\}", css)
+    assert rule, ".form-grid.workers .field card rule not found"
+    body = rule.group(1)
+    assert "var(--sheet)" in body, "workers .field must use --sheet background"
+    assert "1px solid var(--line)" in body, "workers .field must use 1px --line border"
+    assert "var(--r-lg)" in body, "workers .field must use --r-lg radius"
+    assert "padding:" in body, "workers .field must declare padding"
