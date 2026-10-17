@@ -2265,6 +2265,12 @@
     const total = ov.total;
     const cats = Object.entries(ov.by_category).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
     const active = ($("#catfilter") || {}).value || "";
+    const dockTotal = $("#dock-total");
+    if (dockTotal) {
+      dockTotal.textContent = fmtN(total);
+      $("#dock-label").textContent = total === 1 ? "photo in your library" : "photos in your library";
+      $("#btn-sort-dock").disabled = !total;
+    }
     $$(".comp-host").forEach((host) => {
       const head = `<div class="comp-head"><span class="comp-total">${fmtN(total)}</span>
         <span class="comp-label">${total === 1 ? "photo" : "photos"} in your library${total ? "" : ". Import a folder to see it sorted here."}</span></div>`;
@@ -2426,6 +2432,7 @@
       confirmText: "Clear library", variant: "danger" });
     if (!okReset) return;
     const btns = [$("#btn-reset-library"), $("#btn-import-reset")];
+    const saved = btns.map((b) => b && b.innerHTML);
     btns.forEach((b) => {
       if (b) {
         b.disabled = true;
@@ -2448,10 +2455,10 @@
     } catch (e) {
       toast("Failed to reset library: " + e.message, "err");
     } finally {
-      btns.forEach((b) => {
+      btns.forEach((b, i) => {
         if (b) {
           b.disabled = false;
-          b.textContent = b.id === "btn-import-reset" ? "Reset library" : "Clear indexed library";
+          b.innerHTML = saved[i];
         }
       });
     }

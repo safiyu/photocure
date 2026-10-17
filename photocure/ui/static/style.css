@@ -563,13 +563,23 @@ body.has-picks .pick { opacity: 1; }
 .step.done .step-flow { color: var(--ok-sage); }
 .step:has(+ .step.active) .step-flow { color: var(--accent-electric); }
 
-.runall { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 26px; }
-.runall .btn { height: 38px; padding: 0 22px; border-radius: 20px; font-weight: 600; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
-.runall .btn.primary { background: var(--accent-electric); border-color: var(--accent-electric); color: #fff; box-shadow: var(--accent-glow); }
-.runall .btn.primary:hover { background: var(--accent-electric-hover); border-color: var(--accent-electric-hover); box-shadow: 0 0 24px rgba(59, 130, 246, 0.4); }
-.runall .btn.danger { background: var(--danger-crimson-bg); border-color: var(--danger-crimson-border); color: var(--danger-crimson); }
-.runall .btn.danger:hover { background: color-mix(in srgb, var(--danger-crimson) 20%, var(--danger-crimson-bg)); border-color: var(--danger-crimson); }
-.runall #library-status { color: var(--mut); font-size: 13px; line-height: 1.45; }
+/* C10: action and summary dock, a rounded bar under the step cards. */
+.dock {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap;
+  margin-bottom: 8px; padding: 10px 14px 10px 22px; border-radius: 32px;
+  background: var(--sheet); border: 1px solid var(--line);
+}
+.dock-summary { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; min-width: 0; }
+.dock-total { font: 600 26px/1 var(--font-display); letter-spacing: -.02em; }
+.dock-label { color: var(--mut); font-size: 14px; }
+.dock-sort { height: 32px; padding: 0 14px; border-radius: 16px; background: var(--well); }
+.dock-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dock-actions .btn { height: 38px; padding: 0 20px; border-radius: 20px; font-weight: 600; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
+.dock-actions .btn.primary { background: var(--accent-electric); border-color: var(--accent-electric); color: #fff; box-shadow: var(--accent-glow); }
+.dock-actions .btn.primary:hover { background: var(--accent-electric-hover); border-color: var(--accent-electric-hover); box-shadow: 0 0 24px rgba(59, 130, 246, 0.4); }
+.dock-actions .btn.danger { background: var(--danger-crimson-bg); border-color: var(--danger-crimson-border); color: var(--danger-crimson); }
+.dock-actions .btn.danger:hover { background: color-mix(in srgb, var(--danger-crimson) 20%, var(--danger-crimson-bg)); border-color: var(--danger-crimson); }
+.dock-status { margin: 0 0 26px 22px; color: var(--mut); font-size: 13px; line-height: 1.45; }
 
 .panel-title { font-size: 19px; margin: 8px 0 10px; }
 .action-log { display: flex; flex-direction: column; gap: 2px; font-size: 13px; max-height: 320px; overflow: auto; }

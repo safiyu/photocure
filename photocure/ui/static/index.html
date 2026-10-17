@@ -31,6 +31,7 @@
     <symbol id="i-cpu" viewBox="0 0 24 24"><path d="M9 9h6v6H9z"/><path d="M5 5h14v14H5z"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
     <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><path d="M12 17a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3"/></symbol>
     <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><path d="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></symbol>
@@ -145,7 +146,6 @@
         <!-- IMPORT -->
         <section id="tab-library" class="panel active">
           <div class="banner-host"></div>
-          <div class="comp comp-host" data-target="categories"></div>
 
           <ol class="steps">
             <li class="step" id="step-scan">
@@ -228,11 +228,18 @@
             </li>
           </ol>
 
-          <div class="runall">
-            <button id="btn-ingest-all" data-busy class="btn primary">Run all three steps</button>
-            <button id="btn-import-reset" data-busy class="btn danger" title="Clear all indexed photos from the database">Reset library</button>
-            <span id="library-status" class="muted">Choose a folder, then run all three steps. Nothing is moved until you apply a plan.</span>
+          <div class="dock" role="group" aria-label="Library summary and actions">
+            <div class="dock-summary">
+              <span class="dock-total" id="dock-total">0</span>
+              <span class="dock-label" id="dock-label">photos in your library</span>
+              <button class="btn dock-sort" id="btn-sort-dock" type="button" data-sortnow>Sort Photos</button>
+            </div>
+            <div class="dock-actions">
+              <button id="btn-ingest-all" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Run All Three Steps</button>
+              <button id="btn-import-reset" data-busy class="btn danger" title="Clear all indexed photos from the database"><svg class="ic sm" aria-hidden="true"><use href="#i-undo"/></svg>Reset Library</button>
+            </div>
           </div>
+          <p id="library-status" class="muted dock-status">Choose a folder, then run all three steps. Nothing is moved until you apply a plan.</p>
 
           <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity</h2>
           <div id="library-log" class="action-log"><div class="logline">Nothing has run yet.</div></div>

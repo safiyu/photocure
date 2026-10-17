@@ -75,3 +75,50 @@ def test_device_chip_is_short_with_full_detail_in_title():
     assert "aria-label" in body, "chip must keep an accessible name with the full detail"
     chip_rule = re.search(r"\.devchip\s*\{([^}]*)\}", _css())
     assert chip_rule and "width: 100%" not in chip_rule.group(1), ".devchip must be a compact pill"
+
+
+# ------------------------------------------------------------------ action and summary dock
+
+def _library_tab(html: str) -> str:
+    m = re.search(r'<section id="tab-library"[^>]*>(.*?)</section>', html, re.DOTALL)
+    assert m, "#tab-library not found"
+    return m.group(1)
+
+
+def test_dock_markup_holds_summary_and_actions():
+    tab = _library_tab(_html())
+    dock = re.search(r'<div class="dock"[^>]*>(.*)', tab, re.DOTALL)
+    assert dock, ".dock not found in the Import tab"
+    body = dock.group(1)
+    for needle in ('id="dock-total"', 'id="btn-sort-dock"', "data-sortnow",
+                   'id="btn-ingest-all"', 'id="btn-import-reset"'):
+        assert needle in body, f"{needle} must live inside the dock"
+    assert "Run All Three Steps" in body and "Reset Library" in body and "Sort Photos" in body
+    assert 'class="runall"' not in tab, "the old .runall row must be gone"
+    assert 'id="library-status"' in tab, "status caption must be kept for the JS that writes to it"
+
+
+def test_dock_css_is_a_pill_bar():
+    css = _css()
+    rule = re.search(r"\.dock\s*\{([^}]*)\}", css)
+    assert rule and "border-radius" in rule.group(1), ".dock must be a rounded bar"
+    assert ".runall" not in css, "dead .runall rules must be removed"
+
+
+def test_dock_total_follows_overview_and_sort_disables_when_empty():
+    js = _js()
+    render = re.search(r"function renderComp\(ov\)\s*\{(.*?)\n  \}", js, re.DOTALL)
+    assert render, "renderComp not found"
+    body = render.group(1)
+    assert "dock-total" in body, "renderComp must write the dock total"
+    assert re.search(r"btn-sort-dock[^;]*;?[^;]*disabled\s*=\s*!total", body, re.DOTALL), (
+        "Sort Photos must be disabled when the library is empty"
+    )
+
+
+def test_reset_restores_button_markup_not_plain_text():
+    js = _js()
+    assert 'b.textContent = b.id === "btn-import-reset"' not in js, (
+        "restoring plain text would wipe the dock button icon and casing"
+    )
+    assert "innerHTML = saved" in js
