@@ -87,3 +87,37 @@ def test_step_flow_rotates_on_mobile():
     assert tablet and re.search(r"\.step-flow[^{]*\{[^}]*rotate\(90deg\)", tablet.group(1)), (
         ".step-flow must rotate 90deg at <= 960px so chevrons point down when stacked"
     )
+
+
+def test_sect_padding_matches_step():
+    css = _style()
+    sect = re.search(r"\.sect\s*\{([^}]*)\}", css)
+    assert sect, ".sect rule not found"
+    assert re.search(r"padding:\s*20px\s+22px", sect.group(1)), (
+        ".sect padding must match .step (20px 22px)"
+    )
+    assert "var(--r-lg)" in sect.group(1), ".sect must keep --r-lg radius"
+    assert "1px solid var(--line)" in sect.group(1), ".sect must keep 1px --line border"
+
+
+def test_sect_header_has_accent_marker():
+    css = _style()
+    head = re.search(r"\.sect\s*>\s*h2\s*\{([^}]*)\}", css)
+    assert head, ".sect > h2 rule not found"
+    body = head.group(1)
+    assert "border-left" in body and "var(--accent-electric)" in body, (
+        ".sect > h2 must carry a left accent bar in --accent-electric"
+    )
+    assert "padding-left" in body, ".sect > h2 must indent after the accent bar"
+
+
+def test_sect_danger_border_still_wins():
+    css = _style()
+    danger = re.search(r"\.sect\.danger\s*\{([^}]*)\}", css)
+    assert danger, ".sect.danger rule must still exist"
+    assert "var(--err)" in danger.group(1) or "var(--danger-crimson)" in danger.group(1), (
+        ".sect.danger must keep its crimson/err border"
+    )
+    sect_pos = re.search(r"\.sect\s*\{", css).start()
+    danger_pos = re.search(r"\.sect\.danger\s*\{", css).start()
+    assert danger_pos > sect_pos, ".sect.danger must come AFTER .sect so its border wins"

@@ -484,8 +484,9 @@ body.has-picks .pick { opacity: 1; }
 .empty .btn { margin-top: 10px; }
 
 /* --------------------------------------------------------------- sections / steps */
-.sect { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 22px 24px; margin-bottom: 20px; }
-.sect > h2 { font-size: 19px; margin-bottom: 4px; }
+/* C9: .sect picks up step-card shape — padding matches .step and the header carries a left-accent bar. */
+.sect { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px 22px; margin-bottom: 20px; }
+.sect > h2 { font-size: 19px; margin-bottom: 4px; padding-left: 10px; border-left: 3px solid var(--accent-electric); }
 .sect > .lede { margin: 0 0 18px; color: var(--mut); max-width: 70ch; }
 .sect.danger { border-color: color-mix(in srgb, var(--err) 35%, var(--line)); }
 
