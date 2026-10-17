@@ -529,6 +529,108 @@ try {
     check(await page.eval("document.activeElement.classList.contains('card')"), "focus restored to card after closing help");
   });
 
+  await scenario("the hardware theme switch flips light/dark and stays in sync (click + keyboard)", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click()");
+    await settle();
+    const flip = (t) => (t === "dark" ? "light" : "dark");
+    const snap = () => page.eval(`(() => {
+      const sw = document.getElementById('theme-switch');
+      return { theme: document.documentElement.dataset.theme, checked: sw.checked,
+        aria: sw.getAttribute('aria-checked'), stored: localStorage.getItem('pcur-theme') };
+    })()`);
+    const t0 = (await snap()).theme;
+    check(t0 === "light" || t0 === "dark", "no initial theme: " + t0);
+
+    // 1) Drive the checkbox's change event (the click path) -> the whole system follows.
+    await page.eval(`(() => { const sw = document.getElementById('theme-switch'); sw.checked = !sw.checked; sw.dispatchEvent(new Event('change')); })()`);
+    const a = await snap();
+    check(a.theme === flip(t0), "data-theme did not flip to " + flip(t0) + " (got " + a.theme + ")");
+    check(a.checked === (flip(t0) === "dark"), "checkbox state is out of sync");
+    check(a.aria === String(flip(t0) === "dark"), "aria-checked is out of sync");
+    check(a.stored === flip(t0), "localStorage pcur-theme is out of sync");
+
+    // 2) Focus the label and press Space (the keyboard path) -> flips back to the original.
+    await page.eval("document.getElementById('theme-toggle').focus()");
+    check(await page.eval("document.activeElement.id === 'theme-toggle'"), "the switch label is not keyboard-focusable");
+    await press(" ");
+    const b = await snap();
+    check(b.theme === t0, "keyboard toggle did not restore " + t0 + " (got " + b.theme + ")");
+    check(b.checked === (t0 === "dark") && b.aria === String(t0 === "dark") && b.stored === t0, "state not restored in sync after keyboard toggle");
+    await shot("12-theme-switch");
+  });
+
+  await scenario("step cards reflect library state and stack to one column on tablet", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click()");
+    await settle();
+    const info = await page.eval(`(() => {
+      const steps = [...document.querySelectorAll('.steps > .step')].map((li) => ({
+        id: li.id, done: li.classList.contains('done'), active: li.classList.contains('active'), locked: li.classList.contains('locked'),
+        badgeBg: getComputedStyle(li.querySelector('.step-num')).backgroundColor,
+        checkVisible: getComputedStyle(li.querySelector('.step-num .ic')).display !== 'none',
+        numHidden: getComputedStyle(li.querySelector('.step-num .n')).display === 'none'
+      }));
+      return {
+        steps,
+        states: { scan: document.getElementById('state-scan').textContent, infer: document.getElementById('state-infer').textContent,
+                  cluster: document.getElementById('state-cluster').textContent },
+        cols: getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length
+      };
+    })()`);
+    // Seeded library: 5,000 indexed + 1 burst group, all inferred -> every step is done.
+    const byId = Object.fromEntries(info.steps.map((s) => [s.id, s]));
+    for (const id of ["step-scan", "step-infer", "step-cluster"]) {
+      check(byId[id].done, id + " is not in the done state");
+      check(!byId[id].active && !byId[id].locked, id + " carries a conflicting state class");
+      check(byId[id].badgeBg !== "rgba(0, 0, 0, 0)", id + " badge has no painted background");
+      check(byId[id].checkVisible && byId[id].numHidden, id + " did not swap its number for the check mark");
+    }
+    check(/indexed/.test(info.states.scan), "step 1 state text has no index count: " + info.states.scan);
+    check(info.states.infer === "Done", "step 1 done but step 2 is not marked done: " + info.states.infer);
+    check(/group/.test(info.states.cluster), "step 3 state text has no group count: " + info.states.cluster);
+    check(info.cols === 3, "wide layout should show 3 step columns, got " + info.cols);
+
+    // Tablet: at <= 960px the 3-column grid stacks to a single column.
+    await page.viewport(900, 800);
+    await page.waitFor(`getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length === 1`, 8000, "steps stack to one column");
+    await settle();
+    const narrow = await page.eval("getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length");
+    check(narrow === 1, "tablet layout should show 1 step column, got " + narrow);
+    await shot("13-steps-tablet");
+    await page.viewport(1400, 900);
+    await page.waitFor(`getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length === 3`, 8000, "steps restore to 3 columns");
+    await settle();
+  });
+
+  await scenario("activity log rows render monospace tabular time pills", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click()");
+    await settle();
+    // An empty scan path is a safe, non-mutating way to make the real logTo() write a row.
+    await page.eval("document.getElementById('scan-path').value = ''");
+    await page.eval("document.getElementById('btn-scan').click()");
+    await page.waitFor(`(() => { const l = document.querySelector('#library-log .logline .time-pill'); return l && /\\d{1,2}:\\d{2}/.test(l.textContent); })()`, 8000, "a time-pill appears in the activity log");
+    const log = await page.eval(`(() => {
+      const rows = [...document.querySelectorAll('#library-log .logline')];
+      const err = rows.find((r) => r.textContent.includes('Choose a photo folder'));
+      const anyPill = document.querySelector('#library-log .logline .time-pill');
+      const cs = getComputedStyle(anyPill);
+      return {
+        hasErrRow: !!err,
+        errPillClass: err ? err.querySelector('.time-pill').className : "",
+        errHighlighted: err ? err.classList.contains('active-highlight') : false,
+        fontFamily: cs.fontFamily, fontVariant: cs.fontVariantNumeric,
+        pillText: anyPill.textContent,
+        terminalBg: getComputedStyle(document.getElementById('library-log')).backgroundColor
+      };
+    })()`);
+    check(/\d{1,2}:\d{2}/.test(log.pillText), "time-pill has no readable time: " + log.pillText);
+    check(/JetBrains Mono/.test(log.fontFamily), "time-pill is not monospace: " + log.fontFamily);
+    check(/tabular-nums/.test(log.fontVariant), "time-pill is not tabular: " + log.fontVariant);
+    check(log.hasErrRow && log.errPillClass.includes("muted"), "the error row should carry a muted time-pill: " + log.errPillClass);
+    check(!log.errHighlighted, "an error row should not be a completion highlight");
+    check(log.terminalBg !== "rgba(0, 0, 0, 0)", "the activity terminal has no painted background");
+    await shot("14-log-pills");
+  });
+
   await scenario("the page raised no script errors", async () => {
     check(page.errors.length === 0, "script errors: " + page.errors.join(" | ").slice(0, 400));
   });

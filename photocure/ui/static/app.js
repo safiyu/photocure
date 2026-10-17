@@ -13,6 +13,7 @@
   const PAGE = 200;
   const state = {
     tab: "library", cats: [], junk: new Set(), byId: {}, busy: false, taskRunning: false,
+    inferred: false,
     triageSel: -1, triageGrid: null, undo: [], picks: new Set(), lastPick: null,
     overview: null, eventId: null,
     backend: null, thresholds: null, manualCount: 0,
@@ -307,10 +308,23 @@
     const box = $(boxSel);
     if (!box) return;
     $$(":scope > .logline:not([data-t])", box).forEach((e) => e.remove());
+    // Pill tint per log type: success=green, error/warn=muted, progress/info=blue.
+    const pillCls = cls === "ok" ? "ok" : (cls === "err" || cls === "warn") ? "muted" : "info";
+    // A completed phase gets the green checkmark row. Detected by text (not cls, since
+    // start messages like "Apply started" are also cls=ok) and never on err/warn rows.
+    const completion =
+      cls !== "err" && cls !== "warn" &&
+      /\b(finished|done|rebuilt|verified|repaired|learned|applied)\b/i.test(msg);
     const el = document.createElement("div");
-    el.className = "logline " + (cls || "");
+    el.className = "logline" + (cls ? " " + cls : "") + (completion ? " active-highlight" : "");
     el.dataset.t = "1";
-    el.textContent = new Date().toLocaleTimeString() + "  " + msg;
+    const pill = document.createElement("span");
+    pill.className = "time-pill " + pillCls;
+    pill.textContent = new Date().toLocaleTimeString();
+    const body = document.createElement("span");
+    body.textContent = msg;
+    el.appendChild(pill);
+    el.appendChild(body);
     box.prepend(el);
     while (box.children.length > 200) box.lastChild.remove();
   }
@@ -321,8 +335,11 @@
   function applyTheme(t) {
     document.documentElement.dataset.theme = t;
     try { localStorage.setItem("pcur-theme", t); } catch (e) { /* private mode */ }
-    const b = $("#theme-toggle");
-    if (b) b.innerHTML = icon(t === "dark" ? "sun" : "moon");
+    const sw = $("#theme-switch");
+    if (sw) {
+      sw.checked = t === "dark";
+      sw.setAttribute("aria-checked", String(t === "dark"));
+    }
   }
 
   // ------------------------------------------------------------------ cards
@@ -1879,6 +1896,9 @@
     const stopped = !p.active && !!p.stopped;
     const visible = p.active || done || bad || stopped;
     show(card, visible);
+    // C8: the equalizer spectrum (M5 CSS) animates only while #progress-card
+    // is .active, so gate the eq-pulse keyframes on the live running state.
+    card.classList.toggle("active", p.active);
     show(topbar, visible);
     if (!visible) return;
     const pct = p.active ? Math.max(num(p.percent), 4) : 100;
@@ -1900,6 +1920,9 @@
     $("#progress-fill").style.width = pct + "%";
     $("#progress-msg").textContent = bad ? p.error : (p.message || "Working");
     $("#progress-counts").textContent = p.detail || (p.total > 0 ? `${fmtN(p.done)} of ${fmtN(p.total)}` : "");
+    // C8: live tabular ratio (e.g. "135 / 3,194"); empty when there's no total,
+    // which the :empty CSS rule uses to hide the element.
+    $("#progress-ratio").textContent = p.total > 0 ? `${fmtN(p.done)} / ${fmtN(p.total)}` : "";
     $("#topbar-progress-text").textContent = `${p.task || "Task"} ${bad ? "failed" : (stopped ? "stopped" : num(p.percent) + "%")}`;
     $("#topbar-fill").className = "topbar-fill " + (p.active ? "" : cls);
     $("#topbar-fill").style.width = pct + "%";
@@ -1924,7 +1947,7 @@
   function applyBusy(busy) {
     state.busy = busy;
     $$("[data-busy]").forEach((b) => {
-      b.disabled = busy;
+      b.disabled = busy || (b.id === "btn-cluster" && !state.inferred);
       b.classList.toggle("busy", busy);
     });
     updateLearn();
@@ -2054,6 +2077,7 @@
     const label = acc ? accShort(acc) : String(st.selected || "cpu").toUpperCase();
     $("#device-chip-text").textContent = "Running on " + label;
     chip.classList.toggle("gpu", !!st.selected && st.selected !== "cpu");
+    chip.classList.toggle("on", !st.fallback_reason);
     chip.classList.toggle("warn", !!st.fallback_reason);
     chip.title = st.fallback_reason ? `Using ${label}. ${st.fallback_reason}` : "Open Settings";
   }
@@ -2273,16 +2297,24 @@
     set("actions", s.planned_actions);
 
     const total = ov.total, pending = num(s.pending_inference), bursts = num(s.burst_groups);
-    const step = (id, done, text) => {
+    const inferred = total > 0 && pending === 0;
+    state.inferred = inferred;
+    const step = (id, cls, text) => {
       const li = $("#step-" + id);
       if (!li) return;
-      li.classList.toggle("done", done);
+      li.classList.toggle("done", cls === "done");
+      li.classList.toggle("active", cls === "active");
+      li.classList.toggle("locked", cls === "locked");
       $("#state-" + id).textContent = text;
     };
-    step("scan", total > 0, total > 0 ? `${fmtN(total)} indexed` : "Not started");
-    const inferred = total > 0 && pending === 0;
-    step("infer", inferred, pending > 0 ? `${fmtN(pending)} waiting` : total > 0 ? "Done" : "Needs step 1");
-    step("cluster", bursts > 0, bursts > 0 ? `${fmtN(bursts)} groups` : inferred ? "Not run yet" : "Needs step 2");
+    // Step 1 — done once indexed, otherwise the actionable focus (never locked).
+    step("scan", total > 0 ? "done" : "active", total > 0 ? `${fmtN(total)} indexed` : "Not started");
+    // Step 2 — done once inferred, the active focus while photos await analysis, locked with no library.
+    step("infer", inferred ? "done" : total > 0 ? "active" : "locked",
+      pending > 0 ? `${fmtN(pending)} waiting` : total > 0 ? "Done" : "Needs step 1");
+    // Step 3 — done once grouped, active when analysis is ready, locked until step 2 completes.
+    step("cluster", bursts > 0 ? "done" : inferred ? "active" : "locked",
+      bursts > 0 ? `${fmtN(bursts)} groups` : inferred ? "Not run yet" : "Needs step 2");
   }
 
   async function loadStats() {
@@ -2599,8 +2631,24 @@
         document.body.classList.remove("nav-open");
       }
     });
-    $("#theme-toggle").onclick = () =>
+    const themeToggle = $("#theme-toggle");
+    const themeSwitch = $("#theme-switch");
+    const toggleTheme = () =>
       applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+    if (themeSwitch) themeSwitch.onchange = toggleTheme;
+    if (themeToggle) {
+      themeToggle.onclick = (e) => {
+        if (e.target === themeSwitch) return;  // the native change already fired
+        toggleTheme();
+      };
+      themeToggle.onkeydown = (e) => {
+        if (e.target === themeSwitch) return;  // the input handles Space itself
+        if (e.key === " " || e.key === "Enter") {
+          e.preventDefault();
+          toggleTheme();
+        }
+      };
+    }
     $("#btn-help").onclick = openHelp;
     $("#help-close").onclick = closeHelp;
     $("#help").addEventListener("click", (e) => { if (e.target.id === "help") closeHelp(); });
