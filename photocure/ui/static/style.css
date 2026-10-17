@@ -250,30 +250,36 @@ button { cursor: pointer; }
 .icon-btn:hover { background: var(--well); color: var(--ink); }
 
 .content { min-width: 0; }
+/* C10: the header is a hero card: title on the left, gauge and AI progress on the right while a task runs. */
 .topbar {
-  position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 14px;
-  padding: 16px 32px 14px; background: var(--table);
-  border-bottom: 1px solid transparent;
+  position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 14px 28px;
+  margin: 16px 32px 6px; max-width: 1416px; padding: 18px 28px;
+  background: var(--sheet); border: 1px solid var(--line); border-radius: 28px;
 }
-@supports (backdrop-filter: blur(10px)) {
-  .topbar { background: color-mix(in srgb, var(--table) 88%, transparent); backdrop-filter: blur(10px); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .topbar { background: var(--table); backdrop-filter: none; }
-}
-.topbar h1 { font-size: 28px; line-height: 1.15; }
+.topbar h1 { font-size: 30px; line-height: 1.15; }
 .topbar .sub { color: var(--mut); margin-top: 2px; max-width: 70ch; }
-.topbar .grow { flex: 1; min-width: 0; }
+.topbar .grow { flex: 1 1 260px; min-width: 0; }
 .menu-btn { display: none; }
 
-.pill {
-  display: flex; align-items: center; gap: 9px; padding: 6px 12px 6px 10px;
-  border-radius: 20px; background: var(--sheet); border: 1px solid var(--line); font-size: 13px;
+.gauge { position: relative; width: 150px; height: 88px; flex: none; }
+.gauge-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.gauge-track, .gauge-arc { fill: none; stroke-width: 9; stroke-linecap: round; }
+.gauge-track { stroke: var(--well); }
+.gauge-arc {
+  stroke: var(--accent-electric); stroke-dasharray: 0 100;
+  transition: stroke-dasharray .35s ease, stroke .2s ease; filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.45));
 }
-.topbar-track { width: 84px; height: 5px; border-radius: 3px; background: var(--well); overflow: hidden; }
-.topbar-fill { height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width .25s ease; }
-.topbar-fill.done { background: var(--ok); }
-.topbar-fill.error { background: var(--err); }
+.gauge-arc.done { stroke: var(--ok-sage); filter: none; }
+.gauge-arc.error { stroke: var(--danger-crimson); filter: none; }
+.gauge-text { position: absolute; left: 0; right: 0; bottom: 2px; display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.gauge-phase, .gauge-sub { font-size: 11px; color: var(--mut); }
+.gauge-text b { font: 600 22px/1.1 var(--font-display); }
+
+.hero .progress-card { flex: 1 1 340px; max-width: 520px; min-width: 0; margin: 0; padding: 0; background: none; border: 0; gap: 8px; }
+.hero .progress-header { flex-direction: column; align-items: stretch; gap: 8px; }
+.hero .progress-task { min-width: 0; }
+.hero #progress-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hero .progress-track { height: 4px; }
 
 main { padding: 8px 32px 96px; max-width: 1480px; }
 .panel { display: none; }
@@ -843,7 +849,8 @@ body.has-picks .pick { opacity: 1; }
   body.nav-open .side { transform: none; }
   body.nav-open::after { content: ""; position: fixed; inset: 0; z-index: 65; background: var(--scrim); }
   .menu-btn { display: inline-grid; }
-  .topbar, main { padding-left: 18px; padding-right: 18px; }
+  main { padding-left: 18px; padding-right: 18px; }
+  .topbar { margin: 12px 18px 4px; padding: 14px 18px; }
   .topbar h1 { font-size: 23px; }
   .split { grid-template-columns: 1fr; }
   .burstlist { position: static; max-height: 260px; }
@@ -865,8 +872,8 @@ body.has-picks .pick { opacity: 1; }
 /* C8: phone-width canvas refinements. The photo grid needs no rule here: it
    auto-fills --thumb-min, which the virtual grid reads from computed CSS. */
 @media (max-width: 640px) {
-  .topbar, main { padding-left: 14px; padding-right: 14px; }
-  .topbar { flex-wrap: wrap; gap: 10px; }
+  main { padding-left: 14px; padding-right: 14px; }
+  .topbar { margin: 10px 14px 4px; padding: 12px 14px; gap: 10px; border-radius: 22px; }
   .topbar h1 { font-size: 20px; }
   .sect { padding: 16px 16px; }
   .step { padding: 16px; }

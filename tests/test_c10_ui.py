@@ -122,3 +122,53 @@ def test_reset_restores_button_markup_not_plain_text():
         "restoring plain text would wipe the dock button icon and casing"
     )
     assert "innerHTML = saved" in js
+
+
+# ------------------------------------------------------------------ hero header and gauge
+
+def _hero(html: str) -> str:
+    m = re.search(r'<header class="topbar hero">(.*?)</header>', html, re.DOTALL)
+    assert m, '<header class="topbar hero"> not found'
+    return m.group(1)
+
+
+def test_progress_card_lives_in_the_hero_and_keeps_error_text():
+    hero = _hero(_html())
+    assert 'id="progress-card"' in hero, "progress card must sit inside the hero header"
+    assert 'id="progress-msg"' in hero, "errors render in #progress-msg, which must stay visible"
+    assert 'id="btn-stop-progress"' in hero, "Stop button must move with the card"
+    assert _html().count('id="progress-card"') == 1, "progress card must not be duplicated"
+
+
+def test_hero_gauge_is_an_accessible_progressbar():
+    hero = _hero(_html())
+    tag = re.search(r'<div[^>]*id="hero-gauge"[^>]*>', hero)
+    assert tag, "#hero-gauge not found in the hero"
+    for needle in ('role="progressbar"', "aria-valuemin", "aria-valuemax", "aria-valuenow", "aria-label", "hidden"):
+        assert needle in tag.group(0), f"gauge needs {needle}"
+    assert 'id="gauge-arc"' in hero and 'pathLength="100"' in hero
+
+
+def test_old_topbar_pill_is_gone_everywhere():
+    for name, text in (("html", _html()), ("js", _js())):
+        for stale in ("topbar-progress", "btn-stop-topbar", "topbar-fill", "topbar-spinner", "topbar-status-icon"):
+            assert stale not in text, f"{stale} still referenced in {name}"
+    assert "topbar-track" not in _css() and "topbar-fill" not in _css()
+
+
+def test_render_progress_drives_the_gauge_and_hides_it_when_idle():
+    js = _js()
+    assert 'show($("#hero-gauge"), visible)' in js, "gauge must hide when no task is visible"
+    assert "gauge-arc" in js and "aria-valuenow" in js
+    assert re.search(r"Phase\\s\+\\d\+", js), "phase label must be parsed from the progress message"
+
+
+def test_gauge_css_and_hero_is_not_sticky():
+    css = _css()
+    arc = re.search(r"(?m)^\.gauge-arc\s*\{([^}]*)\}", css)
+    assert arc and "stroke-dasharray" in arc.group(1) and "transition" in arc.group(1)
+    assert re.search(r"prefers-reduced-motion:\s*reduce\)\s*\{[^@]*transition-duration:\s*\.001ms", css), (
+        "the blanket reduced-motion rule must cover the gauge transition"
+    )
+    topbar = re.search(r"\.topbar\s*\{([^}]*)\}", css)
+    assert topbar and "position: sticky" not in topbar.group(1), "the hero card scrolls with the page"

@@ -1889,7 +1889,6 @@
 
   function renderProgress(p) {
     const card = $("#progress-card");
-    const topbar = $("#topbar-progress");
     const show = (el, on) => { if (el) el.hidden = !on; };
     const done = !p.active && !p.error && !p.stopped && p.percent === 100;
     const bad = !p.active && !!p.error;
@@ -1899,13 +1898,12 @@
     // C8: the equalizer spectrum (M5 CSS) animates only while #progress-card
     // is .active, so gate the eq-pulse keyframes on the live running state.
     card.classList.toggle("active", p.active);
-    show(topbar, visible);
+    show($("#hero-gauge"), visible);
     if (!visible) return;
     const pct = p.active ? Math.max(num(p.percent), 4) : 100;
     const cls = p.active ? "active" : (bad || stopped ? "error" : "done");
     show($("#progress-spinner"), p.active);
-    show($("#topbar-spinner"), p.active);
-    [$("#progress-status-icon"), $("#topbar-status-icon")].forEach((e) => {
+    [$("#progress-status-icon")].forEach((e) => {
       if (!e) return;
       e.hidden = p.active;
       e.innerHTML = icon(bad || stopped ? "alert" : "check", "sm");
@@ -1923,12 +1921,18 @@
     // C8: live tabular ratio (e.g. "135 / 3,194"); empty when there's no total,
     // which the :empty CSS rule uses to hide the element.
     $("#progress-ratio").textContent = p.total > 0 ? `${fmtN(p.done)} / ${fmtN(p.total)}` : "";
-    $("#topbar-progress-text").textContent = `${p.task || "Task"} ${bad ? "failed" : (stopped ? "stopped" : num(p.percent) + "%")}`;
-    $("#topbar-fill").className = "topbar-fill " + (p.active ? "" : cls);
-    $("#topbar-fill").style.width = pct + "%";
+    // Gauge: the arc is 100 units long (pathLength), so the dash length is the percent.
+    const gaugePct = p.active ? Math.max(num(p.percent), 2) : (done ? 100 : Math.max(num(p.percent), 0));
+    const phase = (String(p.message || "").match(/Phase\s+\d+\s*\/\s*\d+/i) || [""])[0];
+    const gauge = $("#hero-gauge");
+    gauge.setAttribute("aria-valuenow", String(Math.round(gaugePct)));
+    $("#gauge-arc").style.strokeDasharray = `${gaugePct} 100`;
+    $("#gauge-arc").setAttribute("class", "gauge-arc " + cls);
+    $("#gauge-phase").textContent = bad ? "Error" : (stopped ? "Stopped" : (phase || p.task || "Working"));
+    $("#gauge-pct").textContent = bad || stopped ? "-" : `${num(p.percent)}%`;
 
     const isBusy = p.active || p.busy;
-    [$("#btn-stop-progress"), $("#btn-stop-topbar")].forEach((btn) => {
+    [$("#btn-stop-progress")].forEach((btn) => {
       if (!btn) return;
       btn.style.display = isBusy ? "inline-flex" : "none";
       if (p.stopping) {
@@ -2404,7 +2408,7 @@
   }
 
   async function stopProcess() {
-    const btns = [$("#btn-stop-progress"), $("#btn-stop-topbar")];
+    const btns = [$("#btn-stop-progress")];
     btns.forEach((b) => {
       if (b) {
         b.disabled = true;
@@ -2799,7 +2803,6 @@
     $("#btn-save-settings").onclick = saveSettings;
     $("#btn-reset-settings").onclick = () => { renderSettings(); };
     $("#btn-stop-progress").onclick = stopProcess;
-    $("#btn-stop-topbar").onclick = stopProcess;
     const btnResetLib = $("#btn-reset-library");
     if (btnResetLib) btnResetLib.onclick = resetLibrary;
     const btnImportReset = $("#btn-import-reset");

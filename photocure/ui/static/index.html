@@ -102,23 +102,19 @@
     </aside>
 
     <div class="content">
-      <header class="topbar">
+      <header class="topbar hero">
         <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open menu"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
         <div class="grow">
           <h1 id="page-title">Import</h1>
           <div class="sub" id="page-sub"></div>
         </div>
-        <button id="header-version-badge" class="version-pill" type="button" title="Click to view About Photocure" data-goto="settings"></button>
-        <div id="topbar-progress" class="pill" hidden role="status">
-          <span class="spinner" id="topbar-spinner"></span>
-          <span id="topbar-status-icon" hidden></span>
-          <span id="topbar-progress-text">Working</span>
-          <button id="btn-stop-topbar" class="stop-btn" title="Stop current process" style="display:none;margin-left:8px">Stop</button>
-          <div class="topbar-track"><div id="topbar-fill" class="topbar-fill"></div></div>
+        <div id="hero-gauge" class="gauge" hidden role="progressbar" aria-label="Overall progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <svg class="gauge-svg" viewBox="0 0 120 70" aria-hidden="true">
+            <path class="gauge-track" d="M10 62 A50 50 0 0 1 110 62" pathLength="100"/>
+            <path id="gauge-arc" class="gauge-arc" d="M10 62 A50 50 0 0 1 110 62" pathLength="100"/>
+          </svg>
+          <div class="gauge-text"><span id="gauge-phase" class="gauge-phase">Working</span><b id="gauge-pct">0%</b><span class="gauge-sub">Overall</span></div>
         </div>
-      </header>
-
-      <main id="main">
         <div id="progress-card" class="progress-card" hidden>
           <div class="progress-header">
             <div class="progress-task">
@@ -142,7 +138,10 @@
             <span id="progress-counts"></span>
           </div>
         </div>
+        <button id="header-version-badge" class="version-pill" type="button" title="Click to view About Photocure" data-goto="settings"></button>
+      </header>
 
+      <main id="main">
         <!-- IMPORT -->
         <section id="tab-library" class="panel active">
           <div class="banner-host"></div>
