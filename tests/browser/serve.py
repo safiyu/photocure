@@ -71,8 +71,37 @@ def seed(root: Path, n: int) -> dict:
                                   x1=0.2, y1=0.2, x2=0.8, y2=0.8, eye_closed_score=0.9 if blink else 0.05,
                                   eye_status="closed" if blink else "open", is_blink=blink, face_sharpness=300))
         bg.best_shot_id = ids[BURST[0]]
+        _seed_features(s, paths)
     return {"n": n, "lib": str(lib), "foreign": paths[FOREIGN].name, "burst_photos": [paths[i].name for i in BURST],
             "burst_id": 1}
+
+
+def _seed_features(s, paths) -> None:
+    """Data for the search, highlights, duplicates and event views."""
+    import numpy as np
+    from sqlmodel import select
+
+    from photocure.db import models as M
+    from photocure.db.repository import quantize_embedding
+
+    def rec(i):
+        return s.exec(select(M.ImageRecord).where(M.ImageRecord.filename == paths[i].name)).one()
+
+    exact_a, exact_b = rec(300), rec(301)           # identical files
+    exact_a.sha256 = exact_b.sha256 = "sha-identical-pair"
+    keeper, lookalike = rec(400), rec(401)          # a look-alike pair
+    lookalike.near_dup_of = keeper.id
+    ev = M.EventGroup(label="Seaside", start=rec(500).taken_at, end=rec(509).taken_at, image_count=10)
+    s.add(ev)
+    s.flush()
+    for k, i in enumerate(range(500, 510)):         # ten scored photos, best first
+        r = rec(i)
+        r.event_id = ev.id
+        vec = np.zeros(512, dtype=np.float32)
+        vec[k] = 1.0
+        s.add(M.SemanticScore(image_id=r.id, backend="clip", top1_category="scenery",
+                              aesthetic=round(0.90 - 0.04 * k, 2), embedding=quantize_embedding(vec.tolist())))
+    s.flush()
 
 
 def main() -> None:

@@ -134,6 +134,22 @@ class SemanticEngine:
             return _stub_text_features(self.taxonomy)
         return self._text_features.detach().cpu().numpy().astype(np.float32)
 
+    def text_search_available(self) -> bool:
+        """True when a real CLIP text tower is loaded (the placeholder has none)."""
+        self._ensure_loaded()
+        return (self.bs.semantic_backend == "clip"
+                and self._model is not None and self._model != "stub")
+
+    def encode_queries(self, texts: Sequence[str]) -> np.ndarray:
+        """Raw CLIP text features ``(len(texts), 512)``; callers normalize and pool."""
+        import torch
+        self._ensure_loaded()
+        tok = self._tokenize(list(texts)).to(self._device)
+        ctx = self._autocast or torch.autocast(device_type="cpu", enabled=False)
+        with torch.no_grad(), ctx:
+            feats = self._model.encode_text(tok)
+        return feats.float().cpu().numpy()
+
     def release(self) -> None:
         self._model = None
         self._text_features = None

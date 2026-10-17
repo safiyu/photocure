@@ -237,6 +237,8 @@ class CuratorConfig(BaseSettings):
     # read-only library mount.
     write_sidecars: bool = True
     sidecar_debounce_seconds: float = 1.5  # (tune) wait this long after the last change, then write
+    # Watch mode: a new file is scanned once it has been quiet for this many seconds.
+    watch_debounce_seconds: float = 2.0
     # Offline reverse geocoding of GPS positions (needs photocure[geo]).
     geocode: bool = True
     geocode_batch: int = 500

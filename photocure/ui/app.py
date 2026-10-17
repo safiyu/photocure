@@ -8,6 +8,16 @@ Endpoints:
     GET  /api/stats | /api/progress | /api/plan
     GET  /api/images                       filtered + paginated listing
     GET  /api/images/{id}/similar          embedding neighbours
+    GET  /api/search?q=                    natural-language search over embeddings
+    GET  /api/highlights/events | /years   best of each event, years with scored photos
+    GET  /api/highlights/export            year in review as a self-contained HTML page
+    GET  /api/features  POST /api/features highlight weights, keyword export, watch folder
+    GET  /api/duplicates                   exact and near duplicate groups with a suggested keeper
+    GET  /api/keywords  POST /api/keywords/write   XMP keyword export (background job)
+    GET  /api/watch  POST /api/watch       follow a folder: scan, analyse and file new photos
+    POST /api/duplicates/resolve | /dismiss | /resolve-all
+    GET  /api/preferences                  taste model status
+    POST /api/preferences/learn | /reset   train the taste model from ratings, or forget it
     GET  /thumbnail/{id}?tier=&v=          cached WebP thumbnail (micro, medium, preview)
     GET  /api/bursts | /api/burst/{id}
     GET  /api/events                       clusters
@@ -357,6 +367,7 @@ def _item(r: M.ImageRecord, cfg: CuratorConfig | None = None) -> dict:
         "top1_score": round(sem.top1_score, 3) if sem else None,
         "margin": round(sem.score_margin, 3) if sem else None,
         "aesthetic": round(sem.aesthetic, 3) if sem and sem.aesthetic is not None else None,
+        "preference": round(sem.preference, 3) if sem and sem.preference is not None else None,
         "quality_score": round(qm.quality_score, 3) if qm else None,
         "is_blurry": bool(qm.is_blurry) if qm else False,
         "is_too_dark": bool(qm.is_too_dark) if qm else False,
@@ -405,6 +416,25 @@ class RejectReq(BaseModel):
 
 class FavoriteReq(BaseModel):
     favorite: bool | None = None  # omitted: toggle
+
+
+class WatchReq(BaseModel):
+    enabled: bool
+    path: str | None = None
+
+
+class KeywordsReq(BaseModel):
+    remove: bool = False
+
+
+class DupResolveReq(BaseModel):
+    keep_id: int
+    discard_ids: list[int] = Field(min_length=1, max_length=500)
+    kind: Literal["exact", "near"]
+
+
+class DupDismissReq(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
 
 
 class MkdirReq(BaseModel):
@@ -471,6 +501,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
     app.state.progress = progress_mgr
     jobs: dict[str, dict] = {}
     app.state.jobs = jobs
+    encoder_lock = threading.Lock()
+    from ..watch_service import WatchService
 
     def req_cfg() -> CuratorConfig:
         return app.state.cfg.model_copy(deep=True)
@@ -862,6 +894,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
         need_sem = highlights or min_aesthetic is not None
         if need_sem:
             conds.append(M.SemanticScore.aesthetic.is_not(None))
+        if highlights:
+            from ..highlights import candidate_filters
+            conds.extend(candidate_filters())
         if min_aesthetic is not None:
             conds.append(M.SemanticScore.aesthetic >= min_aesthetic)
 
@@ -875,15 +910,224 @@ def create_app(db_path: str | None = None) -> FastAPI:
         with get_session(dbp) as s:
             total = s.exec(apply(select(func.count()).select_from(I))).one()
             if highlights:
-                order = [M.SemanticScore.aesthetic.desc(), I.id]
-            elif sort == "taken":
-                order = [I.taken_at.asc().nulls_last(), I.id]
-            else:
-                order = [I.id]
+                from ..highlights import highlight_expr
+                expr = highlight_expr(hl_weights())
+                ranked = s.exec(apply(select(I.id, expr)).order_by(expr.desc(), I.id)
+                                .offset(offset).limit(limit)).all()
+                ids = [i for i, _ in ranked]
+                items = _load_items(s, list(ids), app.state.cfg)
+                hl = {int(i): float(v) for i, v in ranked}
+                for it in items:
+                    it["highlight"] = round(hl.get(it["id"], 0.0), 3)
+                return {"total": int(total), "offset": offset, "limit": limit, "items": items}
+            order = [I.taken_at.asc().nulls_last(), I.id] if sort == "taken" else [I.id]
             ids = s.exec(apply(select(I.id)).order_by(*order)
                          .offset(offset).limit(limit)).all()
             return {"total": int(total), "offset": offset, "limit": limit,
                     "items": _load_items(s, list(ids), app.state.cfg)}
+
+    def hl_weights():
+        from ..features import load_features
+        from ..highlights import HighlightWeights
+        return HighlightWeights.from_features(load_features(dbp))
+
+    @app.get("/api/features")
+    def get_features():
+        from ..features import DEFAULTS, load_features
+        return {"features": load_features(dbp), "defaults": dict(DEFAULTS)}
+
+    @app.post("/api/features", dependencies=auth)
+    def post_features(payload: dict = Body(...)):
+        from ..features import DEFAULTS, save_features
+        try:
+            saved = save_features(dbp, payload)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {"features": saved, "defaults": dict(DEFAULTS)}
+
+    def near_cosine() -> float:
+        return float(getattr(app.state.cfg.taxonomy, "near_dup_min_cosine", 0.93))
+
+    @app.get("/api/duplicates")
+    def get_duplicates(kind: Literal["exact", "near"] | None = Query(None),
+                       limit: int = Query(30, ge=1, le=200), offset: int = Query(0, ge=0),
+                       reviewed: bool = Query(False)):
+        from .. import duplicates as dups
+        with get_session(dbp) as s:
+            found = dups.find_groups(s, include_reviewed=True, near_min_cosine=near_cosine())
+            everything = [g for g in found if (kind is None or g["kind"] == kind)
+                          and (reviewed or not g["reviewed"])]
+            page = everything[offset:offset + limit]
+            items = {it["id"]: it for it in _load_items(
+                s, [m["id"] for g in page for m in g["members"]], app.state.cfg)}
+            for g in page:
+                for m in g["members"]:
+                    m["item"] = items.get(m["id"])
+            return {"summary": dups.summarize([g for g in found if not g["reviewed"]]),
+                    "total": len(everything), "offset": offset, "limit": limit, "groups": page}
+
+    @app.post("/api/duplicates/resolve", dependencies=auth)
+    def resolve_duplicates(body: DupResolveReq):
+        from .. import duplicates as dups
+        with exclusive(), get_session(dbp) as s:
+            try:
+                result = dups.resolve_group(s, body.keep_id, body.discard_ids, body.kind)
+            except LookupError as e:
+                raise HTTPException(404, str(e))
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            s.flush()
+            return {"result": result, "summary": dups.summary(s, near_cosine())}
+
+    @app.post("/api/duplicates/dismiss", dependencies=auth)
+    def dismiss_duplicates(body: DupDismissReq):
+        from .. import duplicates as dups
+        with exclusive(), get_session(dbp) as s:
+            cut = dups.dismiss_near(s, body.ids)
+            return {"result": {"unlinked": cut}, "summary": dups.summary(s, near_cosine())}
+
+    @app.post("/api/duplicates/resolve-all", dependencies=auth)
+    def resolve_all_duplicates(payload: dict = Body(default={})):
+        from .. import duplicates as dups
+        with exclusive(), get_session(dbp) as s:
+            result = dups.resolve_all(s, near_cosine())
+            return {"result": result, "summary": dups.summary(s, near_cosine())}
+
+    def watch_process(c: CuratorConfig) -> dict:
+        res = do_infer(c, InferReq())
+        routed = make_planner(c).route_new()
+        return {"processed": res.get("processed", 0) if isinstance(res, dict) else 0, "routed": routed}
+
+    app.state.watch = WatchService(dbp, lambda: run_cfg(None), busy=_BUSY, process_fn=watch_process,
+                                   debounce_s=cfg.watch_debounce_seconds,
+                                   on_cancel=progress_mgr.request_stop)
+
+    @app.get("/api/watch")
+    def get_watch():
+        return app.state.watch.status()
+
+    @app.post("/api/watch", dependencies=auth)
+    def set_watch(body: WatchReq):
+        from ..features import load_features, save_features
+        if not body.enabled:
+            app.state.watch.stop()  # if an analysis is still winding down, the status says "stopping"
+            save_features(dbp, {"watch_enabled": False})
+            return app.state.watch.status()
+        path = (body.path or load_features(dbp)["watch_path"]).strip()
+        if not path:
+            raise HTTPException(400, "Choose a folder to watch.")
+        try:
+            status = app.state.watch.start(path)
+        except FileNotFoundError as e:
+            raise HTTPException(400, str(e))
+        except RuntimeError as e:
+            raise HTTPException(409, str(e))
+        save_features(dbp, {"watch_enabled": True, "watch_path": status["path"]})
+        return status
+
+    @app.get("/api/keywords")
+    def keywords_status():
+        from ..features import load_features
+        with get_session(dbp) as s:
+            photos = s.exec(select(func.count()).select_from(M.ImageRecord)
+                            .where(M.ImageRecord.scan_status != "missing")).one()
+        return {"enabled": bool(load_features(dbp)["write_keywords"]),
+                "sidecars": bool(app.state.cfg.write_sidecars), "photos": int(photos)}
+
+    @app.post("/api/keywords/write", dependencies=auth, status_code=202)
+    def write_keywords(body: KeywordsReq = KeywordsReq()):
+        """Write, or remove, Photocure keywords in the XMP sidecars (background job)."""
+        from .. import keywords as kw
+        if not app.state.cfg.write_sidecars:
+            raise HTTPException(400, "Sidecar writing is turned off in the settings.")
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+
+        def work(job: dict) -> dict:
+            verb = "Removing" if body.remove else "Writing"
+            progress_mgr.start("Keywords", f"{verb} keywords in XMP sidecars", 0, "Starting...")
+            jlog(job, f"{verb.lower()} keywords")
+
+            def on_prog(done, total):
+                progress_mgr.update(done, total, f"{verb} keywords", detail=f"{done} / {total}")
+
+            try:
+                res = kw.write_all(dbp, app.state.cfg, keywords=not body.remove,
+                                   io_lock=app.state.sidecars.io_lock, on_progress=on_prog,
+                                   cancel_check=progress_mgr.is_stopped)
+            except Exception as e:
+                progress_mgr.error(str(e))
+                raise
+            if res.get("cancelled"):
+                progress_mgr.stop("Keyword export stopped by user")
+            else:
+                progress_mgr.finish(f"Keywords done: {res['written']} sidecars updated")
+            jlog(job, f"{res['written']} updated, {res['edited_elsewhere']} left alone "
+                      f"because another program edited them")
+            return {"ok": True, **res}
+
+        job = spawn("keywords", work)
+        return {"ok": True, "job_id": job["id"]}
+
+    @app.get("/api/preferences")
+    def get_preferences():
+        from ..inference.preference import status
+        with get_session(dbp) as s:
+            return status(s)
+
+    @app.post("/api/preferences/learn", dependencies=auth)
+    def learn_preferences():
+        from ..inference import preference as pref
+        with exclusive(), get_session(dbp) as s:
+            res = pref.train_preferences(s)
+            st = pref.status(s)
+        return {"status": res.status, "n_positive": res.n_positive,
+                "n_negative": res.n_negative, "cv_accuracy": round(res.cv_accuracy, 3),
+                "scored": res.scored, "preferences": st}
+
+    @app.post("/api/preferences/reset", dependencies=auth)
+    def reset_preferences():
+        from ..inference import preference as pref
+        with exclusive(), get_session(dbp) as s:
+            pref.reset_preferences(s)
+            return pref.status(s)
+
+    @app.get("/api/highlights/events")
+    def highlights_by_event(per_event: int = Query(1, ge=1, le=12),
+                            min_score: float | None = Query(None, ge=0, le=2)):
+        from ..highlights import best_of_events
+        with get_session(dbp) as s:
+            events = best_of_events(s, hl_weights(), per_event, min_score)
+            items = {it["id"]: it for it in _load_items(
+                s, [i for e in events for i, _ in e["items"]], app.state.cfg)}
+            out = []
+            for e in events:
+                row_items = []
+                for image_id, score in e["items"]:
+                    if image_id in items:
+                        row_items.append({**items[image_id], "highlight": round(score, 3)})
+                out.append({"event_id": e["event_id"], "label": e["label"],
+                            "start": e["start"].isoformat() if e["start"] else None,
+                            "end": e["end"].isoformat() if e["end"] else None,
+                            "total": e["total"], "count": len(row_items), "items": row_items})
+        return {"events": out}
+
+    @app.get("/api/highlights/years")
+    def highlight_years():
+        from ..highlights import years_available
+        with get_session(dbp) as s:
+            return {"years": [{"year": y, "count": c} for y, c in years_available(s)]}
+
+    @app.get("/api/highlights/export")
+    def highlights_export(year: int = Query(..., ge=1800, le=9999), n: int = Query(50, ge=1, le=500)):
+        from ..highlights import export_html, top_of_year
+        with get_session(dbp) as s:
+            ranked = top_of_year(s, hl_weights(), year, n)
+            if not ranked:
+                raise HTTPException(404, f"No scored photos from {year}.")
+            page = export_html(s, ranked, f"Best of {year}")
+        return Response(page, media_type="text/html; charset=utf-8", headers={
+            "Content-Disposition": f'attachment; filename="highlights-{year}.html"'})
 
     @app.get("/api/facets")
     def facets():
@@ -965,6 +1209,29 @@ def create_app(db_path: str | None = None) -> FastAPI:
             for it in items:
                 it["score"] = round(score.get(it["id"], 0.0), 4)
             return {"id": image_id, "items": items}
+
+    @app.get("/api/search")
+    def search_photos(q: str = Query(..., max_length=300), k: int = Query(60, ge=1, le=300),
+                      duplicates: bool = Query(False)):
+        from .. import search as search_mod
+        text = " ".join(q.split())
+        if not text:
+            raise HTTPException(400, "Type what you are looking for.")
+        with encoder_lock:  # two cold searches must not each load a CLIP text tower
+            encoder = getattr(app.state, "text_encoder", None)
+            if encoder is None:
+                encoder = app.state.text_encoder = search_mod.default_encoder(run_cfg())
+        try:
+            vec = encoder.encode(text)
+        except search_mod.SearchUnavailable as e:
+            raise HTTPException(503, str(e))
+        with get_session(dbp) as s:
+            pairs = search_mod.search_embeddings(s, vec, k, include_duplicates=duplicates)
+            items = _load_items(s, [i for i, _ in pairs], app.state.cfg)
+            score = dict(pairs)
+            for it in items:
+                it["score"] = round(float(score.get(it["id"], 0.0)), 4)
+        return {"query": text, "items": items}
 
     @app.get("/thumbnail/{image_id}")
     def thumbnail(image_id: int, tier: Literal["micro", "medium", "preview"] = Query("micro"),
@@ -1800,10 +2067,22 @@ def create_app(db_path: str | None = None) -> FastAPI:
             logging.getLogger("photocure.ui").warning(
                 "incomplete transaction %s (%d pending actions) from an unexpected shutdown",
                 t["transaction_id"], t["pending_actions"])
+        from ..features import load_features
+        saved = load_features(dbp)
+        if saved["watch_enabled"] and saved["watch_path"]:
+            try:
+                app.state.watch.start(saved["watch_path"])
+            except FileNotFoundError as e:
+                logging.getLogger("photocure.ui").warning("watched folder not resumed: %s", e)
+                app.state.watch.note_failure(saved["watch_path"], str(e))
 
     @app.on_event("shutdown")
     async def shutdown_event():
+        app.state.watch.stop()
         app.state.sidecars.close()  # write anything still waiting out its debounce
+        encoder = getattr(app.state, "text_encoder", None)
+        if encoder is not None:
+            encoder.close()
         _pid_file(cfg.port).unlink(missing_ok=True)
 
     @app.get("/", response_class=HTMLResponse)

@@ -45,7 +45,7 @@ from ..db.repository import PhotoRepository, quantize_embedding
 from ..db.session import get_session
 from ..quality.engine import QualityEngine
 from ..quality.image_loader import load_image
-from .aesthetic import get_head
+from .aesthetic import get_head, sync_aesthetic
 from .backends import (
     BackendState,
     detect_backend,
@@ -55,6 +55,7 @@ from .backends import (
 )
 from ..clustering.blinks import classify_group
 from .face_engine import FaceEngine
+from .preference import apply_preferences
 from .semantic_engine import SemanticEngine
 
 log = logging.getLogger("photocure.pipeline")
@@ -77,6 +78,8 @@ class InferResult:
     skipped_already_inferred: int = 0
     reanalyzed_stub: int = 0
     faces_redone: int = 0
+    aesthetic_synced: int = 0
+    preference_scored: int = 0
     oom_retries: int = 0
     errors: list = field(default_factory=list)
 
@@ -210,6 +213,10 @@ class InferencePipeline:
                     log.info("re-analysing %d photos first scored by the stub",
                              result.reanalyzed_stub)
                     session.commit()
+            # Scores from another head, or placeholder scores, are brought in line first.
+            result.aesthetic_synced = sync_aesthetic(session)
+            if result.aesthetic_synced:
+                session.commit()
             pending = self._select_records(repo, only_paths, retry_failed, limit)
 
             todo: list[ImageRecord] = []
@@ -295,6 +302,9 @@ class InferencePipeline:
                 self._phase_b(repo, chunks, result, _decode, _on_oom, on_progress,
                               progress, tasks, total_steps, len(todo),
                               cancel_check=cancel_check)
+                # New photos get their personal taste score from the active model, if any.
+                result.preference_scored = apply_preferences(session, only_missing=True)
+                session.commit()
                 if on_progress:
                     on_progress(total_steps, total_steps,
                                 f"Inference complete: {result.processed} processed")
@@ -437,6 +447,9 @@ class InferencePipeline:
                         emb = sem.embedding or []
                         # Read after classify: the engine may have fallen back to stub.
                         backend_name = "clip" if self.bs.semantic_backend == "clip" else "stub"
+                        # Placeholder embeddings and the stub head carry no aesthetic signal.
+                        aesthetic = (head.score(emb) if backend_name == "clip" and not head.stub
+                                     and len(emb) == head.w.shape[0] else None)
                         repo.upsert_semantic(SemanticScore(
                             image_id=fr.image_id,
                             model_name=(self.cfg.taxonomy.clip_model_name
@@ -449,7 +462,8 @@ class InferencePipeline:
                             score_margin=sem.margin,
                             distribution=_json_sem(sem.distribution),
                             embedding=quantize_embedding(emb),
-                            aesthetic=head.score(emb) if len(emb) == head.w.shape[0] else None,
+                            aesthetic=aesthetic,
+                            aesthetic_model=head.name if aesthetic is not None else "",
                         ))
                         rec.infer_status = "inferred"
                         result.quality_computed += 1

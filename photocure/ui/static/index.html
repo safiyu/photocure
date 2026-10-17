@@ -70,6 +70,7 @@
         <div class="navgroup" style="margin-top:18px">
           <h2>Browse</h2>
           <button class="tab navitem" data-tab="categories"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span>Library</span><em class="count" data-count="categories"></em></button>
+          <button class="tab navitem" data-tab="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span>Search</span><em class="count"></em></button>
           <button class="tab navitem" data-tab="bursts"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span>Bursts</span><em class="count" data-count="bursts"></em></button>
           <button class="tab navitem" data-tab="highlights"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg><span>Highlights</span><em class="count"></em></button>
           <button class="tab navitem" data-tab="events"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg><span>Events</span><em class="count"></em></button>
@@ -77,6 +78,7 @@
         <div class="navgroup" style="margin-top:18px">
           <h2>Review</h2>
           <button class="tab navitem" data-tab="uncertain"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><span>Needs a look</span><em class="count" data-count="uncertain"></em></button>
+          <button class="tab navitem" data-tab="duplicates"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>Duplicates</span><em class="count" data-count="duplicates"></em></button>
           <button class="tab navitem" data-tab="junk"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Junk</span><em class="count" data-count="junk"></em></button>
           <button class="tab navitem" data-tab="actions"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg><span>Apply and undo</span><em class="count" data-count="actions"></em></button>
         </div>
@@ -239,6 +241,10 @@
             </div>
           </div>
           <p id="library-status" class="muted dock-status">Choose a folder, then run all three steps. Nothing is moved until you apply a plan.</p>
+          <div class="watchbar">
+            <label class="toggle"><input type="checkbox" id="watch-toggle">Keep watching this folder for new photos</label>
+            <span id="watch-status" class="muted" role="status"></span>
+          </div>
 
           <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity</h2>
           <div id="library-log" class="action-log"><div class="logline">Nothing has run yet.</div></div>
@@ -287,12 +293,43 @@
           <div id="grid-more" class="loadmore"></div>
         </section>
 
+        <!-- SEARCH -->
+        <section id="tab-search" class="panel">
+          <form id="search-form" class="toolbar" role="search">
+            <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+              <input id="searchq" type="search" maxlength="300" autocomplete="off"
+                     placeholder="Describe a photo, like dog on the beach" aria-label="Describe the photo you are looking for"></div>
+            <button class="btn primary" type="submit">Search</button>
+            <label class="toggle"><input type="checkbox" id="search-dups">Include duplicates</label>
+            <span class="grow"></span>
+            <span id="searchcount" class="rowcount" role="status"></span>
+          </form>
+          <div id="searchgrid" class="grid"></div>
+        </section>
+
         <!-- BURSTS -->
         <section id="tab-bursts" class="panel">
           <div class="split">
             <div id="burstlist" class="burstlist"></div>
             <div id="burstdetail" class="detail"></div>
           </div>
+        </section>
+
+        <!-- DUPLICATES -->
+        <section id="tab-duplicates" class="panel">
+          <div class="toolbar">
+            <select id="dup-kind" aria-label="Type of duplicate">
+              <option value="">All duplicates</option>
+              <option value="exact">Identical files</option>
+              <option value="near">Look-alikes</option>
+            </select>
+            <label class="toggle"><input type="checkbox" id="dup-reviewed">Show decided groups</label>
+            <button id="btn-dup-all" class="btn" type="button">Keep the suggested photo in every group</button>
+            <span class="grow"></span>
+            <span id="dup-summary" class="rowcount" role="status"></span>
+          </div>
+          <div id="dup-list" class="dup-list"></div>
+          <div class="loadmore"><button id="btn-dup-more" class="btn" type="button" hidden>Show more groups</button></div>
         </section>
 
         <!-- JUNK -->
@@ -333,12 +370,42 @@
         <!-- HIGHLIGHTS -->
         <section id="tab-highlights" class="panel">
           <div class="toolbar">
-            <label class="inline-num">Minimum score <input id="minaes" type="number" step="0.1" placeholder="any"></label>
+            <select id="hl-view" aria-label="Show">
+              <option value="all">All photos, best first</option>
+              <option value="events">Best of each event</option>
+            </select>
+            <label class="inline-num" title="Filters on the AI appeal score, in both views">Minimum appeal <input id="minaes" type="number" step="0.1" placeholder="any"></label>
+            <select id="hl-year" aria-label="Year in review"><option value="">Year in review</option></select>
+            <button id="btn-hl-export" class="btn" type="button" disabled>Download page</button>
             <span class="grow"></span>
             <span id="highlightcount" class="rowcount"></span>
           </div>
+          <details id="hl-tune" class="sect tune">
+            <summary>Tune the ranking</summary>
+            <p class="lede">Photos are ranked by how appealing the AI finds them. These settings let your own choices count too.</p>
+            <div class="tune-grid">
+              <div class="field"><label for="hl-w-rating">Star ratings <output id="hl-o-rating"></output></label>
+                <input type="range" id="hl-w-rating" min="0" max="0.5" step="0.01" data-feat="highlight_rating_weight">
+                <p class="help">Five stars lift a photo, one star lowers it. Zero ignores stars.</p></div>
+              <div class="field"><label for="hl-w-fav">Favourites <output id="hl-o-fav"></output></label>
+                <input type="range" id="hl-w-fav" min="0" max="0.5" step="0.01" data-feat="highlight_favorite_weight">
+                <p class="help">A flat bonus for every favourite.</p></div>
+              <div class="field"><label for="hl-w-taste">My taste <output id="hl-o-taste"></output></label>
+                <input type="range" id="hl-w-taste" min="0" max="1" step="0.05" data-feat="highlight_preference_weight">
+                <p class="help">How much the taste learned from your ratings counts against the AI's view.</p></div>
+            </div>
+            <div class="taste" id="taste-box">
+              <h3>Learn my taste</h3>
+              <p id="taste-text" class="help" role="status"></p>
+              <div class="btn-row">
+                <button id="btn-taste-learn" class="btn" type="button">Learn from my ratings</button>
+                <button id="btn-taste-reset" class="btn" type="button">Forget what it learned</button>
+              </div>
+            </div>
+          </details>
           <div id="highlightgrid" class="grid"></div>
           <div id="highlightgrid-more" class="loadmore"></div>
+          <div id="hl-events" hidden></div>
         </section>
 
         <!-- EVENTS -->
@@ -488,6 +555,17 @@
             <button id="btn-save-settings" class="btn primary" type="button">Save settings</button>
             <button id="btn-reset-settings" class="btn" type="button">Back to saved</button>
             <span id="settings-msg" class="help" role="status"></span>
+          </div>
+
+          <div class="sect" id="sect-keywords" style="margin-top:28px">
+            <h2>Keywords in sidecar files</h2>
+            <p class="lede">Photocure can add its own keywords to each photo's XMP sidecar: its category, an event name you chose, and Highlight for your best photos. Programs such as digiKam or Lightroom can then search and filter by them. Your ratings and other keywords are never changed.</p>
+            <label class="toggle"><input type="checkbox" id="set-keywords">Add keywords whenever a rating is saved</label>
+            <div class="btn-row" style="margin-top:14px">
+              <button id="btn-kw-write" class="btn" type="button" data-busy>Write keywords for every photo</button>
+              <button id="btn-kw-remove" class="btn" type="button" data-busy>Remove them</button>
+            </div>
+            <p id="kw-note" class="help" style="margin-top:10px" role="status"></p>
           </div>
 
           <div class="sect" style="margin-top:28px">

@@ -479,11 +479,14 @@ def describe_backend(state: BackendState | None = None) -> dict:
     """Plain summary of what will run, for the CLI and the dashboard.
 
     Keys: device, semantic_backend, face_backend, semantic_is_stub, forced_by_env,
-    face_is_fallback, hint, accelerators (see list_accelerators), selected
-    (accelerator id), requested, fallback_reason.
+    face_is_fallback, blink_available, aesthetic_available, aesthetic_model, hint,
+    accelerators (see list_accelerators), selected (accelerator id), requested,
+    fallback_reason.
     """
+    from .aesthetic import get_head
     bs = state or detect_backend()
     stub = bs.semantic_backend == "stub"
+    head = get_head()
     # The model can be installed yet switched off by PCUR_BACKEND, which needs a different fix.
     forced = stub and _force_env() in ("stub", "off") and _have_open_clip()
     if forced:
@@ -503,6 +506,8 @@ def describe_backend(state: BackendState | None = None) -> dict:
         "semantic_is_stub": stub,
         "face_is_fallback": bs.face_backend != "yunet",
         "blink_available": bs.face_backend == "yunet" and _have_mediapipe(),
+        "aesthetic_available": not head.stub,
+        "aesthetic_model": "" if head.stub else head.name,
         "hint": hint,
         "accelerators": list_accelerators(bs.torch, bs.device_index),
         "selected": bs.accelerator,

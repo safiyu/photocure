@@ -236,6 +236,10 @@ class PhotoRepository:
                 if k in ("id", "computed_at"):
                     continue
                 setattr(existing, k, v)
+            # A re-analysis replaces these even when empty, or an old score would outlive its embedding.
+            existing.aesthetic = sem.aesthetic
+            existing.aesthetic_model = sem.aesthetic_model
+            existing.preference = sem.preference
         self.s.flush()
         return sem
 

@@ -23,6 +23,8 @@
   const TITLES = {
     library: ["Import", "Choose a folder and let Photocure sort what it finds."],
     categories: ["Library", "Every photo, grouped by the category it was sorted into."],
+    search: ["Search", "Describe a photo in your own words and Photocure finds it."],
+    duplicates: ["Duplicates", "Identical and look-alike photos. Choose the one to keep in each group."],
     bursts: ["Bursts", "Shots taken seconds apart. The best one of each group is kept."],
     highlights: ["Highlights", "Your most appealing photos first."],
     events: ["Events", "Photos grouped by when and where they were taken."],
@@ -989,6 +991,410 @@
     }
   }
 
+  // ------------------------------------------------------------- highlights
+  const FEAT_OUT = { highlight_rating_weight: "#hl-o-rating", highlight_favorite_weight: "#hl-o-fav",
+    highlight_preference_weight: "#hl-o-taste" };
+
+  async function loadFeatures() {
+    const data = await api("/api/features");
+    state.features = data.features;
+    $$("[data-feat]").forEach((inp) => {
+      inp.value = data.features[inp.dataset.feat];
+      $(FEAT_OUT[inp.dataset.feat]).textContent = num(inp.value).toFixed(2);
+    });
+  }
+
+  async function refreshTaste() {
+    const st = await api("/api/preferences");
+    const t = $("#taste-text");
+    const liked = `${fmtN(st.n_positive)} liked and ${fmtN(st.n_negative)} disliked`;
+    if (st.trained) {
+      t.textContent = `Learned from ${fmtN(st.model_positive)} liked and ${fmtN(st.model_negative)} disliked photos, ` +
+        `about ${Math.round(num(st.cv_accuracy) * 100)}% right on photos it had not seen. ` +
+        `${fmtN(st.scored)} photos have a taste score. Rate more photos, then learn again to refine it.`;
+    } else if (st.can_train) {
+      t.textContent = `Ready to learn from ${liked} photos.`;
+    } else {
+      t.textContent = `So far ${liked} photos. Photocure needs at least ${st.min_per_class} of each. ` +
+        "Favourites and four or five stars count as liked, rejects and one or two stars as disliked.";
+    }
+    $("#btn-taste-learn").disabled = !st.can_train;
+    $("#btn-taste-reset").disabled = !st.trained;
+  }
+
+  async function loadHighlightYears() {
+    const data = await api("/api/highlights/years");
+    const sel = $("#hl-year");
+    const cur = sel.value;
+    fillSelect(sel, "Year in review", data.years.map((y) => ({ value: String(y.year), text: `${y.year} (${fmtN(y.count)})` })));
+    if (data.years.some((y) => String(y.year) === cur)) sel.value = cur;
+    $("#btn-hl-export").disabled = !sel.value;
+  }
+
+  async function renderEventHighlights() {
+    const host = $("#hl-events");
+    const m = $("#minaes").value;
+    host.replaceChildren(...Array.from({ length: 6 }, () => el("div", { class: "skel" })));
+    try {
+      const data = await api("/api/highlights/events?per_event=3" + (m !== "" ? "&min_score=" + encodeURIComponent(m) : ""));
+      $("#highlightcount").textContent = `${fmtN(data.events.length)} event${data.events.length === 1 ? "" : "s"}`;
+      if (!data.events.length) {
+        host.replaceChildren(emptyNode({ icon: "cal", title: "No events with scored photos",
+          text: "Find events first, then analyze your photos so they can be scored." }));
+        return;
+      }
+      host.replaceChildren(...data.events.map((ev) => {
+        ev.items.forEach((x) => { state.byId[x.id] = x; });
+        const when = ev.start ? String(ev.start).slice(0, 10) : "";
+        return el("div", { class: "ev-block" },
+          el("div", { class: "ev-head" }, el("h3", { text: ev.label }),
+            el("span", { text: [when, `top ${ev.count} of ${fmtN(ev.total)}`].filter(Boolean).join(", ") })),
+          el("div", { class: "grid" }, ev.items.map(cardNode)));
+      }));
+    } catch (e) {
+      host.replaceChildren(emptyNode({ icon: "alert", title: "Could not load highlights", text: e.message }));
+    }
+  }
+
+  function applyHighlightView() {
+    const events = $("#hl-view").value === "events";
+    $("#highlightgrid").hidden = events;
+    $("#hl-events").hidden = !events;
+    if (events) renderEventHighlights(); else grids.highlights.reset();
+  }
+
+  async function exportHighlights() {
+    const year = $("#hl-year").value;
+    if (!year) return;
+    const a = el("a", { href: `/api/highlights/export?year=${encodeURIComponent(year)}&n=50`, download: `highlights-${year}.html` });
+    document.body.append(a);
+    a.click();
+    a.remove();
+  }
+
+  async function learnTaste() {
+    const btn = $("#btn-taste-learn");
+    btn.disabled = true;
+    try {
+      const r = await post("/api/preferences/learn");
+      if (r.status === "trained") toast(`Learned your taste, about ${Math.round(num(r.cv_accuracy) * 100)}% right on new photos`, "ok");
+      else if (r.status === "weak") toast("Your ratings do not show a clear pattern yet, so nothing changed.", "warn");
+      else toast(`Rate at least ${r.preferences.min_per_class} liked and ${r.preferences.min_per_class} disliked photos first.`, "warn");
+      await refreshTaste();
+      applyHighlightView();
+    } catch (e) { toast(e.message, "err"); await refreshTaste().catch(() => {}); }
+  }
+
+  async function forgetTaste() {
+    const ok = await showConfirmDialog({ title: "Forget your taste?", confirmText: "Forget",
+      cancelText: "Keep", message: "Highlights go back to ranking by the AI's score and your stars. Your ratings are not touched." });
+    if (!ok) return;
+    try {
+      await post("/api/preferences/reset");
+      await refreshTaste();
+      applyHighlightView();
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  function bindHighlights() {
+    $$("[data-feat]").forEach((inp) => {
+      inp.addEventListener("input", () => { $(FEAT_OUT[inp.dataset.feat]).textContent = num(inp.value).toFixed(2); });
+      inp.addEventListener("change", async () => {
+        try {
+          const data = await post("/api/features", { [inp.dataset.feat]: num(inp.value) });
+          state.features = data.features;
+          applyHighlightView();
+        } catch (e) { toast(e.message, "err"); }
+      });
+    });
+    $("#hl-view").addEventListener("change", applyHighlightView);
+    $("#hl-year").addEventListener("change", () => { $("#btn-hl-export").disabled = !$("#hl-year").value; });
+    $("#btn-hl-export").onclick = exportHighlights;
+    $("#btn-taste-learn").onclick = learnTaste;
+    $("#btn-taste-reset").onclick = forgetTaste;
+  }
+
+  // ------------------------------------------------------------------- watch
+  const WATCH_STATE = { idle: "Watching", scanning: "Looking for new photos in", analyzing: "Analyzing new photos in", waiting: "Waiting for the current task, then continuing in", stopping: "Stopping", stopped: "Not watching" };
+  let watchTimer = null;
+  let watchSeen = null;
+
+  function setText(node, text) { if (node && node.textContent !== text) node.textContent = text; }
+
+  function renderWatch(st) {
+    const box = $("#watch-toggle");
+    if (box.checked !== !!st.running) box.checked = !!st.running;
+    if (st.running && st.path && !$("#scan-path").value) $("#scan-path").value = st.path;
+    let text = "";
+    if (st.running) {
+      text = `${WATCH_STATE[st.state] || "Watching"} ${st.path}` +
+        (st.photos_added ? `. ${fmtN(st.photos_added)} new photo${st.photos_added === 1 ? "" : "s"} so far.` : ".");
+      if (st.last_error) text += ` Last problem: ${st.last_error}`;
+    } else if (st.last_error) text = st.last_error;
+    setText($("#watch-status"), text);
+    if (watchSeen !== null && st.photos_added !== watchSeen) { loadStats(); resetVisibleGrids(); }
+    watchSeen = st.running ? st.photos_added : null;
+  }
+
+  async function refreshWatch() {
+    clearTimeout(watchTimer);
+    watchTimer = null;
+    let st;
+    try { st = await api("/api/watch"); } catch (e) { return; }
+    renderWatch(st);
+    if (st.running) watchTimer = setTimeout(refreshWatch, 5000);
+  }
+
+  function bindWatch() {
+    $("#watch-toggle").addEventListener("change", async (e) => {
+      const on = e.target.checked;
+      try {
+        if (on) {
+          const path = $("#scan-path").value.trim();
+          if (!path) { e.target.checked = false; toast("Choose a folder to watch first.", "warn"); return; }
+          renderWatch(await post("/api/watch", { enabled: true, path }));
+        } else {
+          renderWatch(await post("/api/watch", { enabled: false }));
+        }
+        refreshWatch();
+      } catch (err) { e.target.checked = !on; toast(err.message, "err"); }
+    });
+  }
+
+  // ---------------------------------------------------------------- keywords
+  async function refreshKeywords() {
+    let st;
+    try { st = await api("/api/keywords"); } catch (e) { return; }
+    $("#set-keywords").checked = !!st.enabled;
+    ["#set-keywords", "#btn-kw-write", "#btn-kw-remove"].forEach((sel) => { $(sel).disabled = !st.sidecars; });
+    $("#kw-note").textContent = st.sidecars
+      ? `Writing adds a .xmp file next to any of your ${fmtN(st.photos)} photos that does not have one. Photos whose sidecar another program changed are skipped.`
+      : "Sidecar writing is turned off, so keywords cannot be written.";
+  }
+
+  async function keywordsRun(remove) {
+    const n = (await api("/api/keywords")).photos;
+    const ok = await showConfirmDialog({
+      title: remove ? "Remove Photocure keywords?" : "Write keywords for every photo?",
+      confirmText: remove ? "Remove" : "Write", cancelText: "Cancel",
+      message: remove
+        ? `Photocure's own keywords are removed from the sidecars of up to ${fmtN(n)} photos. Nothing else in them changes.`
+        : `This creates or updates a .xmp sidecar next to up to ${fmtN(n)} photos. Only Photocure's own keywords are added, and your ratings are not touched.` });
+    if (!ok) return;
+    try {
+      const r = await post("/api/keywords/write", { remove });
+      logLine(remove ? "Removing keywords from sidecars" : "Writing keywords to sidecars", "ok");
+      const res = await followJob(r.job_id, "Keywords");
+      const left = num(res && res.edited_elsewhere);
+      toast(`${fmtN(res && res.written)} sidecar${num(res && res.written) === 1 ? "" : "s"} updated` +
+        (left ? `, ${fmtN(left)} left alone because another program edited them` : ""), "ok");
+    } catch (e) { toast(e.message, "err"); }
+    pollProgress();
+  }
+
+  function bindKeywords() {
+    $("#set-keywords").addEventListener("change", async (e) => {
+      try { await post("/api/features", { write_keywords: e.target.checked }); } catch (err) {
+        e.target.checked = !e.target.checked;
+        toast(err.message, "err");
+      }
+    });
+    $("#btn-kw-write").onclick = () => keywordsRun(false);
+    $("#btn-kw-remove").onclick = () => keywordsRun(true);
+  }
+
+  // -------------------------------------------------------------- duplicates
+  const DUP_PAGE = 20;
+  const dup = { groups: [], total: 0, pick: {}, busy: false };
+
+  function setDupCount(summary) {
+    dupCountAt = Date.now();
+    dup.summary = summary;
+    const badge = $('[data-count="duplicates"]');
+    const text = summary && summary.groups ? fmtN(summary.groups) : "";
+    if (badge && badge.textContent !== text) badge.textContent = text;  // no write when nothing changed
+  }
+
+  let dupCountAt = 0;
+
+  async function refreshDupCount() {
+    if (Date.now() - dupCountAt < 4000) return;  // loadStats runs after every edit; groups take a moment to find
+    dupCountAt = Date.now();
+    try { setDupCount((await api("/api/duplicates?limit=1")).summary); } catch (e) { /* badge stays as it was */ }
+  }
+
+  function dupMemberNode(g, m, chosenId) {
+    const it = m.item || { id: m.id, filename: m.filename };
+    state.byId[m.id] = it;
+    const chosen = m.id === chosenId;
+    const stars = m.rating === -1 ? "Rejected" : (m.rating > 0 ? "\u2605".repeat(m.rating) : "");
+    const facts = [`${num(m.width)}\u00d7${num(m.height)}`, fmtBytes(m.file_size),
+      m.taken_at ? String(m.taken_at).slice(0, 10) : "", stars, m.favorite ? "Favourite" : "",
+      g.kind === "near" && m.similarity != null && m.id !== g.keeper_id ? `${Math.round(num(m.similarity) * 100)}% alike` : ""]
+      .filter(Boolean).join(", ");
+    const img = el("img", { loading: "lazy", decoding: "async", src: thumbUrl(m.id, "medium"), alt: m.filename || "" });
+    img.onerror = () => { img.style.opacity = ".15"; };
+    return el("figure", { class: "dup-member" + (chosen ? " keep" : " out"), "data-mid": m.id },
+      el("button", { class: "dup-thumb", type: "button", "data-dup-open": m.id, "aria-label": "Open " + (m.filename || "photo") }, img),
+      el("figcaption", {},
+        el("div", { class: "fn", title: m.path, text: m.filename }),
+        el("div", { class: "facts", text: facts }),
+        m.suggested ? el("span", { class: "tag sug", text: "Suggested" }) : null,
+        g.reviewed ? null : el("button", { class: "btn sm" + (chosen ? " primary" : ""), type: "button",
+          "data-dup-keep": m.id, "aria-pressed": String(chosen), text: chosen ? "Keeping this one" : "Keep this one" })));
+  }
+
+  function dupGroupNode(g) {
+    const chosen = dup.pick[g.id] != null && g.members.some((m) => m.id === dup.pick[g.id]) ? dup.pick[g.id] : g.keeper_id;
+    const others = g.members.filter((m) => m.id !== chosen);
+    const frees = others.reduce((a, m) => a + num(m.file_size), 0);
+    const title = g.kind === "exact" ? `${g.members.length} identical files` : `${g.members.length} look-alike photos`;
+    const foot = g.reviewed
+      ? el("div", { class: "dup-foot" }, el("span", { class: "done", text: "Decided. The others will be treated as duplicates when you apply a plan." }))
+      : el("div", { class: "dup-foot" },
+        el("button", { class: "btn primary", type: "button", "data-dup-apply": g.id,
+          text: `Keep this one, discard ${others.length} other${others.length === 1 ? "" : "s"}` }),
+        g.kind === "near" ? el("button", { class: "btn", type: "button", "data-dup-dismiss": g.id, text: "These are not duplicates" }) : null);
+    return el("article", { class: "dup-group", "data-gid": g.id },
+      el("header", { class: "dup-head" }, el("h3", { text: title }),
+        el("span", { class: "saves", text: `Frees ${fmtBytes(frees)}` })),
+      el("div", { class: "dup-row" }, g.members.map((m) => dupMemberNode(g, m, chosen))),
+      foot);
+  }
+
+  function dupSummaryText() {
+    const sm = dup.summary;
+    $("#dup-summary").textContent = sm && sm.groups
+      ? `${fmtN(sm.groups)} group${sm.groups === 1 ? "" : "s"}, ${fmtN(sm.images)} photos, up to ${fmtBytes(sm.reclaimable_bytes)} to free`
+      : "";
+    $("#btn-dup-all").disabled = !(sm && sm.groups) || $("#dup-reviewed").checked;
+  }
+
+  async function loadDuplicates(append) {
+    const host = $("#dup-list");
+    if (!append) {
+      dup.groups = [];
+      host.replaceChildren(...Array.from({ length: 3 }, () => el("div", { class: "skel", style: "height:220px" })));
+    }
+    try {
+      const kind = $("#dup-kind").value;
+      const qs = new URLSearchParams({ limit: DUP_PAGE, offset: dup.groups.length });
+      if (kind) qs.set("kind", kind);
+      if ($("#dup-reviewed").checked) qs.set("reviewed", "true");
+      const data = await api("/api/duplicates?" + qs);
+      dup.total = data.total;
+      dup.groups = dup.groups.concat(data.groups);
+      setDupCount(data.summary);
+      dupSummaryText();
+      if (!append) host.replaceChildren();
+      if (!dup.groups.length) {
+        host.replaceChildren(emptyNode({ icon: "check", title: "No duplicates to review",
+          text: "Identical and look-alike photos appear here after you analyze your library." }));
+      } else {
+        data.groups.forEach((g) => host.append(dupGroupNode(g)));
+      }
+      $("#btn-dup-more").hidden = dup.groups.length >= dup.total;
+    } catch (e) {
+      host.replaceChildren(emptyNode({ icon: "alert", title: "Could not load duplicates", text: e.message }));
+    }
+  }
+
+  function dupFinish(res, msg) {
+    setDupCount(res.summary);
+    toast(msg, "ok");
+    loadDuplicates(false);
+  }
+
+  async function dupApply(gid) {
+    const g = dup.groups.find((x) => x.id === gid);
+    if (!g || dup.busy) return;
+    const chosen = dup.pick[gid] != null ? dup.pick[gid] : g.keeper_id;
+    const discard = g.members.filter((m) => m.id !== chosen).map((m) => m.id);
+    dup.busy = true;
+    try {
+      const res = await post("/api/duplicates/resolve", { keep_id: chosen, discard_ids: discard, kind: g.kind });
+      dupFinish(res, `Kept 1 photo and marked ${discard.length} as duplicates. Nothing moves until you apply a plan.`);
+    } catch (e) { toast(e.message, "err"); } finally { dup.busy = false; }
+  }
+
+  async function dupDismiss(gid) {
+    const g = dup.groups.find((x) => x.id === gid);
+    if (!g || dup.busy) return;
+    dup.busy = true;
+    try {
+      const res = await post("/api/duplicates/dismiss", { ids: g.members.map((m) => m.id) });
+      dupFinish(res, "Marked as different photos.");
+    } catch (e) { toast(e.message, "err"); } finally { dup.busy = false; }
+  }
+
+  async function dupResolveAll() {
+    const n = dup.summary ? dup.summary.groups : 0;
+    const ok = await showConfirmDialog({ title: "Keep the suggested photo in every group?",
+      confirmText: "Resolve all", cancelText: "Cancel",
+      message: `${fmtN(n)} group${n === 1 ? "" : "s"} will be resolved. In each, the suggested photo stays and the rest are marked as duplicates. ` +
+        "Nothing is moved or deleted until you apply a plan, and you can change any photo's category afterwards." });
+    if (!ok) return;
+    try {
+      const res = await post("/api/duplicates/resolve-all", {});
+      dupFinish(res, `Resolved ${fmtN(res.result.groups)} groups, ${fmtN(res.result.discarded)} photos marked as duplicates.`);
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  function bindDuplicates() {
+    $("#dup-kind").addEventListener("change", () => loadDuplicates(false));
+    $("#dup-reviewed").addEventListener("change", () => loadDuplicates(false));
+    $("#btn-dup-more").onclick = () => loadDuplicates(true);
+    $("#btn-dup-all").onclick = dupResolveAll;
+    $("#dup-list").addEventListener("click", (ev) => {
+      const t = ev.target.closest("[data-dup-keep],[data-dup-open],[data-dup-apply],[data-dup-dismiss]");
+      if (!t) return;
+      const node = t.closest(".dup-group");
+      const gid = node && node.dataset.gid;
+      const g = dup.groups.find((x) => x.id === gid);
+      if (!g) return;
+      if (t.dataset.dupKeep) {
+        dup.pick[gid] = num(t.dataset.dupKeep);
+        node.replaceWith(dupGroupNode(g));
+      } else if (t.dataset.dupOpen) {
+        openLightboxList(g.members.map((m) => m.id), num(t.dataset.dupOpen), t);
+      } else if (t.dataset.dupApply) dupApply(gid);
+      else if (t.dataset.dupDismiss) dupDismiss(gid);
+    });
+  }
+
+  // ------------------------------------------------------------------ search
+  let searchSeq = 0;
+
+  async function runSearch() {
+    const q = $("#searchq").value.trim();
+    const host = $("#searchgrid");
+    const count = $("#searchcount");
+    if (!q) {
+      count.textContent = "";
+      host.replaceChildren(emptyNode({ icon: "search", title: "Describe the photo",
+        text: "Try dog on the beach, birthday cake, or a red car at night." }));
+      return;
+    }
+    const seq = ++searchSeq;
+    count.textContent = "Searching...";
+    host.replaceChildren(...Array.from({ length: 12 }, () => el("div", { class: "skel" })));
+    try {
+      const dups = $("#search-dups").checked ? "&duplicates=true" : "";
+      const data = await api(`/api/search?q=${encodeURIComponent(q)}&k=120${dups}`);
+      if (seq !== searchSeq) return;
+      data.items.forEach((x) => { state.byId[x.id] = x; });
+      count.textContent = `${fmtN(data.items.length)} photo${data.items.length === 1 ? "" : "s"}`;
+      host.replaceChildren(...(data.items.length ? data.items.map(cardNode)
+        : [emptyNode({ icon: "search", title: "Nothing matched",
+          text: "Try other words, or analyze your photos first so they can be searched." })]));
+    } catch (e) {
+      if (seq !== searchSeq) return;
+      count.textContent = "";
+      host.replaceChildren(emptyNode({ icon: "alert",
+        title: e.status === 503 ? "Search needs the AI model" : "Search failed", text: e.message }));
+    }
+  }
+
   function setCategoryFilter(cat) {
     $("#catfilter").value = cat || "";
     updateResetFiltersButton();
@@ -1066,6 +1472,13 @@
       lb.i = Math.max(0, lb.ids.indexOf(id));
     }
     lbShow(card);
+  }
+
+  function openLightboxList(ids, id, opener) {
+    lb.grid = null;
+    lb.ids = ids.slice();
+    lb.i = Math.max(0, lb.ids.indexOf(id));
+    lbShow(opener);
   }
 
   function openLightboxFor(g, id) {
@@ -1155,6 +1568,7 @@
     if (it.top1) add("Looks like", `${it.top1} (${Math.round(num(it.top1_score) * 100)}%)`);
     if (it.quality_score != null) add("Quality", num(it.quality_score).toFixed(2));
     if (it.aesthetic != null) add("Appeal", num(it.aesthetic).toFixed(2));
+    if (it.preference != null) add("Your taste", num(it.preference).toFixed(2));
     if (it.face_count) add("Faces", it.face_count);
     if (it.rating != null) add("Rating", "★".repeat(Math.max(0, Math.min(5, num(it.rating)))) || num(it.rating));
     const notes = flagList(it).map((f) => f.text);
@@ -2341,6 +2755,7 @@
       renderCounts(ov);
     } catch (e) { /* ignore */ }
     loadFacets();
+    refreshDupCount();
   }
 
   // ------------------------------------------------------------------- tabs
@@ -2377,10 +2792,22 @@
         else { g.update(); }
       }
     }
+    if (name === "search") {
+      if (!$("#searchgrid").children.length) runSearch();
+      setTimeout(() => $("#searchq").focus(), 0);
+    }
+    if (name === "library") refreshWatch();
+    if (name === "duplicates") loadDuplicates(false);
+    if (name === "highlights") {
+      loadFeatures().catch(() => {});
+      refreshTaste().catch(() => {});
+      loadHighlightYears().catch(() => {});
+      if ($("#hl-view").value === "events") renderEventHighlights();
+    }
     if (name === "bursts") renderBursts().catch((e) => toast(e.message, "err"));
     if (name === "events") loadEvents().catch((e) => toast(e.message, "err"));
     if (name === "actions") loadTransactions().catch(() => {});
-    if (name === "settings") refreshSettings(true);
+    if (name === "settings") { refreshSettings(true); refreshKeywords(); }
     if (name === "uncertain") renderLegend();
     if (state.overview) renderComp(state.overview);
   }
@@ -2693,7 +3120,15 @@
       qt = setTimeout(() => grids.cat.reset(), 250);
     });
     $("#junkfilter").addEventListener("change", () => grids.junk.reset());
-    $("#minaes").addEventListener("change", () => grids.highlights.reset());
+    $("#minaes").addEventListener("change", () => {
+      if ($("#hl-view").value === "events") renderEventHighlights(); else grids.highlights.reset();
+    });
+    bindHighlights();
+    bindDuplicates();
+    bindKeywords();
+    bindWatch();
+    $("#search-form").addEventListener("submit", (e) => { e.preventDefault(); runSearch(); });
+    $("#search-dups").addEventListener("change", () => { if ($("#searchq").value.trim()) runSearch(); });
     $("#similar-close").onclick = () => { $("#similar-panel").hidden = true; };
     $("#btn-dismiss-progress").onclick = () => { $("#progress-card").hidden = true; $("#hero-gauge").hidden = true; };
 

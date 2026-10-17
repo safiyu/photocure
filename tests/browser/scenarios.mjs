@@ -1,7 +1,7 @@
 // Real-browser checks of the UI against a seeded server.
 // node tests/browser/scenarios.mjs META_JSON RESULTS_JSON [SHOT_DIR]
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { Browser, sleep } from "./cdp.mjs";
 
 const meta = JSON.parse(readFileSync(process.argv[2], "utf8"));
@@ -464,7 +464,8 @@ try {
   });
 
   await scenario("touch swipe navigation in lightbox stage", async () => {
-    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 8000, "cards rendered");
+    // Wait for the first card itself: after a tab switch the window can still hold cards from lower down.
+    await page.waitFor("document.querySelector('#grid .vg-window .card[data-idx=\"0\"] .thumb')", 8000, "first card rendered");
     await page.eval("document.querySelector('#grid .vg-window .card[data-idx=\"0\"] .thumb').click()");
     await page.waitFor("!document.querySelector('#lightbox').hidden", 8000, "lightbox opens");
     const title0 = await page.eval("document.querySelector('#lb-title').textContent");
@@ -629,6 +630,107 @@ try {
     check(!log.errHighlighted, "an error row should not be a completion highlight");
     check(log.terminalBg !== "rgba(0, 0, 0, 0)", "the activity terminal has no painted background");
     await shot("14-log-pills");
+  });
+
+  const clickTab = async (t) => {
+    await page.eval(`document.querySelector('.tab[data-tab="${t}"]').click()`);
+    await page.waitFor(`document.querySelector('.panel.active').id === 'tab-${t}'`, 8000, `${t} tab active`);
+  };
+  const post = (path, body) => page.eval(`fetch(${JSON.stringify(path)}, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify(body || {}))} }).then((r) => r.json())`);
+  const imageId = async (i) => (await api(`/api/images?q=${name(i)}&limit=1`)).items[0].id;
+
+  await scenario("search explains that it needs the AI model when only the placeholder is installed", async () => {
+    await clickTab("search");
+    await page.waitFor("document.querySelector('#searchgrid .empty')", 5000, "the prompt is shown");
+    await page.eval("(() => { document.querySelector('#searchq').value = 'a dog on the beach'; document.querySelector('#search-form').requestSubmit(); })()");
+    await page.waitFor("(document.querySelector('#searchgrid .empty h3') || {}).textContent === 'Search needs the AI model'", 8000, "model message");
+    await shot("15-search");
+  });
+
+  await scenario("highlights rank best first, show the best of each event and offer a year export", async () => {
+    await clickTab("highlights");
+    await page.waitFor("document.querySelector('#highlightgrid .vg-window .card[data-idx=\"0\"] .fn')", 10000, "highlight cards");
+    const first = await page.eval("document.querySelector('#highlightgrid .vg-window .card[data-idx=\"0\"] .fn').textContent");
+    check(first === name(500), "the best photo should come first, got " + first);
+    check(Number(await page.eval("document.querySelector('#highlightcount').textContent.replace(/[^0-9]/g, '')")) === 10, "ten scored photos expected");
+    await page.eval("(() => { const v = document.querySelector('#hl-view'); v.value = 'events'; v.dispatchEvent(new Event('change')); })()");
+    await page.waitFor("document.querySelectorAll('#hl-events .ev-block').length === 1", 8000, "one event block");
+    check((await page.eval("document.querySelector('#hl-events .ev-head h3').textContent")) === "Seaside", "event name");
+    check((await page.eval("document.querySelectorAll('#hl-events .ev-block .card').length")) === 3, "top three of the event");
+    await page.waitFor("document.querySelectorAll('#hl-year option').length > 1", 8000, "years listed");
+    check(await page.eval("document.querySelector('#btn-hl-export').disabled"), "export starts disabled");
+    await page.eval("(() => { const y = document.querySelector('#hl-year'); y.value = y.options[1].value; y.dispatchEvent(new Event('change')); })()");
+    check(!(await page.eval("document.querySelector('#btn-hl-export').disabled")), "export enabled once a year is chosen");
+    const page5 = await page.eval("fetch('/api/highlights/export?year=' + document.querySelector('#hl-year').value + '&n=5').then((r) => r.text())");
+    check(page5.includes("data:image/webp;base64,") && page5.includes(name(500)), "the exported page lists the best photo with a preview");
+    await page.eval("document.querySelector('#hl-tune').open = true");
+    await shot("16-highlights");
+    await page.eval("(() => { const v = document.querySelector('#hl-view'); v.value = 'all'; v.dispatchEvent(new Event('change')); })()");
+  });
+
+  await scenario("ranking sliders save and a favourite can outrank the AI's score", async () => {
+    const id = await imageId(509);                      // the lowest scored of the ten
+    await post(`/api/images/${id}/favorite`, { favorite: true });
+    await page.eval("(() => { const s = document.querySelector('#hl-w-fav'); s.value = '0.5'; s.dispatchEvent(new Event('input')); s.dispatchEvent(new Event('change')); })()");
+    await page.waitFor(`document.querySelector('#highlightgrid .vg-window .card[data-idx="0"] .fn').textContent === ${JSON.stringify(name(509))}`, 8000, "the favourite jumps to the top");
+    check((await api("/api/features")).features.highlight_favorite_weight === 0.5, "the weight was saved");
+    await page.eval("(() => { const s = document.querySelector('#hl-w-fav'); s.value = '0.15'; s.dispatchEvent(new Event('input')); s.dispatchEvent(new Event('change')); })()");
+    await post(`/api/images/${id}/favorite`, { favorite: false });
+    await page.waitFor(`document.querySelector('#highlightgrid .vg-window .card[data-idx="0"] .fn').textContent === ${JSON.stringify(name(500))}`, 8000, "the order is restored");
+    check(/at least 8/.test(await page.eval("document.querySelector('#taste-text').textContent")), "the taste panel explains what it needs");
+    check(await page.eval("document.querySelector('#btn-taste-learn').disabled"), "learning is disabled with too few ratings");
+  });
+
+  await scenario("duplicate review lists groups, picks a keeper, resolves one and dismisses the other", async () => {
+    await clickTab("duplicates");
+    await page.waitFor("document.querySelectorAll('#dup-list .dup-group').length === 2", 10000, "two groups");
+    check((await page.eval("document.querySelector('[data-count=\"duplicates\"]').textContent")) === "2", "the nav badge counts groups");
+    await shot("17-duplicates");
+    const exactGroup = "Array.from(document.querySelectorAll('#dup-list .dup-group')).find((x) => /identical/.test(x.querySelector('h3').textContent))";
+    const alt = await page.eval(`(() => {
+      const g = ${exactGroup};
+      const second = g.querySelectorAll('.dup-member')[1];
+      second.querySelector('[data-dup-keep]').click();
+      return Number(second.dataset.mid);
+    })()`);
+    await page.waitFor(`(() => { const g = ${exactGroup}; return g && g.querySelector('.dup-member.keep') && Number(g.querySelector('.dup-member.keep').dataset.mid) === ${alt}; })()`, 5000, "the second photo is now the one kept");
+    check(/discard 1 other/.test(await page.eval(`${exactGroup}.querySelector('[data-dup-apply]').textContent`)), "the apply button says what it will do");
+    await page.eval(`${exactGroup}.querySelector('[data-dup-apply]').click()`);
+    await page.waitFor("document.querySelectorAll('#dup-list .dup-group').length === 1", 8000, "the resolved group left the queue");
+    const done = (await api("/api/duplicates?reviewed=true&kind=exact")).groups.find((g) => g.reviewed);
+    check(done && done.keeper_id === alt, "the chosen photo is the one kept");
+    await page.eval("document.querySelector('[data-dup-dismiss]').click()");
+    await page.waitFor("(document.querySelector('#dup-list .empty h3') || {}).textContent === 'No duplicates to review'", 8000, "all done");
+  });
+
+  await scenario("the keyword setting saves and the sidecar actions explain themselves", async () => {
+    await clickTab("settings");
+    await page.waitFor("document.querySelector('#kw-note').textContent.length > 0", 8000, "note filled");
+    check(!(await page.eval("document.querySelector('#set-keywords').disabled")), "the switch is usable");
+    await page.eval("document.querySelector('#set-keywords').click()");
+    await page.waitFor("fetch('/api/features').then((r) => r.json()).then((j) => j.features.write_keywords === true)", 5000, "saved on");
+    await shot("18-settings-keywords");
+    await page.eval("document.querySelector('#set-keywords').click()");
+    await page.waitFor("fetch('/api/features').then((r) => r.json()).then((j) => j.features.write_keywords === false)", 5000, "saved off");
+  });
+
+  await scenario("watch mode asks for a folder, picks up a new photo, and stops", async () => {
+    const inbox = join(dirname(meta.lib), "inbox");
+    mkdirSync(inbox, { recursive: true });
+    await clickTab("library");
+    await page.eval("document.querySelector('#scan-path').value = ''");
+    await page.eval("document.querySelector('#watch-toggle').click()");
+    await page.waitFor("!document.querySelector('#watch-toggle').checked", 5000, "no folder, no watch");
+    await page.eval(`document.querySelector('#scan-path').value = ${JSON.stringify(inbox)}`);
+    await page.eval("document.querySelector('#watch-toggle').click()");
+    await page.waitFor("/Watching|Looking for new photos|Analyzing/.test(document.querySelector('#watch-status').textContent)", 8000, "watching");
+    const before = (await api("/api/overview")).total;
+    copyFileSync(join(meta.lib, name(1)), join(inbox, "arrived.jpg"));
+    await page.waitFor(`fetch('/api/overview').then((r) => r.json()).then((o) => o.total === ${before + 1})`, 40000, "the new photo is indexed");
+    await page.waitFor("/1 new photo/.test(document.querySelector('#watch-status').textContent)", 20000, "the status counts it");
+    await shot("19-watching");
+    await page.eval("document.querySelector('#watch-toggle').click()");
+    await page.waitFor("fetch('/api/watch').then((r) => r.json()).then((w) => w.running === false)", 8000, "stopped");
   });
 
   await scenario("the page raised no script errors", async () => {

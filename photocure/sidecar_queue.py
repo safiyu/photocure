@@ -63,6 +63,12 @@ class SidecarQueue:
                 self._timer.cancel()
                 self._timer = None
         results: dict[int, SyncResult] = {}
+        # Keywords follow the setting as it is now, so switching it off strips them on the next write.
+        from .features import load_features
+        from .highlights import HighlightWeights
+        from .keywords import keyword_tags
+        feats = load_features(self.db_path)
+        weights = HighlightWeights.from_features(feats)
         for image_id, overwrite in batch.items():
             try:
                 with self.io_lock, get_session(self.db_path) as s:  # the commit happens inside the lock
@@ -70,7 +76,10 @@ class SidecarQueue:
                     if rec is None:
                         continue
                     rating = rec.rating if rec.rating is not None else 0
-                    res = sync_sidecar(rec, rating=rating, tags=desired_tags(rec),
+                    tags = desired_tags(rec)
+                    if feats["write_keywords"]:
+                        tags += keyword_tags(s, rec, weights)
+                    res = sync_sidecar(rec, rating=rating, tags=tags,
                                        explicit=True, overwrite_foreign=overwrite)
             except Exception as e:  # a failed sidecar must never take the server down
                 res = SyncResult("error", f"{e.__class__.__name__}: {e}")

@@ -334,3 +334,43 @@ test("roving tabindex: exactly one card has tabindex='0', moves with cursor, sur
   }
 });
 
+
+test("ensureLoaded waits for a page that another caller already asked for", async () => {
+  // The lightbox opens on a card, then steps while the same page is still being fetched by
+  // a reset. Returning early would leave idAt() empty and the step silently does nothing.
+  const prevDoc = globalThis.document;
+  globalThis.document = { createElement: (tag) => makeMockElement(tag) };
+  try {
+    const mockWin = {
+      scrollY: 0, innerHeight: 800,
+      requestAnimationFrame(fn) { return setTimeout(fn, 0); },
+      addEventListener() {}, removeEventListener() {}, scrollTo(x, y) { this.scrollY = y; },
+      getComputedStyle() { return { getPropertyValue(p) { return p === "--thumb-min" ? "200px" : p === "--vg-caption-h" ? "92px" : ""; } }; },
+    };
+    const host = makeMockElement("div");
+    host._winRef = mockWin;
+    const items = Array.from({ length: 20 }, (_, i) => ({ id: i + 1 }));
+    let release;
+    let fetches = 0;
+    const grid = new VirtualGrid({
+      host, pageSize: 10, minCard: 200, win: mockWin,
+      fetchPage(offset, limit) {
+        fetches++;
+        return new Promise((resolve) => { release = () => resolve({ items: items.slice(offset, offset + limit), total: items.length }); });
+      },
+      renderCard(it) { const el = makeMockElement("figure"); el.classList.add("card"); el.dataset.id = String(it.id); return el; },
+      renderSkeleton() { return makeMockElement("div"); },
+    });
+    const resetting = grid.reset();                 // page 0 is now in flight
+    let settled = false;
+    const waiting = grid.ensureLoaded(1, 2).then(() => { settled = true; });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(settled, false, "ensureLoaded must not resolve before the page arrives");
+    assert.equal(fetches, 1, "the page is fetched once, not twice");
+    release();
+    await Promise.all([resetting, waiting]);
+    assert.equal(grid.idAt(1), 2, "the item is there once the shared fetch completes");
+  } finally {
+    globalThis.document = prevDoc;
+  }
+});
