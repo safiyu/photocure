@@ -323,6 +323,7 @@ input:hover, select:hover { border-color: var(--faint); }
 .toolbar .search input { padding-left: 36px; }
 .toolbar select { width: auto; min-width: 170px; }
 .toolbar .grow { flex: 1; }
+#search-form .search { max-width: 560px; flex: 1 1 320px; }
 .toggle {
   display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px;
   border: 1px solid var(--line); border-radius: 18px; background: var(--sheet); color: var(--mut); cursor: pointer; font-size: 13px;
@@ -1058,3 +1059,42 @@ body.has-picks .pick { opacity: 1; }
 .banners { position: sticky; bottom: 0; display: flex; flex-direction: column; gap: 8px; padding: 0 16px; z-index: 900; }
 .banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border-radius: var(--r-sm); border: 1px solid var(--warn); background: var(--warn-soft); color: var(--ink); font-size: 14px; }
 .banner span { flex: 1 1 260px; }
+
+/* Highlights: ranking controls, taste panel and the best-of-each-event view. */
+.sect.tune { padding: 14px 22px; }
+.sect.tune > summary { cursor: pointer; font-weight: 600; font-size: 15px; list-style-position: inside; }
+.sect.tune[open] > summary { margin-bottom: 8px; }
+.tune-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; margin: 12px 0 8px; }
+.tune-grid output { float: right; font-weight: 500; color: var(--mut); font-variant-numeric: tabular-nums; }
+.tune-grid input[type="range"] { width: 100%; accent-color: var(--accent); }
+.taste { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.taste h3 { font-size: 15px; margin: 0 0 4px; }
+.taste .help { margin-bottom: 10px; max-width: 70ch; }
+#hl-events .ev-block { margin-bottom: 28px; }
+#hl-events .ev-head { display: flex; align-items: baseline; gap: 12px; margin: 0 0 10px; }
+#hl-events .ev-head h3 { font-size: 17px; margin: 0; }
+#hl-events .ev-head span { color: var(--mut); font-size: 13px; }
+
+/* Duplicate review: one card per group, members side by side. */
+.dup-list { display: flex; flex-direction: column; gap: 18px; }
+.dup-group { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px 18px; }
+.dup-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.dup-head h3 { font-size: 16px; margin: 0; }
+.dup-head .saves { color: var(--mut); font-size: 13px; }
+.dup-head .grow { flex: 1; }
+.dup-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+.dup-member { margin: 0; border: 2px solid var(--line); border-radius: var(--r-md, 12px); overflow: hidden; background: var(--table); }
+.dup-member.keep { border-color: var(--accent); }
+.dup-member.out { opacity: .72; }
+.dup-thumb { display: block; width: 100%; padding: 0; border: 0; background: #0e0f12; cursor: zoom-in; }
+.dup-thumb img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; }
+.dup-member figcaption { padding: 9px 11px 11px; display: flex; flex-direction: column; gap: 6px; }
+.dup-member .fn { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
+.dup-member .facts { color: var(--mut); font-size: 12px; }
+.dup-member .tag.sug { align-self: flex-start; }
+.dup-foot { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.dup-foot .done { color: var(--mut); font-size: 13px; }
+
+/* Import: the watch toggle under the library summary. */
+.watchbar { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; margin: 4px 0 18px; }
+.watchbar .muted { font-size: 13px; overflow-wrap: anywhere; }

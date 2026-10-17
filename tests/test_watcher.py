@@ -99,3 +99,39 @@ def test_watchdog_mode_ingests_new_files(cfg, tmp_db, tmp_path):
     finally:
         stop.set()
         t.join(timeout=10)
+
+
+@pytest.mark.skipif(importlib.util.find_spec("watchdog") is None, reason="watchdog not installed")
+def test_a_file_arriving_right_after_the_first_scan_is_not_missed(cfg, tmp_db, tmp_path, monkeypatch):
+    """Events must already be flowing while the first scan runs, or a file landing in between is lost."""
+    real = FileScanner.scan_directory
+
+    def slow(self, *a, **k):
+        res = real(self, *a, **k)
+        time.sleep(0.8)  # the gap in which a new file used to fall through
+        return res
+
+    monkeypatch.setattr(FileScanner, "scan_directory", slow)
+    root = tmp_path / "inbox"
+    root.mkdir()
+    stop, t, out = _run(cfg, root, tmp_db, debounce_s=0.2, use_watchdog=True)
+    try:
+        time.sleep(0.3)
+        make_image(root / "late.jpg", rng_seed=5)
+        assert _wait(lambda: _count(tmp_db) == 1, timeout=15)
+    finally:
+        stop.set()
+        t.join(timeout=10)
+
+
+@pytest.mark.skipif(importlib.util.find_spec("watchdog") is None, reason="watchdog not installed")
+def test_a_file_still_fresh_at_the_first_scan_is_picked_up_once_it_settles(cfg, tmp_db, tmp_path):
+    """The first scan defers files that were only just written; event mode must come back for them."""
+    root = tmp_path / "inbox"
+    make_image(root / "fresh.jpg", rng_seed=6)  # written a moment before watching starts
+    stop, t, out = _run(cfg, root, tmp_db, debounce_s=1.0, use_watchdog=True)
+    try:
+        assert _wait(lambda: _count(tmp_db) == 1, timeout=15)
+    finally:
+        stop.set()
+        t.join(timeout=10)

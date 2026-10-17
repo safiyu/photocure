@@ -1,10 +1,11 @@
 """Aesthetic score from the stored CLIP embedding (no extra GPU pass).
 
 A linear head over the L2-normalized 512-dim image embedding produces a 0..1
-score. Real weights (``.npz`` with ``w`` and optional ``b``, or a ``.npy`` vector)
-load from ``PCUR_AESTHETIC_WEIGHTS``. Without a weights file a deterministic
-stub head is used so the pipeline stays reproducible; its scores are NOT a
-meaningful aesthetic judgement and only exist to exercise the plumbing.
+score. The bundled head is the LAION aesthetic predictor v1 for CLIP ViT-B/16
+(MIT); it rates photos 1..10 and that rating is mapped onto 0..1. A custom head
+loads from ``PCUR_AESTHETIC_WEIGHTS`` (``.npz`` with ``w`` and optional ``b``,
+``kind`` and ``name``, or a bare ``.npy`` vector). Without any usable weights a
+deterministic stub keeps the plumbing exercisable; its scores are never stored.
 """
 from __future__ import annotations
 
@@ -15,41 +16,66 @@ from pathlib import Path
 
 import numpy as np
 
+from .. import models
+
 log = logging.getLogger("photocure.aesthetic")
 
 EMBED_DIM = 512
 _STUB_SEED = 20240601
 _SCALE = 8.0  # sharpens the sigmoid for unit-norm inputs
+# sigmoid: sigmoid(scale * w.e + b). linear10: a 1..10 rating (w.e + b) mapped to 0..1.
+KINDS = ("sigmoid", "linear10")
+_stub_warned = False
 
 
 class AestheticHead:
-    """Linear head: sigmoid(scale * (w . e) + b)."""
+    """Linear head over a unit embedding; ``kind`` says how the raw value becomes 0..1."""
 
     def __init__(self, weights: np.ndarray | None = None, bias: float = 0.0,
-                 stub: bool = False):
+                 stub: bool = False, kind: str = "sigmoid", name: str = ""):
         if weights is None:
             rng = np.random.default_rng(_STUB_SEED)
             weights = rng.standard_normal(EMBED_DIM).astype(np.float32)
             weights /= np.linalg.norm(weights)
             stub = True
+        if kind not in KINDS:
+            raise ValueError(f"unknown aesthetic head kind {kind!r}")
         self.w = np.asarray(weights, dtype=np.float32).ravel()
         self.b = float(bias)
         self.stub = stub
+        self.kind = kind
+        self.name = "stub" if stub else (name or "custom")
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> AestheticHead:
+        """Explicit path or env var first, then the bundled model, else the stub."""
         chosen = path or os.environ.get("PCUR_AESTHETIC_WEIGHTS")
-        if not chosen:
+        if chosen:
+            return cls._from_file(Path(chosen).expanduser()) or cls()
+        bundled = models.model_path(models.AESTHETIC)
+        head = cls._from_file(bundled) if bundled is not None else None
+        if head is None:
+            _warn_stub_once()
             return cls()
-        p = Path(chosen).expanduser()
+        return head
+
+    @classmethod
+    def _from_file(cls, p: Path) -> AestheticHead | None:
         try:
             if p.suffix == ".npz":
                 data = np.load(p)
-                return cls(data["w"], float(data["b"]) if "b" in data else 0.0)
-            return cls(np.load(p))
+                return cls(data["w"], float(data["b"]) if "b" in data else 0.0,
+                           kind=str(data["kind"]) if "kind" in data else "sigmoid",
+                           name=str(data["name"]) if "name" in data else p.stem)
+            return cls(np.load(p), name=p.stem)
         except Exception as e:
             log.warning("aesthetic weights %s unreadable (%s); using stub head", p, e)
-            return cls()
+            return None
+
+    def _squash(self, raw: np.ndarray) -> np.ndarray:
+        if self.kind == "linear10":
+            return np.clip((raw - 1.0) / 9.0, 0.0, 1.0)
+        return 1.0 / (1.0 + np.exp(-(_SCALE * raw)))
 
     def score(self, embedding: Sequence[float] | np.ndarray) -> float:
         e = np.asarray(embedding, dtype=np.float32).ravel()
@@ -58,15 +84,23 @@ class AestheticHead:
         n = float(np.linalg.norm(e))
         if n < 1e-9:
             return 0.5
-        z = _SCALE * float(np.dot(self.w, e / n)) + self.b
-        return float(1.0 / (1.0 + np.exp(-z)))
+        raw = float(np.dot(self.w, e / n)) + (self.b / _SCALE if self.kind == "sigmoid" else self.b)
+        return float(self._squash(np.float64(raw)))
 
     def score_many(self, embeddings: np.ndarray) -> np.ndarray:
         e = np.asarray(embeddings, dtype=np.float32)
         norms = np.linalg.norm(e, axis=1, keepdims=True)
         norms[norms < 1e-9] = 1.0
-        z = _SCALE * ((e / norms) @ self.w) + self.b
-        return (1.0 / (1.0 + np.exp(-z))).astype(np.float32)
+        raw = (e / norms) @ self.w + (self.b / _SCALE if self.kind == "sigmoid" else self.b)
+        return self._squash(raw.astype(np.float64)).astype(np.float32)
+
+
+def _warn_stub_once() -> None:
+    global _stub_warned
+    if not _stub_warned:
+        _stub_warned = True
+        log.warning("No aesthetic model is available (bundled file missing or altered); "
+                    "highlights will stay empty")
 
 
 _head: AestheticHead | None = None
@@ -88,27 +122,56 @@ def score_embedding(embedding: Sequence[float] | np.ndarray) -> float:
     return get_head().score(embedding)
 
 
-def backfill_aesthetic(session, batch: int = 2000) -> int:
-    """Fill ``SemanticScore.aesthetic`` for rows that have an embedding but no score."""
-    from sqlmodel import select as sselect
+def _paged(session, model, cond, batch: int):
+    """Yield rows matching ``cond`` in id order, ``batch`` at a time, freeing each batch afterwards."""
+    from sqlmodel import col, select as sselect
+    last = 0
+    while True:
+        rows = session.exec(sselect(model).where(col(model.id) > last, cond)
+                            .order_by(col(model.id)).limit(batch)).all()
+        if not rows:
+            return
+        last = rows[-1].id
+        yield rows
+        session.flush()
+        for row in rows:  # embeddings are large, so do not keep a whole library in memory
+            session.expunge(row)
+
+
+def sync_aesthetic(session, batch: int = 2000) -> int:
+    """Bring ``SemanticScore.aesthetic`` in line with the active head.
+
+    Rows scored by another (or unknown) head are re-scored from their stored
+    embedding; placeholder embeddings and a stub head leave the score empty.
+    Returns the number of rows changed. The caller owns the commit.
+    """
+    from sqlalchemy import and_
+    from sqlmodel import col, or_
 
     from ..db.models import SemanticScore
     from ..db.repository import dequantize_embedding
 
     head = get_head()
+    S = SemanticScore
+    scored = or_(col(S.aesthetic).is_not(None), col(S.aesthetic_model) != "")
     updated = 0
-    rows = session.exec(
-        sselect(SemanticScore).where(SemanticScore.aesthetic.is_(None))  # type: ignore[union-attr]
-    ).all()
-    for row in rows:
-        emb = dequantize_embedding(row.embedding)
-        if not emb or len(emb) != head.w.shape[0]:
-            continue
-        row.aesthetic = head.score(emb)
-        updated += 1
-        if updated % batch == 0:
-            session.flush()
-    session.flush()
+    # Scores that should not exist: everything under a stub head, placeholder embeddings otherwise.
+    stale = scored if head.stub else and_(S.backend == "stub", scored)
+    for rows in _paged(session, S, stale, batch):
+        for row in rows:
+            row.aesthetic, row.aesthetic_model = None, ""
+            updated += 1
+    if head.stub:
+        return updated
+    needs = and_(S.backend != "stub",
+                 or_(col(S.aesthetic).is_(None), col(S.aesthetic_model) != head.name))
+    for rows in _paged(session, S, needs, batch):
+        for row in rows:
+            emb = dequantize_embedding(row.embedding)
+            if not emb or len(emb) != head.w.shape[0]:
+                continue
+            row.aesthetic, row.aesthetic_model = head.score(emb), head.name
+            updated += 1
     return updated
 
 

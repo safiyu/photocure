@@ -15,6 +15,16 @@
       "license": "Apache-2.0",
       "upstream_url": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
       "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
+    },
+    {
+      "file": "aesthetic_laion_sa_v1_vit_b_16.npz",
+      "name": "LAION aesthetic predictor v1 (ViT-B/16 linear head)",
+      "purpose": "Rates how appealing a photo looks from its CLIP embedding",
+      "license": "MIT",
+      "upstream_url": "https://github.com/LAION-AI/aesthetic-predictor/raw/main/sa_0_4_vit_b_16_linear.pth",
+      "upstream_sha256": "8ad3923d7ecf019df20ecd2ab5542a3075fbba0278d239c0371345f3d7fcbde0",
+      "converted_by": "packaging/convert_aesthetic_head.py",
+      "sha256": "2597f84b08c5c6ac71161f10bdb4da864d6ce7f67de1ba72dd365e9bf5221137"
     }
   ]
 }

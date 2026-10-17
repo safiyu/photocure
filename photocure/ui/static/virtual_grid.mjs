@@ -88,7 +88,7 @@ export class VirtualGrid {
     this.cursorId = null;
     this.cards = new Map();      // index -> element currently in the DOM
     this.epoch = 0;              // bumped whenever loaded pages stop being trustworthy
-    this.inflight = new Set();
+    this.inflight = new Map();     // page key -> promise, so concurrent callers share one fetch
     this.cols = 0;
     this.rowH = 0;
     this.raf = 0;
@@ -266,23 +266,27 @@ export class VirtualGrid {
     await Promise.all(offsets.map((o) => this._load(o, this.pageSize)));
   }
 
-  async _load(offset, limit) {
+  _load(offset, limit) {
     const key = offset + ":" + this.epoch;
-    if (this.inflight.has(key)) return;
-    this.inflight.add(key);
+    const running = this.inflight.get(key);
+    if (running) return running;                  // wait for the fetch already under way
     const epoch = this.epoch;
-    try {
-      const data = await this.fetchPage(offset, limit);
-      if (epoch !== this.epoch) return;           // the list changed while this was in flight
-      this.total = data.total;
-      data.items.forEach((it, k) => { if (!this.items[offset + k]) this.items[offset + k] = it; });
-      this.onChange(this);
-      if (this.total === 0) { this._clearCards(); this.spacer.style.height = "0px"; }
-    } catch (e) {
-      if (epoch === this.epoch) this.onError(e);
-    } finally {
-      this.inflight.delete(key);
-    }
+    const job = (async () => {
+      try {
+        const data = await this.fetchPage(offset, limit);
+        if (epoch !== this.epoch) return;         // the list changed while this was in flight
+        this.total = data.total;
+        data.items.forEach((it, k) => { if (!this.items[offset + k]) this.items[offset + k] = it; });
+        this.onChange(this);
+        if (this.total === 0) { this._clearCards(); this.spacer.style.height = "0px"; }
+      } catch (e) {
+        if (epoch === this.epoch) this.onError(e);
+      } finally {
+        if (this.inflight.get(key) === job) this.inflight.delete(key);
+      }
+    })();
+    this.inflight.set(key, job);
+    return job;
   }
 
   /** Replace the card for an item whose data changed. */

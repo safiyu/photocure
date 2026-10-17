@@ -196,9 +196,30 @@ class SemanticScore(SQLModel, table=True):
     # Normalized 512-dim image embedding (JSON, float16 quantized).
     embedding: str = Field(default="")
     aesthetic: float | None = Field(default=None)
+    # Name of the head that produced ``aesthetic``; "" when no score is stored.
+    aesthetic_model: str = Field(default="")
+    # Personal taste score (0..1) learned from the user's ratings; None until a model is trained.
+    preference: float | None = Field(default=None)
     # Semantic backend that produced the row ("clip", "stub"); "" means unknown.
     backend: str = Field(default="")
     computed_at: datetime = Field(default_factory=utcnow)
+
+
+class PreferenceModel(SQLModel, table=True):
+    """The latest taste model trained from the user's ratings (one active row per kind)."""
+
+    __tablename__ = "preference_models"
+
+    id: int | None = Field(default=None, primary_key=True)
+    kind: str = Field(default="aesthetic", index=True)
+    # JSON list of weights over the unit CLIP embedding, plus the bias.
+    weights: str = Field(default="[]")
+    bias: float = 0.0
+    n_positive: int = 0
+    n_negative: int = 0
+    # Held-out accuracy from cross-validation; the model is only applied when it beats chance.
+    cv_accuracy: float = 0.0
+    trained_at: datetime = Field(default_factory=utcnow)
 
 
 class BurstGroup(SQLModel, table=True):

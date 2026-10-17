@@ -11,6 +11,9 @@ Commands:
     repair       Fix images.path from the ledger.
     trash-purge  Delete trash staging older than the retention window.
     similar      Find images similar to one image.
+    search       Find photos by describing them in words.
+    highlights   Export the best photos of a year as a page, optionally with copies.
+    keywords     Write (or remove) category, highlight and event keywords in XMP sidecars.
     events       Group images into events.
     export-onnx  Export the models to ONNX.
     transactions List ledger transactions.
@@ -763,6 +766,98 @@ def similar(
             other = repo.get_by_id(image_id)
             t.add_row(f"{score:.3f}", other.path if other else str(image_id))
         console.print(t)
+
+
+@app.command()
+def search(
+    query: str = typer.Argument(..., help="What to look for, e.g. 'dog on the beach'."),
+    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    limit: int = typer.Option(10, "-n", "--top", min=1, max=300, help="Number of results."),
+    duplicates: bool = typer.Option(False, "--duplicates",
+                                    help="Include duplicates and burst alternates."),
+):
+    """Find photos by describing them in words (CLIP text against stored embeddings)."""
+    from . import search as search_mod
+    cfg = _config(db)
+    encoder = search_mod.default_encoder(cfg)
+    try:
+        try:
+            vec = encoder.encode(query)
+        except (ValueError, search_mod.SearchUnavailable) as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from None
+        with get_session(cfg.db_path) as s:
+            hits = search_mod.search_embeddings(s, vec, limit, include_duplicates=duplicates)
+            repo = PhotoRepository(s)
+            t = Table(title=f"Photos matching: {query}")
+            t.add_column("Match", justify="right")
+            t.add_column("Path", overflow="fold")
+            for image_id, score in hits:
+                other = repo.get_by_id(image_id)
+                t.add_row(f"{score:.3f}", other.path if other else str(image_id))
+            console.print(t)
+    finally:
+        encoder.close()
+
+
+@app.command()
+def highlights(
+    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    year: int | None = typer.Option(None, "--year", min=1, max=9999,
+                                    help="Default: the newest year with photos."),
+    top: int = typer.Option(50, "--top", "-n", min=1, max=500, help="How many photos."),
+    out: Path = typer.Option(Path("highlights"), "--out", help="Folder for the page and copies."),
+    copy: bool = typer.Option(False, "--copy", help="Also copy the originals into <out>/photos."),
+):
+    """Export the best photos of a year as a self-contained page, optionally with copies."""
+    from . import highlights as hl
+    from .features import load_features
+    cfg = _config(db)
+    with get_session(cfg.db_path) as s:
+        years = hl.years_available(s)
+        chosen = year if year is not None else (years[0][0] if years else None)
+        ranked = (hl.top_of_year(s, hl.HighlightWeights.from_features(load_features(cfg.db_path)),
+                                 chosen, top) if chosen is not None else [])
+        if not ranked:
+            console.print(f"[red]No scored photos{f' from {chosen}' if chosen else ''}. "
+                          "Analyze the library first.[/red]")
+            raise typer.Exit(1)
+        out.mkdir(parents=True, exist_ok=True)
+        page = out / f"highlights-{chosen}.html"
+        page.write_text(hl.export_html(s, ranked, f"Best of {chosen}"), encoding="utf-8")
+        console.print(f"[green]Wrote[/green] {page} ({len(ranked)} photos)")
+        if copy:
+            n = hl.copy_originals(s, ranked, out / "photos")
+            console.print(f"[green]Copied[/green] {n} originals to {out / 'photos'}")
+
+
+@app.command()
+def keywords(
+    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    remove: bool = typer.Option(False, "--remove", help="Remove Photocure keywords instead."),
+):
+    """Write (or remove) category, highlight and event keywords in XMP sidecars.
+
+    Only photocure-* keywords are touched. Ratings and other programs' keywords are kept, and a
+    sidecar edited outside Photocure is skipped. Writing creates a sidecar next to every photo.
+    """
+    from . import keywords as kw
+    cfg = _config(db)
+    try:
+        res = kw.write_all(cfg.db_path, cfg, keywords=not remove)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from None
+    t = Table(title="Keywords removed" if remove else "Keywords written")
+    t.add_column("Outcome")
+    t.add_column("Photos", justify="right")
+    labels = {"written": "Sidecars updated", "kept_foreign_rating": "Updated, existing rating kept",
+              "edited_elsewhere": "Skipped, edited by another program", "skipped": "Skipped",
+              "no_sidecar": "No sidecar", "nothing_to_write": "Nothing to write", "errors": "Errors"}
+    for key, label in labels.items():
+        if res.get(key):
+            t.add_row(label, str(res[key]))
+    console.print(t)
 
 
 @app.command()

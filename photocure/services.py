@@ -449,6 +449,30 @@ class Planner:
                                 is_alternate=cat == CategoryType.BURST_ALTERNATE)
         return matrix.evaluate_record(r)
 
+    def route_new(self) -> int:
+        """Give analysed photos that have no category yet one, so they show up for review.
+
+        No plan is built and nothing on disk changes. Hand-sorted and locked photos are left to
+        their owners. Returns how many photos were filed.
+        """
+        from sqlalchemy.orm import selectinload
+        from .db.models import ImageRecord, utcnow
+        I = ImageRecord
+        filed = 0
+        with get_session(self.db_path) as session:
+            matrix = DecisionMatrix(self.cfg)
+            rows = session.exec(
+                select(I).where(I.category.is_(None), I.infer_status.in_(("inferred", "failed")),
+                                I.scan_status != "missing", I.manual_bucket.is_(None), I.locked == False)  # noqa: E712
+                .options(selectinload(I.semantic), selectinload(I.quality), selectinload(I.faces))).all()
+            for r in rows:
+                dec = self._decide(matrix, r)
+                r.category = _alt_key() if dec.is_alternate else dec.category.value
+                r.subcategory = dec.subcategory
+                r.updated_at = utcnow()
+                filed += 1
+        return filed
+
     # --------------------------------------------------------- persistence
     def _persist_plan(self, plan: Plan) -> None:
         with get_session(self.db_path) as session:

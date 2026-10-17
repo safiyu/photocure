@@ -691,7 +691,7 @@ def test_progress_is_stopped_when_the_run_aborts(tmp_db, tmp_path, monkeypatch):
     assert events == ["start", "stop"]
 
 
-def test_pipeline_stores_low_contrast_flag_and_aesthetic(tmp_db, tmp_path):
+def test_pipeline_stores_low_contrast_flag_without_placeholder_aesthetic(tmp_db, tmp_path):
     from photocure.db.models import QualityMetric
     from photocure.scanner.file_scanner import FileScanner
     cfg = _cfg(tmp_db)
@@ -705,8 +705,8 @@ def test_pipeline_stores_low_contrast_flag_and_aesthetic(tmp_db, tmp_path):
     with get_session(tmp_db) as s:
         rec = PhotoRepository(s).get_by_path(str(flat))
         assert rec.quality.is_low_contrast is True
-        assert rec.semantic.aesthetic is not None
-        assert 0.0 <= rec.semantic.aesthetic <= 1.0
+        # The suite runs on the stub backend, whose embeddings must not be scored.
+        assert rec.semantic.aesthetic is None
 
 
 def test_pipeline_persists_normalised_face_boxes_and_scale(tmp_db, tmp_path, monkeypatch):
@@ -742,3 +742,73 @@ def test_onnx_export_reports_missing_torch(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "torch", None)
     with pytest.raises(ImportError, match="torch"):
         export_models(tmp_path / "out", CuratorConfig())
+
+
+# ---------------------------------------------------------------------------
+# Aesthetic scores in the pipeline
+# ---------------------------------------------------------------------------
+
+def _scan_one(tmp_db, tmp_path, seed=31):
+    from photocure.scanner.file_scanner import FileScanner
+    root = tmp_path / "lib"
+    path = make_image(root / f"IMG_{seed}.jpg", rng_seed=seed)
+    cfg = _cfg(tmp_db)
+    init_db(tmp_db, drop=True)
+    FileScanner(cfg).scan_directory(root, db_path=tmp_db, show_progress=False)
+    return cfg, path
+
+
+def _run(cfg, tmp_db, backend):
+    import os
+    prev = os.environ.get("PCUR_BACKEND")
+    os.environ["PCUR_BACKEND"] = backend
+    try:
+        reset_backend_cache()
+        return InferencePipeline(cfg).run(db_path=tmp_db, show_progress=False)
+    finally:
+        if prev is None:
+            os.environ.pop("PCUR_BACKEND", None)
+        else:
+            os.environ["PCUR_BACKEND"] = prev
+        reset_backend_cache()
+
+
+def test_pipeline_leaves_aesthetic_null_for_placeholder_embeddings(tmp_db, tmp_path):
+    cfg, path = _scan_one(tmp_db, tmp_path)
+    assert _run(cfg, tmp_db, "stub").processed == 1
+    with get_session(tmp_db) as s:
+        sem = PhotoRepository(s).get_by_path(str(path)).semantic
+        assert sem.aesthetic is None and sem.aesthetic_model == ""
+
+
+@pytest.mark.skipif(not _clip_available(), reason="open_clip not installed")
+def test_pipeline_stores_aesthetic_with_head_name(tmp_db, tmp_path):
+    from photocure.inference import aesthetic
+    aesthetic.reset_head()
+    cfg, path = _scan_one(tmp_db, tmp_path)
+    cfg.device.device = "cpu"
+    assert _run(cfg, tmp_db, "clip").processed == 1
+    with get_session(tmp_db) as s:
+        sem = PhotoRepository(s).get_by_path(str(path)).semantic
+        assert sem.backend == "clip"
+        assert sem.aesthetic is not None and 0.0 <= sem.aesthetic <= 1.0
+        assert sem.aesthetic_model == "laion-sa-v1-vit-b-16"
+
+
+def test_pipeline_run_reconciles_existing_aesthetic_scores(tmp_db, tmp_path):
+    from photocure.inference import aesthetic
+    from photocure.db.models import SemanticScore
+    cfg, path = _scan_one(tmp_db, tmp_path)
+    assert _run(cfg, tmp_db, "stub").processed == 1
+    with get_session(tmp_db) as s:
+        sem = PhotoRepository(s).get_by_path(str(path)).semantic
+        sem.backend, sem.aesthetic, sem.aesthetic_model = "clip", 0.42, ""
+        s.add(sem)
+        s.commit()
+    aesthetic.reset_head()
+    head = aesthetic.get_head()
+    assert _run(cfg, tmp_db, "stub").processed == 0  # nothing pending, still reconciles
+    with get_session(tmp_db) as s:
+        sem = PhotoRepository(s).get_by_path(str(path)).semantic
+        assert sem.aesthetic_model == head.name
+        assert sem.aesthetic != 0.42
