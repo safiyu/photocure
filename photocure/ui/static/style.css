@@ -541,6 +541,22 @@ body.has-picks .pick { opacity: 1; }
 .step.locked .step-num { color: var(--faint); }
 .step.locked .state { color: var(--faint); }
 
+/* C9: animated chevron connectors between step cards. Overlay the gap on desktop; rotate 90deg when stacked. */
+.step { position: relative; }
+.step-flow {
+  position: absolute; right: -14px; top: 50%; transform: translate(50%, -50%);
+  display: flex; gap: 2px; z-index: 2; pointer-events: none; color: var(--faint);
+}
+.step-flow .chev { width: 16px; height: 16px; flex: none; }
+.step-flow .chev:nth-child(1) { animation: chev-flow 1.4s ease-in-out infinite; }
+.step-flow .chev:nth-child(2) { animation: chev-flow 1.4s ease-in-out .35s infinite; }
+@keyframes chev-flow {
+  0%, 100% { opacity: .25; transform: translateX(-3px); }
+  50% { opacity: 1; transform: translateX(2px); }
+}
+.step.done .step-flow { color: var(--ok-sage); }
+.step:has(+ .step.active) .step-flow { color: var(--accent-electric); }
+
 .runall { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 26px; }
 .runall .btn { height: 38px; padding: 0 22px; border-radius: 20px; font-weight: 600; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
 .runall .btn.primary { background: var(--accent-electric); border-color: var(--accent-electric); color: #fff; box-shadow: var(--accent-glow); }
@@ -717,6 +733,7 @@ body.has-picks .pick { opacity: 1; }
 /* Motion-sensitivity guard: freeze the wave and keep the resting heights. */
 @media (prefers-reduced-motion: reduce) {
   .spectrum-bar, #progress-card.active .spectrum-bar { animation: none !important; }
+  .step-flow .chev { animation: none !important; opacity: .55; transform: none !important; }
 }
 
 /* ------------------------------------------------------------------ bulk bar */
@@ -817,6 +834,7 @@ body.has-picks .pick { opacity: 1; }
   .bulk { left: 50%; width: calc(100vw - 24px); flex-wrap: wrap; }
   /* C8: the 3-step workflow stacks into a single column on tablet/mobile. */
   .steps { grid-template-columns: 1fr; }
+  .step-flow { right: 50%; top: auto; bottom: -22px; transform: translate(50%, 50%) rotate(90deg); }
   .lb { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
   .lb-stage { padding: 56px 12px 12px; }
   .lb-nav { top: auto; bottom: 12px; transform: none; } .lb-nav.prev { left: 12px; } .lb-nav.next { right: 12px; }
