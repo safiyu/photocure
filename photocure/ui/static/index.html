@@ -28,6 +28,10 @@
     <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></symbol>
     <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/></symbol>
     <symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 7h11l-3-3M17 17H6l3 3"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><path d="M9 9h6v6H9z"/><path d="M5 5h14v14H5z"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><path d="M12 17a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-sun" viewBox="0 0 24 24"><path d="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"/></symbol>
@@ -44,6 +48,7 @@
     <symbol id="i-help" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9.5a2.5 2.5 0 1 1 4 2c-.9.6-1.5 1-1.5 2M12 17h.01"/></symbol>
     <symbol id="i-image" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M9 9.5h.01"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19zM12 10v4M12 17h.01"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2 12h4l2.5-7 4 14 2.5-7H22"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
   </svg>
 
@@ -83,7 +88,11 @@
         <button class="devchip" id="device-chip" data-goto="settings" title="Open Settings" type="button"><i class="dot"></i><span id="device-chip-text">Checking device</span></button>
         <button class="tab navitem" data-tab="settings"><svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg><span>Settings</span><em class="count"></em></button>
         <div class="foot-icons">
-          <button class="icon-btn" id="theme-toggle" title="Switch between light and dark" aria-label="Switch between light and dark"><svg class="ic" aria-hidden="true"><use href="#i-moon"/></svg></button>
+          <label class="switch" id="theme-toggle" tabindex="0" title="Switch between light and dark"
+                 aria-label="Switch between light and dark">
+            <input type="checkbox" id="theme-switch" role="switch" aria-checked="false">
+            <span class="slider" aria-hidden="true"></span>
+          </label>
           <button class="icon-btn" id="btn-help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
         </div>
         <div class="sidebar-footer"><span class="app-credit">Photocure <span id="sidebar-version"></span> • by Safiyu</span></div>
@@ -97,7 +106,7 @@
           <h1 id="page-title">Import</h1>
           <div class="sub" id="page-sub"></div>
         </div>
-        <span id="header-version-badge" class="version-pill" role="button" tabindex="0" title="Click to view About Photocure" data-goto="settings"></span>
+        <button id="header-version-badge" class="version-pill" type="button" title="Click to view About Photocure" data-goto="settings"></button>
         <div id="topbar-progress" class="pill" hidden role="status">
           <span class="spinner" id="topbar-spinner"></span>
           <span id="topbar-status-icon" hidden></span>
@@ -115,10 +124,14 @@
               <span id="progress-status-icon" hidden></span>
               <span id="progress-title">Working</span>
             </div>
-            <div style="display:flex;align-items:center;gap:8px">
+            <div class="progress-controls">
+              <div class="spectrum-bars" aria-hidden="true">
+                <span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span><span class="spectrum-bar"></span>
+              </div>
+              <span class="progress-ratio" id="progress-ratio"></span>
               <span class="progress-pct" id="progress-pct">0%</span>
               <button id="btn-stop-progress" class="stop-btn" title="Stop current process" style="display:none">Stop</button>
-              <button id="btn-dismiss-progress" class="dismiss-btn" title="Dismiss" style="display:none">Dismiss</button>
+              <button id="btn-dismiss-progress" class="dismiss-btn" title="Dismiss" aria-label="Dismiss" style="display:none"><svg class="ic sm" aria-hidden="true"><use href="#i-x"/></svg></button>
             </div>
           </div>
           <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
@@ -144,30 +157,42 @@
               <div class="field">
                 <label for="scan-path">Photo folder</label>
                 <div class="with-btn">
-                  <input id="scan-path" type="text" placeholder="Choose a folder" autocomplete="off" spellcheck="false">
-                  <button class="btn" id="btn-browse-scan" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+                  <span class="search-field">
+                    <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+                    <input id="scan-path" type="text" placeholder="Choose a folder" autocomplete="off" spellcheck="false">
+                  </span>
                 </div>
               </div>
-              <div class="actions"><button id="btn-scan" data-busy class="btn">Scan folder</button></div>
+              <div class="actions">
+                <button class="btn" id="btn-browse-scan" type="button"><svg class="ic sm" aria-hidden="true"><use href="#i-folder"/></svg>Browse Folder</button>
+                <button id="btn-scan" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-camera"/></svg>Scan</button>
+              </div>
             </li>
             <li class="step" id="step-infer">
               <div class="step-head">
                 <span class="step-num"><span class="n">2</span><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></span>
                 <h3>Analyze</h3>
                 <span class="state" id="state-infer"></span>
+                <button class="step-more" id="step-infer-more" type="button" title="Inference settings" aria-label="Inference settings" data-goto="settings"><svg class="ic sm" aria-hidden="true"><use href="#i-menu"/></svg></button>
               </div>
               <p>Finds faces, checks sharpness and exposure, and labels what each photo shows.</p>
               <div class="field">
                 <label for="infer-device">Run on</label>
-                <select id="infer-device">
-                  <option value="auto">Automatic</option>
-                  <option value="cpu">CPU only</option>
-                  <option value="cuda">NVIDIA GPU</option>
-                  <option value="mps">Apple GPU</option>
-                </select>
+                <div class="device-chip">
+                  <svg class="ic sm" aria-hidden="true"><use href="#i-cpu"/></svg>
+                  <select id="infer-device">
+                    <option value="auto">Automatic</option>
+                    <option value="cpu">CPU only</option>
+                    <option value="cuda">NVIDIA GPU</option>
+                    <option value="mps">Apple GPU</option>
+                  </select>
+                  <svg class="ic sm chevron" aria-hidden="true"><use href="#i-down"/></svg>
+                </div>
                 <a class="link" href="#settings" data-goto="settings">Devices and workers in Settings</a>
               </div>
-              <div class="actions"><button id="btn-infer" data-busy class="btn">Analyze photos</button></div>
+              <div class="actions">
+                <button id="btn-infer" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Analyze Now</button>
+              </div>
             </li>
             <li class="step" id="step-cluster">
               <div class="step-head">
@@ -176,7 +201,19 @@
                 <span class="state" id="state-cluster"></span>
               </div>
               <p>Finds shots taken seconds apart and keeps the best one from each group.</p>
-              <div class="actions"><button id="btn-cluster" data-busy class="btn">Group bursts</button></div>
+              <svg class="burst-art" viewBox="0 0 96 72" aria-hidden="true">
+                <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+                  <rect x="33" y="44" width="34" height="22" rx="3"/>
+                  <rect x="26" y="27" width="34" height="22" rx="3"/>
+                  <rect x="19" y="10" width="34" height="22" rx="3"/>
+                </g>
+                <g fill="none" stroke="currentColor" stroke-width="1.2" opacity=".65">
+                  <rect x="26" y="15" width="10" height="8" rx="1.5"/>
+                </g>
+              </svg>
+              <div class="actions">
+                <button id="btn-cluster" data-busy class="btn" disabled><svg class="ic sm" aria-hidden="true"><use href="#i-swap"/></svg>Group<svg class="ic sm lock" aria-hidden="true"><use href="#i-lock"/></svg></button>
+              </div>
             </li>
           </ol>
 
@@ -186,7 +223,7 @@
             <span id="library-status" class="muted">Choose a folder, then run all three steps. Nothing is moved until you apply a plan.</span>
           </div>
 
-          <h2 class="panel-title">Activity</h2>
+          <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity</h2>
           <div id="library-log" class="action-log"><div class="logline">Nothing has run yet.</div></div>
         </section>
 
@@ -211,11 +248,19 @@
             </select>
             <select id="f-country" aria-label="Country" hidden><option value="">All countries</option></select>
             <label class="toggle"><input type="checkbox" id="f-fav">Favourites</label>
+            <button id="reset-filters" class="btn sm" type="button" hidden>Reset filters</button>
             <span class="grow"></span>
             <label class="density">Size <input type="range" id="density" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="rowcount" class="rowcount"></span>
           </div>
           <div class="scrubber" id="scrubber" hidden>
+            <div class="scrub-presets" id="scrub-presets" role="group" aria-label="Date presets">
+              <button type="button" class="preset-btn active" data-preset="all">All</button>
+              <button type="button" class="preset-btn" data-preset="year">This year</button>
+              <button type="button" class="preset-btn" data-preset="90d">Last 90 days</button>
+              <button type="button" class="preset-btn" data-preset="30d">Last 30 days</button>
+              <button type="button" class="preset-btn" data-preset="custom">Custom</button>
+            </div>
             <label>From <span id="scrub-from-label"></span>
               <input type="range" id="scrub-from" min="0" max="0" value="0" aria-label="Earliest date shown"></label>
             <label>To <span id="scrub-to-label"></span>
@@ -366,7 +411,7 @@
             </div>
           </div>
 
-          <h2 class="panel-title">Activity</h2>
+          <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity</h2>
           <div id="action-log" class="action-log"><div class="logline">Nothing has run yet.</div></div>
         </section>
 
@@ -577,6 +622,11 @@
       <h2 id="confirm-modal-title"></h2>
       <p id="confirm-modal-message"></p>
       <div id="confirm-modal-detail" class="confirm-detail"></div>
+      <div id="confirm-modal-input-wrap" class="confirm-input-wrap" hidden>
+        <label id="confirm-modal-input-label" for="confirm-modal-input" class="confirm-input-label"></label>
+        <input id="confirm-modal-input" type="text" autocomplete="off" class="confirm-input">
+        <p id="confirm-modal-input-error" class="field-error" role="alert" hidden></p>
+      </div>
       <div class="confirm-buttons">
         <button type="button" id="confirm-modal-cancel" class="btn"></button>
         <button type="button" id="confirm-modal-ok" class="btn"></button>

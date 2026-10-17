@@ -278,6 +278,8 @@ try {
   });
 
   await scenario("the grid lays out cleanly after a resize", async () => {
+    await sleep(250);
+    await settle();
     const layout = () => page.eval(`(() => {
       const cs = [...document.querySelectorAll('#grid .vg-window .card')].map((c) => c.getBoundingClientRect());
       const rows = new Map();
@@ -391,6 +393,242 @@ try {
     await page.waitFor(`document.querySelector('#grid .card[data-id="${b}"] .catline .tag') && document.querySelector('#grid .card[data-id="${c}"] .catline .tag')`, 8000, "both selected photos edited");
     check(await page.eval("document.querySelector('#bulkbar').hidden"), "selection was not cleared");
     check(!(await menuOpen()), "picker is still open");
+  });
+
+  await scenario("lightbox focus restoration and focus trap", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click()");
+    await settle();
+    const firstCard = await page.eval("document.querySelector('#grid .vg-window .card[data-idx=\"0\"]')");
+    check(firstCard, "no first card in grid");
+    await page.eval("document.querySelector('#grid .vg-window .card[data-idx=\"0\"] .thumb').click()");
+    await page.waitFor("!document.querySelector('#lightbox').hidden", 8000, "lightbox opens");
+    for (let i = 0; i < 10; i++) {
+      await press("Tab");
+      const inLb = await page.eval("!!document.querySelector('#lightbox').contains(document.activeElement)");
+      check(inLb, "focus leaked outside lightbox during Tab");
+    }
+    await press("Escape");
+    await page.waitFor("document.querySelector('#lightbox').hidden", 8000, "lightbox closes");
+    await settle();
+    const activeCard = await page.eval("document.activeElement && document.activeElement.classList.contains('card')");
+    check(activeCard, "focus did not return to the originating card");
+    const bodyFocus = await page.eval("document.activeElement === document.body");
+    check(!bodyFocus, "focus dropped to body after closing lightbox");
+  });
+
+  await scenario("in-app prompt dialog replaces window.prompt for new folder and event rename", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click()");
+    await page.waitFor("document.querySelector('.panel.active').id === 'tab-library'", 8000, "library panel");
+    await page.eval("document.querySelector('#btn-browse-scan').click()");
+    await page.waitFor("!document.querySelector('#picker').hidden && !!document.querySelector('#picker-path').value", 8000, "picker open and loaded");
+
+    // Folder creation with validation
+    await page.eval("document.querySelector('#picker-new').click()");
+    await page.waitFor("!document.querySelector('#confirm-modal').hidden", 5000, "confirm modal open");
+    check(await page.eval("!document.querySelector('#confirm-modal-input-wrap').hidden"), "input wrap not visible");
+    await page.eval("document.querySelector('#confirm-modal-input').value = ''");
+    await page.eval("document.querySelector('#confirm-modal-ok').click()");
+    await page.waitFor("!document.querySelector('#confirm-modal-input-error').hidden", 4000, "empty name error");
+    check(!await page.eval("document.querySelector('#confirm-modal').hidden"), "modal closed on invalid name");
+
+    await page.eval("document.querySelector('#confirm-modal-input').value = 'bad/folder'");
+    await page.eval("document.querySelector('#confirm-modal-ok').click()");
+    await page.waitFor("!document.querySelector('#confirm-modal-input-error').hidden", 4000, "unsafe name error");
+
+    await press("Escape");
+    await page.waitFor("document.querySelector('#confirm-modal').hidden", 4000, "modal closed on Escape");
+
+    await press("Escape");
+    await page.waitFor("document.querySelector('#picker').hidden", 4000, "picker closed on Escape");
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click()");
+    await settle();
+  });
+
+  await scenario("persistent reset-filters button appears, disappears, and resets in one round-trip", async () => {
+    check(await page.eval("document.querySelector('#reset-filters').hidden"), "reset-filters not initially hidden");
+    await page.eval("document.querySelector('#f-fav').click()");
+    await page.waitFor("!document.querySelector('#reset-filters').hidden", 5000, "reset-filters shown after filter change");
+    await page.eval("document.querySelector('#reset-filters').click()");
+    await page.waitFor("document.querySelector('#reset-filters').hidden", 5000, "reset-filters hidden after click");
+    check(!await page.eval("document.querySelector('#f-fav').checked"), "fav filter was not cleared");
+  });
+
+  await scenario("native version badge button activates via Enter or Space", async () => {
+    await page.eval("document.querySelector('#header-version-badge').focus()");
+    check(await page.eval("document.activeElement.id === 'header-version-badge'"), "version badge not focused");
+    check(await page.eval("document.querySelector('#header-version-badge').tagName === 'BUTTON'"), "version badge is not button");
+    await press("Enter");
+    await page.waitFor("document.querySelector('.panel.active').id === 'tab-settings'", 8000, "settings panel active after Enter");
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click()");
+    await settle();
+  });
+
+  await scenario("touch swipe navigation in lightbox stage", async () => {
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 8000, "cards rendered");
+    await page.eval("document.querySelector('#grid .vg-window .card[data-idx=\"0\"] .thumb').click()");
+    await page.waitFor("!document.querySelector('#lightbox').hidden", 8000, "lightbox opens");
+    const title0 = await page.eval("document.querySelector('#lb-title').textContent");
+
+    // Touch swipe left steps forward
+    await page.eval(`(() => {
+      const stage = document.querySelector('.lb-stage');
+      const r = stage.getBoundingClientRect();
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      stage.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'touch' }));
+      stage.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x - 80, clientY: y, pointerType: 'touch' }));
+    })()`);
+    await page.waitFor(`document.querySelector('#lb-title').textContent !== ${JSON.stringify(title0)}`, 8000, "swipe left stepped");
+
+    // Mouse drag is ignored
+    const curTitle = await page.eval("document.querySelector('#lb-title').textContent");
+    await page.eval(`(() => {
+      const stage = document.querySelector('.lb-stage');
+      const r = stage.getBoundingClientRect();
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      stage.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerType: 'mouse' }));
+      stage.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x - 80, clientY: y, pointerType: 'mouse' }));
+    })()`);
+    check((await page.eval("document.querySelector('#lb-title').textContent")) === curTitle, "mouse drag stepped photo");
+
+    await press("Escape");
+    await page.waitFor("document.querySelector('#lightbox').hidden", 5000);
+    await settle();
+  });
+
+  await scenario("date presets compute parameters and animate scrubber", async () => {
+    await page.eval("document.querySelector('#scrub-presets .preset-btn[data-preset=\"year\"]').click()");
+    await page.waitFor("document.querySelector('#scrub-presets .preset-btn[data-preset=\"year\"]').classList.contains('active')", 5000, "year active");
+    await page.waitFor("!document.querySelector('#reset-filters').hidden", 5000, "reset-filters visible on preset");
+    await page.eval("document.querySelector('#reset-filters').click()");
+    await page.waitFor("document.querySelector('#reset-filters').hidden", 5000, "filters reset");
+    check(await page.eval("document.querySelector('#scrub-presets .preset-btn[data-preset=\"all\"]').classList.contains('active')"), "preset reset to all");
+  });
+
+  await scenario("roving focus for virtual grid has exactly one tab stop and moves DOM focus", async () => {
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 8000, "cards rendered");
+    const zeros = await page.eval("document.querySelectorAll('#grid .vg-window .card[tabindex=\"0\"]').length");
+    check(zeros === 1, "expected exactly 1 card with tabindex=0, got " + zeros);
+    const negButtons = await page.eval("document.querySelectorAll('#grid .vg-window .card[tabindex=\"-1\"] button:not([tabindex=\"-1\"])').length");
+    check(negButtons === 0, "found tabbable buttons in inactive cards: " + negButtons);
+    await press("ArrowRight");
+    await settle();
+    const focusedCard = await page.eval("document.activeElement.classList.contains('card')");
+    check(focusedCard, "ArrowRight did not move DOM focus to card");
+  });
+
+  await scenario("picker and help modals contain focus and restore to opener", async () => {
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card[tabindex=\"0\"]').length > 0", 8000, "card with tabindex 0 rendered");
+    await page.eval("document.querySelector('#grid .vg-window .card[tabindex=\"0\"]').focus()");
+    await press("?");
+    await page.waitFor("!document.querySelector('#help').hidden", 5000, "help modal open");
+    check(await page.eval("document.activeElement.id === 'help-close'"), "focus started on help-close");
+    for (let i = 0; i < 5; i++) await press("Tab");
+    check(await page.eval("document.querySelector('#help').contains(document.activeElement)"), "focus escaped help modal");
+    await press("Escape");
+    await page.waitFor("document.querySelector('#help').hidden", 5000, "help closed on Escape");
+    check(await page.eval("document.activeElement.classList.contains('card')"), "focus restored to card after closing help");
+  });
+
+  await scenario("the hardware theme switch flips light/dark and stays in sync (click + keyboard)", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click()");
+    await settle();
+    const flip = (t) => (t === "dark" ? "light" : "dark");
+    const snap = () => page.eval(`(() => {
+      const sw = document.getElementById('theme-switch');
+      return { theme: document.documentElement.dataset.theme, checked: sw.checked,
+        aria: sw.getAttribute('aria-checked'), stored: localStorage.getItem('pcur-theme') };
+    })()`);
+    const t0 = (await snap()).theme;
+    check(t0 === "light" || t0 === "dark", "no initial theme: " + t0);
+
+    // 1) Drive the checkbox's change event (the click path) -> the whole system follows.
+    await page.eval(`(() => { const sw = document.getElementById('theme-switch'); sw.checked = !sw.checked; sw.dispatchEvent(new Event('change')); })()`);
+    const a = await snap();
+    check(a.theme === flip(t0), "data-theme did not flip to " + flip(t0) + " (got " + a.theme + ")");
+    check(a.checked === (flip(t0) === "dark"), "checkbox state is out of sync");
+    check(a.aria === String(flip(t0) === "dark"), "aria-checked is out of sync");
+    check(a.stored === flip(t0), "localStorage pcur-theme is out of sync");
+
+    // 2) Focus the label and press Space (the keyboard path) -> flips back to the original.
+    await page.eval("document.getElementById('theme-toggle').focus()");
+    check(await page.eval("document.activeElement.id === 'theme-toggle'"), "the switch label is not keyboard-focusable");
+    await press(" ");
+    const b = await snap();
+    check(b.theme === t0, "keyboard toggle did not restore " + t0 + " (got " + b.theme + ")");
+    check(b.checked === (t0 === "dark") && b.aria === String(t0 === "dark") && b.stored === t0, "state not restored in sync after keyboard toggle");
+    await shot("12-theme-switch");
+  });
+
+  await scenario("step cards reflect library state and stack to one column on tablet", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click()");
+    await settle();
+    const info = await page.eval(`(() => {
+      const steps = [...document.querySelectorAll('.steps > .step')].map((li) => ({
+        id: li.id, done: li.classList.contains('done'), active: li.classList.contains('active'), locked: li.classList.contains('locked'),
+        badgeBg: getComputedStyle(li.querySelector('.step-num')).backgroundColor,
+        checkVisible: getComputedStyle(li.querySelector('.step-num .ic')).display !== 'none',
+        numHidden: getComputedStyle(li.querySelector('.step-num .n')).display === 'none'
+      }));
+      return {
+        steps,
+        states: { scan: document.getElementById('state-scan').textContent, infer: document.getElementById('state-infer').textContent,
+                  cluster: document.getElementById('state-cluster').textContent },
+        cols: getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length
+      };
+    })()`);
+    // Seeded library: 5,000 indexed + 1 burst group, all inferred -> every step is done.
+    const byId = Object.fromEntries(info.steps.map((s) => [s.id, s]));
+    for (const id of ["step-scan", "step-infer", "step-cluster"]) {
+      check(byId[id].done, id + " is not in the done state");
+      check(!byId[id].active && !byId[id].locked, id + " carries a conflicting state class");
+      check(byId[id].badgeBg !== "rgba(0, 0, 0, 0)", id + " badge has no painted background");
+      check(byId[id].checkVisible && byId[id].numHidden, id + " did not swap its number for the check mark");
+    }
+    check(/indexed/.test(info.states.scan), "step 1 state text has no index count: " + info.states.scan);
+    check(info.states.infer === "Done", "step 1 done but step 2 is not marked done: " + info.states.infer);
+    check(/group/.test(info.states.cluster), "step 3 state text has no group count: " + info.states.cluster);
+    check(info.cols === 3, "wide layout should show 3 step columns, got " + info.cols);
+
+    // Tablet: at <= 960px the 3-column grid stacks to a single column.
+    await page.viewport(900, 800);
+    await page.waitFor(`getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length === 1`, 8000, "steps stack to one column");
+    await settle();
+    const narrow = await page.eval("getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length");
+    check(narrow === 1, "tablet layout should show 1 step column, got " + narrow);
+    await shot("13-steps-tablet");
+    await page.viewport(1400, 900);
+    await page.waitFor(`getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length === 3`, 8000, "steps restore to 3 columns");
+    await settle();
+  });
+
+  await scenario("activity log rows render monospace tabular time pills", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click()");
+    await settle();
+    // An empty scan path is a safe, non-mutating way to make the real logTo() write a row.
+    await page.eval("document.getElementById('scan-path').value = ''");
+    await page.eval("document.getElementById('btn-scan').click()");
+    await page.waitFor(`(() => { const l = document.querySelector('#library-log .logline .time-pill'); return l && /\\d{1,2}:\\d{2}/.test(l.textContent); })()`, 8000, "a time-pill appears in the activity log");
+    const log = await page.eval(`(() => {
+      const rows = [...document.querySelectorAll('#library-log .logline')];
+      const err = rows.find((r) => r.textContent.includes('Choose a photo folder'));
+      const anyPill = document.querySelector('#library-log .logline .time-pill');
+      const cs = getComputedStyle(anyPill);
+      return {
+        hasErrRow: !!err,
+        errPillClass: err ? err.querySelector('.time-pill').className : "",
+        errHighlighted: err ? err.classList.contains('active-highlight') : false,
+        fontFamily: cs.fontFamily, fontVariant: cs.fontVariantNumeric,
+        pillText: anyPill.textContent,
+        terminalBg: getComputedStyle(document.getElementById('library-log')).backgroundColor
+      };
+    })()`);
+    check(/\d{1,2}:\d{2}/.test(log.pillText), "time-pill has no readable time: " + log.pillText);
+    check(/JetBrains Mono/.test(log.fontFamily), "time-pill is not monospace: " + log.fontFamily);
+    check(/tabular-nums/.test(log.fontVariant), "time-pill is not tabular: " + log.fontVariant);
+    check(log.hasErrRow && log.errPillClass.includes("muted"), "the error row should carry a muted time-pill: " + log.errPillClass);
+    check(!log.errHighlighted, "an error row should not be a completion highlight");
+    check(log.terminalBg !== "rgba(0, 0, 0, 0)", "the activity terminal has no painted background");
+    await shot("14-log-pills");
   });
 
   await scenario("the page raised no script errors", async () => {

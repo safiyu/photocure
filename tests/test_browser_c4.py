@@ -22,6 +22,7 @@ BROWSER = ROOT / "tests" / "browser"
 CHROME_CANDIDATES = [
     os.environ.get("PCUR_CHROME"), "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser",
+    "/opt/brave.com/brave/brave", "/opt/brave.com/brave/brave-browser", "/usr/bin/brave-browser",
 ]
 
 pytestmark = pytest.mark.browser
@@ -93,7 +94,12 @@ def test_every_browser_scenario_passes(outcome):
 
 def test_the_expected_scenarios_all_ran(outcome):
     names = {r["name"] for r in outcome["results"]}
-    for needle in ("one-time code", "sign-in box", "DOM stays within 100 cards", "recycled", "arrow keys move",
-                   "keys rate", "XMP sidecar", "edited elsewhere", "page boundary", "filters agree",
-                   "date scrubber", "resize", "WebP", "Reject all blinks", "Inspect faces", "category label", "no script errors"):
+    for needle in (
+        "one-time code", "sign-in box", "DOM stays within 100 cards", "recycled",
+        "arrow keys move", "keys rate", "XMP sidecar", "edited elsewhere", "page boundary",
+        "filters agree", "date scrubber", "resize", "WebP", "Reject all blinks", "Inspect faces",
+        "category label", "lightbox focus restoration", "in-app prompt dialog",
+        "persistent reset-filters", "version badge button", "touch swipe navigation",
+        "date presets", "roving focus", "picker and help modals", "no script errors",
+    ):
         assert any(needle in n for n in names), f"no scenario mentions {needle!r}: {sorted(names)}"

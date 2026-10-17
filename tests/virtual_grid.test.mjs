@@ -124,3 +124,213 @@ test("moveIndex clamps at both ends and starts sensibly with no cursor", () => {
   assert.equal(moveIndex(-1, -1, 100), 99);
   assert.equal(moveIndex(3, 1, 0), -1);
 });
+
+// C7 §7.9: Roving Focus & Accessibility Tests
+import { VirtualGrid } from "../photocure/ui/static/virtual_grid.mjs";
+
+function makeMockElement(tagName = "div") {
+  const children = [];
+  const attrs = new Map();
+  const classes = new Set();
+  const listeners = new Map();
+  const style = new Map();
+  let winRef = null;
+  const el = {
+    tagName: tagName.toUpperCase(),
+    dataset: {},
+    hidden: false,
+    _winRef: null,
+    style: {
+      setProperty(k, v) { style.set(k, v); },
+      getPropertyValue(k) { return style.get(k) || ""; },
+      set height(v) { style.set("height", v); },
+      get height() { return style.get("height") || ""; },
+      set transform(v) { style.set("transform", v); },
+      get transform() { return style.get("transform") || ""; },
+    },
+    classList: {
+      add(...cs) { cs.forEach((c) => classes.add(c)); },
+      remove(...cs) { cs.forEach((c) => classes.delete(c)); },
+      toggle(c, force) {
+        if (force === undefined) {
+          if (classes.has(c)) classes.delete(c); else classes.add(c);
+        } else if (force) classes.add(c);
+        else classes.delete(c);
+        return classes.has(c);
+      },
+      contains(c) { return classes.has(c); },
+    },
+    clientWidth: 1000,
+    offsetParent: {},
+    getBoundingClientRect() {
+      const top = 100 - (el._winRef ? el._winRef.scrollY : 0);
+      return { top, bottom: top + 800, left: 0, right: 1000, width: 1000, height: 800 };
+    },
+    setAttribute(k, v) { attrs.set(k, String(v)); },
+    getAttribute(k) { return attrs.get(k) ?? null; },
+    hasAttribute(k) { return attrs.has(k); },
+    removeAttribute(k) { attrs.delete(k); },
+    appendChild(c) { children.push(c); c.parentElement = this; return c; },
+    append(...kids) { kids.forEach((k) => this.appendChild(k)); },
+    insertBefore(newChild, refChild) {
+      const idx = children.indexOf(refChild);
+      if (idx >= 0) children.splice(idx, 0, newChild);
+      else children.push(newChild);
+      newChild.parentElement = this;
+      return newChild;
+    },
+    replaceChildren(...kids) {
+      children.length = 0;
+      kids.forEach((k) => { children.push(k); k.parentElement = this; });
+    },
+    replaceWith(newEl) {
+      if (this.parentElement) {
+        const idx = this.parentElement.children.indexOf(this);
+        if (idx >= 0) {
+          this.parentElement.children[idx] = newEl;
+          newEl.parentElement = this.parentElement;
+        }
+      }
+    },
+    remove() {
+      if (this.parentElement) {
+        const idx = this.parentElement.children.indexOf(this);
+        if (idx >= 0) this.parentElement.children.splice(idx, 1);
+        this.parentElement = null;
+      }
+    },
+    querySelectorAll(selector) {
+      const matches = [];
+      function walk(n) {
+        for (const child of n.children) {
+          if (selector === "[data-boot]" && child.dataset.boot) matches.push(child);
+          else if (selector.includes("button") && (child.tagName === "BUTTON" || child.getAttribute("role") === "button")) matches.push(child);
+          else if (selector === ".card" && child.classList.contains("card")) matches.push(child);
+          walk(child);
+        }
+      }
+      walk(this);
+      return matches;
+    },
+    querySelector(selector) {
+      return this.querySelectorAll(selector)[0] || null;
+    },
+    get children() { return children; },
+    addEventListener(ev, fn) {
+      if (!listeners.has(ev)) listeners.set(ev, []);
+      listeners.get(ev).push(fn);
+    },
+    removeEventListener(ev, fn) {
+      const arr = listeners.get(ev);
+      if (arr) {
+        const i = arr.indexOf(fn);
+        if (i >= 0) arr.splice(i, 1);
+      }
+    },
+    focus() { this._focused = true; },
+  };
+  return el;
+}
+
+test("roving tabindex: exactly one card has tabindex='0', moves with cursor, survives recycling", async () => {
+  const prevDoc = globalThis.document;
+  globalThis.document = { createElement: (tag) => makeMockElement(tag) };
+  try {
+    const mockWin = {
+      scrollY: 0,
+      innerHeight: 800,
+      requestAnimationFrame(fn) { return setTimeout(fn, 0); },
+      addEventListener() {},
+      removeEventListener() {},
+      scrollTo(x, y) { this.scrollY = y; },
+      getComputedStyle() {
+        return {
+          getPropertyValue(p) {
+            if (p === "--thumb-min") return "200px";
+            if (p === "--vg-caption-h") return "92px";
+            return "";
+          },
+        };
+      },
+    };
+
+    const host = makeMockElement("div");
+    host._winRef = mockWin;
+    const items = Array.from({ length: 500 }, (_, i) => ({ id: i + 1, filename: `photo_${i + 1}.jpg` }));
+
+    const grid = new VirtualGrid({
+      host,
+      pageSize: 50,
+      minCard: 200,
+      win: mockWin,
+      async fetchPage(offset, limit) {
+        return { items: items.slice(offset, offset + limit), total: items.length };
+      },
+      renderCard(it) {
+        const el = makeMockElement("figure");
+        el.classList.add("card");
+        el.dataset.id = String(it.id);
+        const btn = makeMockElement("button");
+        el.appendChild(btn);
+        return el;
+      },
+      renderSkeleton() {
+        const el = makeMockElement("div");
+        el.classList.add("skel");
+        return el;
+      },
+    });
+
+    // 1. Initial state
+    await grid.reset();
+    assert.equal(host.getAttribute("role"), "grid");
+    assert.equal(grid.window.getAttribute("role"), "row");
+
+    const zeroCardsInitial = [...grid.cards.values()].filter((c) => c.getAttribute("tabindex") === "0");
+    assert.equal(zeroCardsInitial.length, 1, "exactly one card has tabindex='0' initially");
+    assert.equal(zeroCardsInitial[0].dataset.id, "1", "initial roving card is item 1");
+
+    // Nested buttons on the roving card have tabindex="0", on other cards have tabindex="-1"
+    const rovingButtons = zeroCardsInitial[0].querySelectorAll("button");
+    assert.ok(rovingButtons.length > 0 && rovingButtons.every((b) => b.getAttribute("tabindex") === "0"));
+
+    const otherCards = [...grid.cards.values()].filter((c) => c.getAttribute("tabindex") === "-1");
+    assert.ok(otherCards.length > 0);
+    assert.ok(otherCards.every((c) => {
+      const btns = c.querySelectorAll("button");
+      return btns.every((b) => b.getAttribute("tabindex") === "-1");
+    }));
+
+    // 2. moveCursor moves the roving position and focuses the target card
+    await grid.moveCursor(1);
+    const zeroCardsAfterFirst = [...grid.cards.values()].filter((c) => c.getAttribute("tabindex") === "0");
+    assert.equal(zeroCardsAfterFirst.length, 1);
+    assert.equal(zeroCardsAfterFirst[0].dataset.id, "1");
+
+    await grid.moveCursor(1);
+    const zeroCardsAfterSecond = [...grid.cards.values()].filter((c) => c.getAttribute("tabindex") === "0");
+    assert.equal(zeroCardsAfterSecond.length, 1);
+    assert.equal(zeroCardsAfterSecond[0].dataset.id, "2");
+    assert.equal(grid.cursorId, 2);
+    assert.equal(zeroCardsAfterSecond[0]._focused, true, "card.focus was called on moveCursor");
+
+    // 3. Scroll recycling: scrolling far down drops card 2 from DOM
+    mockWin.scrollY = 2000;
+    grid.update();
+    assert.equal(grid.cards.has(1), false, "card 2 was recycled out of view");
+    const zeroCardsScrolled = [...grid.cards.values()].filter((c) => c.getAttribute("tabindex") === "0");
+    assert.equal(zeroCardsScrolled.length, 1, "exactly one tabindex='0' card exists even when active card is recycled");
+
+    // 4. Scroll back up: roving tabindex restores to card 2 by record ID, not DOM node
+    mockWin.scrollY = 0;
+    grid.update();
+    const zeroCardsRestored = [...grid.cards.values()].filter((c) => c.getAttribute("tabindex") === "0");
+    assert.equal(zeroCardsRestored.length, 1);
+    assert.equal(zeroCardsRestored[0].dataset.id, "2", "tabindex='0' restored to card id 2");
+
+    grid.destroy();
+  } finally {
+    globalThis.document = prevDoc;
+  }
+});
+
