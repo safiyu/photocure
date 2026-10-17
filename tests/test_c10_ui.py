@@ -172,3 +172,43 @@ def test_gauge_css_and_hero_is_not_sticky():
     )
     topbar = re.search(r"\.topbar\s*\{([^}]*)\}", css)
     assert topbar and "position: sticky" not in topbar.group(1), "the hero card scrolls with the page"
+
+
+# ------------------------------------------------------------------ blob cards and dark gradient
+
+def test_step_cards_have_organic_elliptical_radii():
+    css = _css()
+    rule = re.search(r"(?m)^\.step\s*\{([^}]*)\}", css)
+    assert rule, ".step base rule not found"
+    radius = re.search(r"border-radius:\s*([^;]+);", rule.group(1))
+    assert radius and "/" in radius.group(1), "blob shape needs elliptical radii (a '/' in border-radius)"
+    assert "var(--r-lg)" not in radius.group(1)
+
+
+def test_active_step_is_larger_with_scooped_cta():
+    css = _css()
+    active = re.search(r"\.step\.active\s*\{([^}]*)\}", css)
+    assert active and "scale(" in active.group(1) and "z-index" in active.group(1), (
+        "the active card must be raised and scaled"
+    )
+    cta = re.search(r"\.step\.active\s+\.actions\s+\.btn\.primary\s*\{([^}]*)\}", css)
+    assert cta and "border-radius" in cta.group(1) and "gradient" in cta.group(1), (
+        "the active CTA needs the scooped gradient shape"
+    )
+    tablet = re.search(r"@media\s*\(max-width:\s*960px\)\s*\{(.*?)\n\}", css, re.DOTALL)
+    assert tablet and re.search(r"\.step\.active\s*\{[^}]*transform:\s*none", tablet.group(1)), (
+        "stacked layout must not scale the active card past the page padding"
+    )
+
+
+def test_dark_theme_has_gradient_background_and_glass_cards():
+    css = _css()
+    body = re.search(r':root\[data-theme="dark"\]\s+body\s*\{([^}]*)\}', css)
+    assert body and "gradient" in body.group(1), "dark body needs a gradient background"
+    glass = re.search(r':root\[data-theme="dark"\]\s+\.step[^{]*\{([^}]*)\}', css)
+    assert glass and "gradient" in glass.group(1), "dark cards need a glass gradient fill"
+    assert "border-color" not in glass.group(1), (
+        "glass rule must not override the active step's electric border"
+    )
+    base_body = re.search(r"(?m)^body\s*\{([^}]*)\}", css)
+    assert base_body and "var(--table)" in base_body.group(1), "light theme body stays flat"

@@ -501,7 +501,8 @@ body.has-picks .pick { opacity: 1; }
 .sect.danger > h2 { border-left-color: var(--danger-crimson); }
 
 .steps { list-style: none; margin: 0 0 20px; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-.step { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+/* C10: asymmetric elliptical radii give each step card a soft, organic outline. */
+.step { background: var(--sheet); border: 1px solid var(--line); border-radius: 30px 46px 34px 42px / 36px 32px 44px 34px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
 .step-head { display: flex; align-items: center; gap: 12px; }
 .step-num {
   display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; flex: none;
@@ -545,7 +546,17 @@ body.has-picks .pick { opacity: 1; }
 .step .actions .btn .lock { width: 14px; height: 14px; color: var(--faint); }
 
 /* C8: step-card status states (M9). .active = focused/ready, .locked = pending. */
-.step.active { border: 1.5px solid var(--accent-electric); box-shadow: var(--accent-glow); }
+.step.active {
+  border: 1.5px solid var(--accent-electric); box-shadow: var(--accent-glow);
+  border-radius: 44px 60px 40px 56px / 48px 40px 56px 42px;
+  transform: translateY(-6px) scale(1.035); z-index: 3;
+}
+.step.active .actions .btn.primary {
+  flex: 1; height: 48px; font-size: 15px;
+  border-radius: 55% 55% 16px 16px / 70% 70% 16px 16px;
+  background: linear-gradient(180deg, #6070f2 0%, #3b3fd6 100%);
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.18), var(--accent-glow);
+}
 .step.active .step-num { background: var(--accent-electric); border-color: var(--accent-electric); color: #fff; }
 .step.active .state { color: var(--accent-electric); background: var(--accent-pill); }
 .step.locked { opacity: 0.55; }
@@ -586,6 +597,21 @@ body.has-picks .pick { opacity: 1; }
 .dock-actions .btn.danger { background: var(--danger-crimson-bg); border-color: var(--danger-crimson-border); color: var(--danger-crimson); }
 .dock-actions .btn.danger:hover { background: color-mix(in srgb, var(--danger-crimson) 20%, var(--danger-crimson-bg)); border-color: var(--danger-crimson); }
 .dock-status { margin: 0 0 26px 22px; color: var(--mut); font-size: 13px; line-height: 1.45; }
+
+/* C10: dark theme gets a gradient canvas and glass card fills (backgrounds only, so borders and glows stay intact). */
+:root[data-theme="dark"] body {
+  background-color: var(--canvas-bg);
+  background-image:
+    radial-gradient(1100px 520px at 72% -8%, rgba(70, 90, 190, 0.28), transparent 62%),
+    linear-gradient(180deg, #10152a 0%, var(--canvas-bg) 55%);
+  background-attachment: fixed;
+}
+:root[data-theme="dark"] .step, :root[data-theme="dark"] .sect,
+:root[data-theme="dark"] .topbar, :root[data-theme="dark"] .dock {
+  background: linear-gradient(160deg, rgba(28, 34, 54, 0.82), rgba(15, 20, 31, 0.86));
+}
+:root[data-theme="dark"] .step.active { background: linear-gradient(160deg, rgba(36, 44, 82, 0.9), rgba(18, 24, 44, 0.92)); }
+:root[data-theme="dark"] .side { background: linear-gradient(180deg, rgba(24, 30, 48, 0.92), rgba(14, 18, 30, 0.94)); }
 
 .panel-title { font-size: 19px; margin: 8px 0 10px; }
 .action-log { display: flex; flex-direction: column; gap: 2px; font-size: 13px; max-height: 320px; overflow: auto; }
@@ -857,6 +883,7 @@ body.has-picks .pick { opacity: 1; }
   .bulk { left: 50%; width: calc(100vw - 24px); flex-wrap: wrap; }
   /* C8: the 3-step workflow stacks into a single column on tablet/mobile. */
   .steps { grid-template-columns: 1fr; }
+  .step.active { transform: none; }
   .step-flow { right: 50%; top: auto; bottom: -22px; transform: translate(50%, 50%) rotate(90deg); }
   .lb { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
   .lb-stage { padding: 56px 12px 12px; }
