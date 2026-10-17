@@ -2075,11 +2075,14 @@
     if (!st) { $("#device-chip-text").textContent = "Checking device"; return; }
     const acc = (st.accelerators || []).find((a) => a.id === st.selected);
     const label = acc ? accShort(acc) : String(st.selected || "cpu").toUpperCase();
-    $("#device-chip-text").textContent = "Running on " + label;
-    chip.classList.toggle("gpu", !!st.selected && st.selected !== "cpu");
+    const isGpu = !!st.selected && st.selected !== "cpu";
+    $("#device-chip-text").textContent = isGpu ? "GPU" : "CPU";
+    chip.classList.toggle("gpu", isGpu);
     chip.classList.toggle("on", !st.fallback_reason);
     chip.classList.toggle("warn", !!st.fallback_reason);
-    chip.title = st.fallback_reason ? `Using ${label}. ${st.fallback_reason}` : "Open Settings";
+    const detail = st.fallback_reason ? `Using ${label}. ${st.fallback_reason}` : `Running on ${label}. Open Settings`;
+    chip.title = detail;
+    chip.setAttribute("aria-label", detail);
   }
 
   function fillDeviceSelect() {

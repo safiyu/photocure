@@ -33,3 +33,45 @@ def test_step_flow_has_three_chevrons():
     rule = re.search(r"\.step-flow\s+\.chev:nth-child\(3\)\s*\{([^}]*)\}", _css())
     assert rule, ".step-flow .chev:nth-child(3) rule missing"
     assert ".7s" in rule.group(1), "third chevron must be delayed .7s to extend the stagger"
+
+
+# ------------------------------------------------------------------ sidebar
+
+def _nav(html: str) -> str:
+    m = re.search(r"<nav>(.*?)</nav>", html, re.DOTALL)
+    assert m, "<nav> not found"
+    return m.group(1)
+
+
+def test_nav_finish_group_dropped_and_actions_moved_into_review():
+    nav = _nav(_html())
+    assert "<h2>Finish</h2>" not in nav, "the Finish group header must be gone"
+    review = re.search(r"<h2>Review</h2>(.*)", nav, re.DOTALL)
+    assert review, "Review navgroup not found"
+    assert 'data-tab="actions"' in review.group(1), "Apply and undo must live in the Review group"
+    assert "<span>Apply and undo</span>" in review.group(1)
+
+
+def test_nav_junk_label_is_short():
+    nav = _nav(_html())
+    assert "<span>Junk</span>" in nav
+    assert "<span>Junk review</span>" not in nav
+    assert 'data-tab="junk"' in nav, "route key must not change"
+
+
+def test_dark_mode_row_has_visible_label():
+    html = _html()
+    assert re.search(r'class="theme-text"[^>]*>\s*Dark Mode\s*<', html), "visible Dark Mode text missing"
+    assert 'id="theme-toggle"' in html, "the accessible switch must stay"
+
+
+def test_device_chip_is_short_with_full_detail_in_title():
+    js = _js()
+    assert '.textContent = "Running on " + label' not in js, "chip text must be the short GPU/CPU form"
+    render = re.search(r"function renderChip\(\)\s*\{(.*?)\n  \}", js, re.DOTALL)
+    assert render, "renderChip not found"
+    body = render.group(1)
+    assert "chip.title" in body and "Running on" in body, "full detail belongs in the title"
+    assert "aria-label" in body, "chip must keep an accessible name with the full detail"
+    chip_rule = re.search(r"\.devchip\s*\{([^}]*)\}", _css())
+    assert chip_rule and "width: 100%" not in chip_rule.group(1), ".devchip must be a compact pill"

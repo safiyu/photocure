@@ -76,10 +76,7 @@
         <div class="navgroup" style="margin-top:18px">
           <h2>Review</h2>
           <button class="tab navitem" data-tab="uncertain"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><span>Needs a look</span><em class="count" data-count="uncertain"></em></button>
-          <button class="tab navitem" data-tab="junk"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Junk review</span><em class="count" data-count="junk"></em></button>
-        </div>
-        <div class="navgroup" style="margin-top:18px">
-          <h2>Finish</h2>
+          <button class="tab navitem" data-tab="junk"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Junk</span><em class="count" data-count="junk"></em></button>
           <button class="tab navitem" data-tab="actions"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg><span>Apply and undo</span><em class="count" data-count="actions"></em></button>
         </div>
       </nav>
@@ -88,12 +85,16 @@
         <button class="devchip" id="device-chip" data-goto="settings" title="Open Settings" type="button"><i class="dot"></i><span id="device-chip-text">Checking device</span></button>
         <button class="tab navitem" data-tab="settings"><svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg><span>Settings</span><em class="count"></em></button>
         <div class="foot-icons">
-          <label class="switch" id="theme-toggle" tabindex="0" title="Switch between light and dark"
-                 aria-label="Switch between light and dark">
-            <input type="checkbox" id="theme-switch" role="switch" aria-checked="false">
-            <span class="slider" aria-hidden="true"></span>
-          </label>
           <button class="icon-btn" id="btn-help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
+          <div class="theme-row">
+            <svg class="ic sm" aria-hidden="true"><use href="#i-moon"/></svg>
+            <span class="theme-text">Dark Mode</span>
+            <label class="switch" id="theme-toggle" tabindex="0" title="Switch between light and dark"
+                   aria-label="Switch between light and dark">
+              <input type="checkbox" id="theme-switch" role="switch" aria-checked="false">
+              <span class="slider" aria-hidden="true"></span>
+            </label>
+          </div>
         </div>
         <div class="sidebar-footer"><span class="app-credit">Photocure <span id="sidebar-version"></span> • by Safiyu</span></div>
       </div>
