@@ -239,3 +239,20 @@ def test_chevrons_stay_above_the_raised_active_card():
     z_flow = int(re.search(r"z-index:\s*(\d+)", flow.group(1)).group(1))
     z_active = int(re.search(r"z-index:\s*(\d+)", active.group(1)).group(1))
     assert z_flow > z_active, "the raised active card hid two of the three chevrons leading into it"
+
+
+# ------------------------------------------------------------------ review fixes
+
+def test_sort_photos_locks_while_busy_but_stays_off_for_empty_library():
+    tag = re.search(r'<button[^>]*id="btn-sort-dock"[^>]*>', _html())
+    assert tag and "data-busy" in tag.group(0), "Sort Photos must lock with the other actions during a run"
+    apply_busy = re.search(r"function applyBusy\(busy\)\s*\{(.*?)\n  \}", _js(), re.DOTALL)
+    assert apply_busy and "btn-sort-dock" in apply_busy.group(1), (
+        "applyBusy would re-enable Sort Photos on an empty library unless it accounts for the total"
+    )
+
+
+def test_dismissing_progress_hides_the_gauge_too():
+    handler = re.search(r'\$\("#btn-dismiss-progress"\)\.onclick\s*=\s*\(\)\s*=>\s*\{([^}]*)\}', _js())
+    assert handler, "dismiss handler not found"
+    assert "hero-gauge" in handler.group(1), "dismiss must not leave a lone gauge behind"

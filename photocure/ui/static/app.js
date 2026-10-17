@@ -1951,7 +1951,8 @@
   function applyBusy(busy) {
     state.busy = busy;
     $$("[data-busy]").forEach((b) => {
-      b.disabled = busy || (b.id === "btn-cluster" && !state.inferred);
+      b.disabled = busy || (b.id === "btn-cluster" && !state.inferred)
+        || (b.id === "btn-sort-dock" && !(state.overview && state.overview.total));
       b.classList.toggle("busy", busy);
     });
     updateLearn();
@@ -2694,7 +2695,7 @@
     $("#junkfilter").addEventListener("change", () => grids.junk.reset());
     $("#minaes").addEventListener("change", () => grids.highlights.reset());
     $("#similar-close").onclick = () => { $("#similar-panel").hidden = true; };
-    $("#btn-dismiss-progress").onclick = () => { $("#progress-card").hidden = true; };
+    $("#btn-dismiss-progress").onclick = () => { $("#progress-card").hidden = true; $("#hero-gauge").hidden = true; };
 
     $("#btn-learn").onclick = learnNow;
     renderBanner();
