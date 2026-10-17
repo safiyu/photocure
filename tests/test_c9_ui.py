@@ -123,6 +123,24 @@ def test_sect_danger_border_still_wins():
     assert danger_pos > sect_pos, ".sect.danger must come AFTER .sect so its border wins"
 
 
+def test_sect_danger_header_accent_matches_danger_colour():
+    css = _style()
+    rule = re.search(r"\.sect\.danger\s*>\s*h2\s*\{([^}]*)\}", css)
+    assert rule, (
+        ".sect.danger > h2 must override the generic .sect > h2 accent so the heading "
+        "does not sprout an electric-blue bar on a crimson danger box"
+    )
+    body = rule.group(1)
+    assert re.search(
+        r"border-left(-color)?:\s*[^;]*var\(--(?:danger-crimson|err)\)", body
+    ), ".sect.danger > h2 accent bar must switch to --danger-crimson/--err"
+    sect_h2_pos = re.search(r"\.sect\s*>\s*h2\s*\{", css).start()
+    danger_h2_pos = re.search(r"\.sect\.danger\s*>\s*h2\s*\{", css).start()
+    assert danger_h2_pos > sect_h2_pos, (
+        ".sect.danger > h2 override must come AFTER .sect > h2 so it wins"
+    )
+
+
 def test_workers_fields_become_mini_cards():
     css = _style()
     rule = re.search(r"\.form-grid\.workers\s+\.field\s*\{([^}]*)\}", css)

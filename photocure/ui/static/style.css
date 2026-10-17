@@ -489,6 +489,8 @@ body.has-picks .pick { opacity: 1; }
 .sect > h2 { font-size: 19px; margin-bottom: 4px; padding-left: 10px; border-left: 3px solid var(--accent-electric); }
 .sect > .lede { margin: 0 0 18px; color: var(--mut); max-width: 70ch; }
 .sect.danger { border-color: color-mix(in srgb, var(--err) 35%, var(--line)); }
+/* C9: danger-sect heading keeps the sect-shape accent bar but swaps colour so it does not fight the crimson border. */
+.sect.danger > h2 { border-left-color: var(--danger-crimson); }
 
 .steps { list-style: none; margin: 0 0 20px; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .step { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
