@@ -696,7 +696,7 @@ try {
       return Number(second.dataset.mid);
     })()`);
     await page.waitFor(`(() => { const g = ${exactGroup}; return g && g.querySelector('.dup-member.keep') && Number(g.querySelector('.dup-member.keep').dataset.mid) === ${alt}; })()`, 5000, "the second photo is now the one kept");
-    check(/discard 1 other/.test(await page.eval(`${exactGroup}.querySelector('[data-dup-apply]').textContent`)), "the apply button says what it will do");
+    check(/mark 1 other as a duplicate/.test(await page.eval(`${exactGroup}.querySelector('.dup-plan').textContent`)), "the footer says what Confirm will do");
     await page.eval(`${exactGroup}.querySelector('[data-dup-apply]').click()`);
     await page.waitFor("document.querySelectorAll('#dup-list .dup-group').length === 1", 8000, "the resolved group left the queue");
     const done = (await api("/api/duplicates?reviewed=true&kind=exact")).groups.find((g) => g.reviewed);

@@ -337,10 +337,11 @@
               <option value="near">Look-alikes</option>
             </select>
             <label class="toggle"><input type="checkbox" id="dup-reviewed">Show decided groups</label>
-            <button id="btn-dup-all" class="btn commit" type="button">Keep the suggested photo in every group</button>
+            <button id="btn-dup-all" class="btn commit" type="button" title="Keeps the suggested photo in every group and marks the rest as duplicates.">Accept all suggestions</button>
             <span class="grow"></span>
             <span id="dup-summary" class="rowcount" role="status"></span>
           </div>
+          <p class="dup-intro">Each group holds the same photo more than once. Photocure suggests the best copy to keep. Pick a different one if you prefer, then confirm. Nothing is deleted or moved until you apply a plan.</p>
           <div id="dup-list" class="dup-list"></div>
           <div class="loadmore"><button id="btn-dup-more" class="btn secondary" type="button" hidden>Show more groups</button></div>
         </section>

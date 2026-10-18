@@ -1580,15 +1580,24 @@ body.has-picks .pick { opacity: 1; }
 .dup-head .grow { flex: 1; }
 .dup-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
 .dup-member { margin: 0; border: 2px solid var(--line); border-radius: var(--r-md, 12px); overflow: hidden; background: var(--table); }
-.dup-member.keep { border-color: var(--accent); }
-.dup-member.out { opacity: .72; }
-.dup-thumb { display: block; width: 100%; padding: 0; border: 0; background: #0e0f12; cursor: zoom-in; }
+.dup-member.keep { border-color: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent); }
+.dup-member.out .dup-thumb img { opacity: .72; }
+.dup-thumb { position: relative; display: block; width: 100%; padding: 0; border: 0; background: #0e0f12; cursor: zoom-in; }
 .dup-thumb img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; }
 .dup-member figcaption { padding: 9px 11px 11px; display: flex; flex-direction: column; gap: 6px; }
 .dup-member .fn { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
 .dup-member .facts { color: var(--mut); font-size: 12px; }
 .dup-member .tag.sug { align-self: flex-start; }
-.dup-foot { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.dup-foot { display: flex; gap: 10px 16px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.dup-intro { margin: 0 0 16px; color: var(--mut); max-width: 78ch; }
+.dup-badge {
+  position: absolute; top: 8px; left: 8px; display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 999px; font: 700 12px/1 var(--font-body); letter-spacing: .02em;
+}
+.dup-badge.keep { background: var(--ok); color: var(--navy); }
+.dup-badge.out { background: color-mix(in srgb, var(--sheet) 88%, transparent); color: var(--mut); border: 1px solid var(--line); }
+.dup-plan { margin: 0; flex: 1 1 260px; font-size: 14px; color: var(--ink); }
+.dup-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
 .dup-foot .done { color: var(--mut); font-size: 13px; }
 
 /* Step 1: Watch folder radio option inside scan card */

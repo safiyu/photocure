@@ -1296,27 +1296,32 @@
       .filter(Boolean).join(", ");
     const img = el("img", { loading: "lazy", decoding: "async", src: thumbUrl(m.id, "medium"), alt: m.filename || "" });
     img.onerror = () => { img.style.opacity = ".15"; };
+    const badge = el("span", { class: "dup-badge " + (chosen ? "keep" : "out") },
+      chosen ? el("span", { "aria-hidden": "true", text: "\u2713" }) : null,
+      el("span", { text: chosen ? (g.reviewed ? "Kept" : "Keep") : "Duplicate" }));
     return el("figure", { class: "dup-member" + (chosen ? " keep" : " out"), "data-mid": m.id },
-      el("button", { class: "dup-thumb", type: "button", "data-dup-open": m.id, "aria-label": "Open " + (m.filename || "photo") }, img),
+      el("button", { class: "dup-thumb", type: "button", "data-dup-open": m.id, "aria-label": "Open " + (m.filename || "photo") }, img, badge),
       el("figcaption", {},
         el("div", { class: "fn", title: m.path, text: m.filename }),
         el("div", { class: "facts", text: facts }),
         m.suggested ? el("span", { class: "tag sug", text: "Suggested" }) : null,
-        g.reviewed ? null : el("button", { class: "btn sm" + (chosen ? " commit" : ""), type: "button",
-          "data-dup-keep": m.id, "aria-pressed": String(chosen), text: chosen ? "Keeping this one" : "Keep this one" })));
+        g.reviewed || chosen ? null : el("button", { class: "btn sm ghost", type: "button",
+          "data-dup-keep": m.id, text: "Keep this one instead" })));
   }
 
   function dupGroupNode(g) {
     const chosen = dup.pick[g.id] != null && g.members.some((m) => m.id === dup.pick[g.id]) ? dup.pick[g.id] : g.keeper_id;
     const others = g.members.filter((m) => m.id !== chosen);
+    const keeper = g.members.find((m) => m.id === chosen);
     const frees = others.reduce((a, m) => a + num(m.file_size), 0);
     const title = g.kind === "exact" ? `${g.members.length} identical files` : `${g.members.length} look-alike photos`;
     const foot = g.reviewed
       ? el("div", { class: "dup-foot" }, el("span", { class: "done", text: "Decided. The others will be treated as duplicates when you apply a plan." }))
       : el("div", { class: "dup-foot" },
-        el("button", { class: "btn commit", type: "button", "data-dup-apply": g.id,
-          text: `Keep this one, discard ${others.length} other${others.length === 1 ? "" : "s"}` }),
-        g.kind === "near" ? el("button", { class: "btn", type: "button", "data-dup-dismiss": g.id, text: "These are not duplicates" }) : null);
+        el("p", { class: "dup-plan", text: `Keep ${keeper ? keeper.filename : "this photo"}, mark ${others.length} other${others.length === 1 ? "" : "s"} as a duplicate${others.length === 1 ? "" : "s"}.` }),
+        el("div", { class: "dup-actions" },
+          g.kind === "near" ? el("button", { class: "btn ghost", type: "button", "data-dup-dismiss": g.id, text: "Not duplicates" }) : null,
+          el("button", { class: "btn commit", type: "button", "data-dup-apply": g.id, text: "Confirm" })));
     return el("article", { class: "dup-group", "data-gid": g.id },
       el("header", { class: "dup-head" }, el("h3", { text: title }),
         el("span", { class: "saves", text: `Frees ${fmtBytes(frees)}` })),
@@ -1391,8 +1396,8 @@
 
   async function dupResolveAll() {
     const n = dup.summary ? dup.summary.groups : 0;
-    const ok = await showConfirmDialog({ title: "Keep the suggested photo in every group?",
-      confirmText: "Resolve all", cancelText: "Cancel",
+    const ok = await showConfirmDialog({ title: "Accept the suggested photo in every group?",
+      confirmText: "Accept all", cancelText: "Cancel",
       message: `${fmtN(n)} group${n === 1 ? "" : "s"} will be resolved. In each, the suggested photo stays and the rest are marked as duplicates. ` +
         "Nothing is moved or deleted until you apply a plan, and you can change any photo's category afterwards." });
     if (!ok) return;
