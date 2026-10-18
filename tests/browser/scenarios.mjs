@@ -815,6 +815,32 @@ try {
     check(await page.eval("document.querySelector('#about-card .about-name').textContent === 'Photocure' && /^v/.test(document.querySelector('#about-card .about-ver').textContent)"), "About card is not rendered");
   });
 
+  await scenario("empty states sit near the vertical middle of the page", async () => {
+    for (const tab of ["search"]) {
+      await page.eval(`document.querySelector('.tab[data-tab="${tab}"]').click(); window.scrollTo(0, 0); true`);
+      await page.waitFor(`!!document.querySelector('#tab-${tab} .empty')`, 8000, tab + " empty state");
+      await settle();
+      const r = await page.eval(`(() => { const e = document.querySelector('#tab-${tab} .empty').getBoundingClientRect(); const c = (e.top + e.bottom) / 2; return { c, mid: innerHeight / 2, h: innerHeight }; })()`);
+      check(Math.abs(r.c - r.mid) < r.h * 0.16, `${tab} empty state is at y=${Math.round(r.c)}, page middle is ${Math.round(r.mid)}`);
+    }
+  });
+
+  await scenario("step chevrons are centered in the gaps and animate", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); true");
+    await settle();
+    const r = await page.eval(`(() => {
+      const steps = [...document.querySelectorAll('.steps > .step')];
+      return steps.slice(0, 2).map((s, i) => {
+        const a = s.getBoundingClientRect(), b = steps[i + 1].getBoundingClientRect(), f = s.querySelector('.step-flow').getBoundingClientRect();
+        return { gap: (a.right + b.left) / 2, flow: (f.left + f.right) / 2, anim: getComputedStyle(s.querySelector('.chev')).animationName };
+      });
+    })()`);
+    for (const x of r) {
+      check(Math.abs(x.gap - x.flow) <= 3, `chevrons are ${Math.round(x.flow - x.gap)}px off the gap center`);
+      check(x.anim === "chev-flow", "chevrons are not animating: " + x.anim);
+    }
+  });
+
   await scenario("the page raised no script errors", async () => {
     check(page.errors.length === 0, "script errors: " + page.errors.join(" | ").slice(0, 400));
   });

@@ -36,14 +36,21 @@ def test_panel_enter_ends_visible_and_does_not_loop():
     assert "animation: panel-in" in rule and "infinite" not in rule and "forwards" not in rule
 
 
-def test_chevron_loop_is_gated_to_running_or_next_step():
+def test_chevrons_always_flow_with_a_stagger():
     css = _css()
     assert re.search(r"\.step-flow\s+\.chev\s*\{", css)
-    for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
-        if "chev-flow" in body and "infinite" in body:
-            assert "task-running" in selector or ".step.done:has(+ .step.active)" in selector, selector.strip()
-    third = re.search(r"\.step-flow\s+\.chev:nth-child\(3\)\s*\{([^}]*)\}", css)
-    assert third and ".7s" in third.group(1)
+    for n, delay in ((1, ""), (2, ".35s"), (3, ".7s")):
+        rule = re.search(r"(?m)^\.step-flow \.chev:nth-child\(" + str(n) + r"\)\s*\{([^}]*)\}", css)
+        assert rule, f"ungated .step-flow .chev:nth-child({n}) rule missing"
+        assert "chev-flow" in rule.group(1) and "infinite" in rule.group(1) and delay in rule.group(1)
+
+
+def test_chevrons_are_centered_in_the_gap_between_cards():
+    css = _css()
+    flow = re.search(r"(?m)^\.step-flow\s*\{([^}]*)\}", css).group(1)
+    assert "right: -8px" in flow, "gap is 16px, so the flow sits 8px past the card edge"
+    tablet = re.search(r"@media\s*\(max-width:\s*960px\)\s*\{(.*?)\n\}", css, re.S).group(1)
+    assert re.search(r"\.step-flow\s*\{[^}]*bottom:\s*-8px", tablet)
 
 
 def test_helpers_exist():

@@ -108,3 +108,10 @@ def test_sort_photos_is_highlighted_when_relevant():
     assert 'by_category' in body and "unrouted" in body
     css = (STATIC / "style.css").read_text(encoding="utf-8")
     assert re.search(r"\.btn\.needs-action\s*\{", css) and re.search(r"\.btn\.needs-action:hover\s*\{", css)
+
+
+def test_sort_photos_button_explains_itself():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    tag = re.search(r'<button[^>]*id="btn-sort-dock"[^>]*>', html).group(0)
+    title = re.search(r'title="([^"]*)"', tag)
+    assert title and "category" in title.group(1) and "Nothing is moved" in title.group(1)

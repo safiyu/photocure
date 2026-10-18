@@ -393,7 +393,7 @@ button { cursor: pointer; }
 .switch {
   position: relative; display: inline-flex; align-items: center;
   width: 40px; height: 22px; border-radius: 11px; cursor: pointer; flex: none;
-  background: var(--well); border: 1px solid var(--line);
+  background: var(--sheet); border: 1.5px solid var(--faint);
 }
 .switch input {
   position: absolute; inset: 0; width: 100%; height: 100%;
@@ -728,6 +728,7 @@ body.has-picks .pick { opacity: 1; }
 .empty {
   grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
   gap: 8px; padding: 56px 24px; color: var(--mut); margin: 0 auto; width: 100%; max-width: 680px;
+  min-height: max(300px, 50vh);
 }
 .empty .ic { width: 38px; height: 38px; color: var(--faint); stroke-width: 1.4; }
 .empty h3 { font-size: 20px; color: var(--ink); text-align: center; }
@@ -747,7 +748,7 @@ body.has-picks .pick { opacity: 1; }
   display: none;
 }
 .split:has(.burstlist:empty) .empty {
-  margin: 40px auto; width: 100%; max-width: 680px; text-align: center;
+  margin: 0 auto; width: 100%; max-width: 680px; text-align: center;
 }
 
 /* --------------------------------------------------------------- sections / steps */
@@ -994,16 +995,13 @@ body.has-picks .pick { opacity: 1; }
 /* C9: animated chevron connectors between step cards. Overlay the gap on desktop; rotate 90deg when stacked. */
 .step { position: relative; }
 .step-flow {
-  position: absolute; right: -14px; top: 50%; transform: translate(50%, -50%);
+  position: absolute; right: -8px; top: 50%; transform: translate(50%, -50%);
   display: flex; gap: 2px; z-index: 4; pointer-events: none; color: var(--faint);
 }
 .step-flow .chev { width: 16px; height: 16px; flex: none; opacity: .55; }
-body.task-running .step-flow .chev:nth-child(1),
-.step.done:has(+ .step.active) .step-flow .chev:nth-child(1) { animation: chev-flow 1.4s ease-in-out infinite; }
-body.task-running .step-flow .chev:nth-child(2),
-.step.done:has(+ .step.active) .step-flow .chev:nth-child(2) { animation: chev-flow 1.4s ease-in-out .35s infinite; }
-body.task-running .step-flow .chev:nth-child(3),
-.step.done:has(+ .step.active) .step-flow .chev:nth-child(3) { animation: chev-flow 1.4s ease-in-out .7s infinite; }
+.step-flow .chev:nth-child(1) { animation: chev-flow 1.4s ease-in-out infinite; }
+.step-flow .chev:nth-child(2) { animation: chev-flow 1.4s ease-in-out .35s infinite; }
+.step-flow .chev:nth-child(3) { animation: chev-flow 1.4s ease-in-out .7s infinite; }
 @keyframes chev-flow {
   0%, 100% { opacity: .25; transform: translateX(-3px); }
   50% { opacity: 1; transform: translateX(2px); }
@@ -1384,7 +1382,7 @@ body.task-running .step-flow .chev:nth-child(3),
   /* C8: the 3-step workflow stacks into a single column on tablet/mobile. */
   .steps { grid-template-columns: 1fr; }
   .step.active { transform: none; }
-  .step-flow { right: 50%; top: auto; bottom: -22px; transform: translate(50%, 50%) rotate(90deg); }
+  .step-flow { right: 50%; top: auto; bottom: -8px; transform: translate(50%, 50%) rotate(90deg); }
   .lb { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
   .lb-stage { padding: 56px 12px 12px; }
   .lb-nav { top: auto; bottom: 12px; transform: none; } .lb-nav.prev { left: 12px; } .lb-nav.next { right: 12px; }

@@ -102,3 +102,17 @@ def test_no_brand_hex_outside_root_blocks():
     css = re.sub(r"(?m)^\s*--c-[\w-]+:[^;]*;", "", css).lower()
     left = [h for h in BRAND_HEX if h in css]
     assert not left, f"hard-coded brand hex outside :root: {left}"
+
+
+def test_empty_states_fill_the_page_and_center_their_content():
+    body = _body(".empty {")
+    assert "min-height" in body and "vh" in body, "empty states need a viewport-relative height"
+    assert "justify-content: center" in body and "align-items: center" in body
+    split = _body(".split:has(.burstlist:empty) .empty")
+    assert "min-height" not in split or "margin" in split
+
+
+def test_theme_switch_track_has_a_visible_border():
+    body = _body(".switch {")
+    assert "border: 1.5px solid var(--faint)" in body
+    assert "background: var(--sheet)" in body
