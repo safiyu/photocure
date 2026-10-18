@@ -17,7 +17,7 @@
     triageSel: -1, triageGrid: null, undo: [], picks: new Set(), lastPick: null,
     overview: null, eventId: null,
     backend: null, thresholds: null, manualCount: 0,
-    settings: null, draft: { device: "auto", device_index: 0 },
+    settings: null, draft: { device: "auto", device_index: 0 }, busyBtn: null,
   };
 
   const TITLES = {
@@ -152,7 +152,7 @@
 
     ok.textContent = o.confirmText || "OK";
     cancel.textContent = o.cancelText || "Cancel";
-    ok.className = "btn " + variant;
+    ok.className = "btn " + { danger: "danger", warning: "commit", primary: "primary" }[variant];
     const previous = document.activeElement;
     modal.hidden = false;
 
@@ -1241,7 +1241,7 @@
         el("div", { class: "fn", title: m.path, text: m.filename }),
         el("div", { class: "facts", text: facts }),
         m.suggested ? el("span", { class: "tag sug", text: "Suggested" }) : null,
-        g.reviewed ? null : el("button", { class: "btn sm" + (chosen ? " primary" : ""), type: "button",
+        g.reviewed ? null : el("button", { class: "btn sm" + (chosen ? " commit" : ""), type: "button",
           "data-dup-keep": m.id, "aria-pressed": String(chosen), text: chosen ? "Keeping this one" : "Keep this one" })));
   }
 
@@ -1253,7 +1253,7 @@
     const foot = g.reviewed
       ? el("div", { class: "dup-foot" }, el("span", { class: "done", text: "Decided. The others will be treated as duplicates when you apply a plan." }))
       : el("div", { class: "dup-foot" },
-        el("button", { class: "btn primary", type: "button", "data-dup-apply": g.id,
+        el("button", { class: "btn commit", type: "button", "data-dup-apply": g.id,
           text: `Keep this one, discard ${others.length} other${others.length === 1 ? "" : "s"}` }),
         g.kind === "near" ? el("button", { class: "btn", type: "button", "data-dup-dismiss": g.id, text: "These are not duplicates" }) : null);
     return el("article", { class: "dup-group", "data-gid": g.id },
@@ -2250,7 +2250,7 @@
            <span class="n">${fmtN(n)}</span></div>`).join("")}</div>
       ${notices.map(([k, w]) => `<div class="notice ${k}">${icon("alert", "sm")}<span>${esc(w)}</span></div>`).join("")}
       ${(d.collision_samples || []).length ? `<p class="help">Example clashes: ${esc(d.collision_samples.slice(0, 3).join(", "))}</p>` : ""}
-      ${confirmable ? `<div class="btn-row" style="margin-top:14px"><button id="diff-confirm" class="btn primary" ${d.enough_space ? "" : "disabled"}>${verb} ${fmtN(d.total)} photos</button>
+      ${confirmable ? `<div class="btn-row" style="margin-top:14px"><button id="diff-confirm" class="btn commit" ${d.enough_space ? "" : "disabled"}>${verb} ${fmtN(d.total)} photos</button>
         <button id="diff-cancel" class="btn">Cancel</button></div>`
         : `<div class="btn-row" style="margin-top:14px"><button id="diff-cancel" class="btn">Close</button></div>`}`;
     el.hidden = false;
@@ -2376,7 +2376,9 @@
       b.disabled = busy || (b.id === "btn-cluster" && !state.inferred)
         || (b.id === "btn-sort-dock" && !(state.overview && state.overview.total));
       b.classList.toggle("busy", busy);
+      b.classList.toggle("loading", busy && b === state.busyBtn);
     });
+    if (!busy) state.busyBtn = null;
     updateLearn();
   }
 
@@ -2712,7 +2714,7 @@
       const unsorted = cats.length === 1 && cats[0][0] === "unrouted";
       host.innerHTML = head + `<div class="comp-strip">${strip}</div>
         <div class="comp-legend">${active ? '<button data-cat="">Show all</button>' : ""}${legend}</div>` +
-        (unsorted ? `<p class="help" style="margin-top:12px">Photos are placed in categories when a plan is built. <button class="btn sm" data-sortnow>Sort photos now</button></p>` : "");
+        (unsorted ? `<p class="help" style="margin-top:12px">Photos are placed in categories when a plan is built. <button class="btn sm secondary" data-sortnow>Sort photos now</button></p>` : "");
     });
   }
 
@@ -2823,6 +2825,8 @@
   // ------------------------------------------------------------------- init
   async function runTask(label, fn) {
     state.taskRunning = true;
+    const started = document.activeElement;
+    state.busyBtn = started && started.matches && started.matches("[data-busy]") ? started : null;
     applyBusy(true);
     libLog(label + "...");
     try {

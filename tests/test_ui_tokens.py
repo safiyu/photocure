@@ -117,10 +117,6 @@ def test_single_definition_of_banner_and_spinner():
         assert count == 1, f"{sel} is defined {count} times"
 
 
-import pytest  # noqa: E402
-
-
-@pytest.mark.xfail(reason="per-id button rules are removed in Task 3", strict=False)
 def test_no_important_on_button_ids():
     for selector, body in _rules(_css()):
         if "#btn-" in selector:
