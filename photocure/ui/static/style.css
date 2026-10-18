@@ -416,22 +416,11 @@ button { cursor: pointer; }
   flex-direction: column;
   min-height: 100vh;
 }
-/* The header is borderless: the canvas itself is embossed into a soft recess
-   (pressed-in shading, no fill, no border, no blur), and the page title is
-   engraved with a bevel. The gauge and progress card sit in the same recess. */
 .topbar {
   position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 14px 28px;
   margin: 0 32px 24px; max-width: 1416px; padding: 22px 28px 18px;
-  border-radius: 18px;
-  background-image: linear-gradient(180deg, rgba(15, 23, 42, 0.05) 0%, rgba(255, 255, 255, 0) 34%);
-  box-shadow:
-    inset 0 2px 6px rgba(15, 23, 42, 0.10),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.65);
 }
-.topbar h1 {
-  font-size: 31px; line-height: 1.15; font-weight: 800; letter-spacing: -0.015em;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.9), 0 -1px 1px rgba(15, 23, 42, 0.18);
-}
+.topbar h1 { font-size: 31px; line-height: 1.15; font-weight: 800; letter-spacing: -0.015em; }
 .topbar .sub { color: var(--mut); margin-top: 2px; max-width: 70ch; }
 .topbar .grow { flex: 1 1 260px; min-width: 0; }
 .menu-btn { display: none; }
@@ -543,13 +532,13 @@ input:hover, select:hover { border-color: var(--faint); }
 kbd {
   display: inline-block; min-width: 22px; padding: 1px 6px; text-align: center; border-radius: 5px;
   border: 1px solid var(--line); border-bottom-width: 2px; background: var(--sheet);
-  font: 600 11px/1.5 var(--sans); color: var(--ink);
+  font: 600 11px/1.5 var(--font-body); color: var(--ink);
 }
 
 /* ---------------------------------------------------- composition strip */
 .comp { margin: 4px 0 26px; }
 .comp-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
-.comp-total { font: 600 40px/1 var(--serif); letter-spacing: -.02em; }
+.comp-total { font: 600 40px/1 var(--font-display); letter-spacing: -.02em; }
 .comp-label { color: var(--mut); font-size: 14px; }
 .comp-strip { display: flex; gap: 3px; height: 16px; }
 .comp-strip button {
@@ -712,7 +701,7 @@ body.has-picks .pick { opacity: 1; }
 /* --------------------------------------------------------------- sections / steps */
 /* C9: .sect picks up step-card shape — padding matches .step and the header carries a left-accent bar. */
 .sect {
-  background: linear-gradient(160deg, rgba(253, 242, 248, 0.6) 0%, #ffffff 50%, rgba(240, 249, 255, 0.6) 100%);
+  background: linear-gradient(160deg, rgba(253, 242, 248, 0.92) 0%, #ffffff 50%, rgba(240, 249, 255, 0.92) 100%);
   border: 1px solid var(--line); border-radius: var(--r-lg); padding: 20px 22px; margin-bottom: 20px;
 }
 .sect > h2 { font-size: 19px; margin-bottom: 4px; padding-left: 10px; border-left: 3px solid var(--primary); }
@@ -724,7 +713,7 @@ body.has-picks .pick { opacity: 1; }
 .steps { list-style: none; margin: 0 0 36px; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 /* C10: asymmetric elliptical radii give each step card a soft, organic outline. */
 .step {
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.65);
   border-radius: 18px 22px 20px 22px / 20px 18px 22px 20px;
@@ -734,7 +723,7 @@ body.has-picks .pick { opacity: 1; }
 .step-head { display: flex; align-items: center; gap: 12px; }
 .step-num {
   display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; flex: none;
-  border: 1.5px solid var(--line); font: 600 15px/1 var(--serif); color: var(--mut);
+  border: 1.5px solid var(--line); font: 600 15px/1 var(--font-display); color: var(--mut);
 }
 .step.done .step-num { background: var(--ok); border-color: var(--ok); color: #fff; box-shadow: 0 0 16px rgba(16, 185, 129, 0.35); }
 .step.done .step-num .n { display: none; }
@@ -752,7 +741,7 @@ body.has-picks .pick { opacity: 1; }
 
 /* Step 1: Sky Blue & White soft background */
 :root:not([data-theme="dark"]) #step-scan {
-  background: linear-gradient(150deg, rgba(240, 249, 255, 0.6) 0%, rgba(255, 255, 255, 0.65) 100%);
+  background: linear-gradient(150deg, rgba(240, 249, 255, 0.92) 0%, rgba(255, 255, 255, 0.94) 100%);
 }
 #step-scan .step-num { background: color-mix(in srgb, var(--primary) 12%, transparent); border-color: color-mix(in srgb, var(--primary) 35%, transparent); color: var(--link); }
 #step-scan.done .step-num { background: var(--ok); border-color: var(--ok); color: #fff; }
@@ -915,7 +904,7 @@ body.has-picks .pick { opacity: 1; }
 
 /* Step 2: Pink, White, and Sky Blue soft background */
 :root:not([data-theme="dark"]) #step-infer {
-  background: linear-gradient(150deg, rgba(253, 242, 248, 0.6) 0%, rgba(255, 255, 255, 0.65) 50%, rgba(240, 249, 255, 0.5) 100%);
+  background: linear-gradient(150deg, rgba(253, 242, 248, 0.92) 0%, rgba(255, 255, 255, 0.94) 50%, rgba(240, 249, 255, 0.92) 100%);
 }
 
 /* C8: structural styling for the overhauled 3-step cards (state colors are a later step). */
@@ -942,7 +931,7 @@ body.has-picks .pick { opacity: 1; }
 /* Step 3: Rose Pink & White soft background */
 :root:not([data-theme="dark"]) #step-cluster,
 :root:not([data-theme="dark"]) #step-burst {
-  background: linear-gradient(150deg, rgba(253, 242, 248, 0.6) 0%, rgba(255, 255, 255, 0.65) 100%);
+  background: linear-gradient(150deg, rgba(253, 242, 248, 0.92) 0%, rgba(255, 255, 255, 0.94) 100%);
 }
 .step .burst-art { width: 96px; height: 72px; margin: 4px auto; color: var(--pink-500); display: block; filter: drop-shadow(0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent)); }
 .step .actions .btn .lock { width: 14px; height: 14px; color: currentColor; opacity: .65; margin-left: 2px; }
@@ -963,7 +952,7 @@ body.has-picks .pick { opacity: 1; }
 
 /* C8: step-card status states (M9). Sky (#38BDF8) and Pink (#EC4899) active focus. */
 .step.active {
-  background: linear-gradient(145deg, rgba(253, 242, 248, 0.85) 0%, rgba(255, 255, 255, 0.9) 46%, rgba(240, 249, 255, 0.85) 100%);
+  background: linear-gradient(145deg, rgba(253, 242, 248, 0.94) 0%, rgba(255, 255, 255, 0.96) 46%, rgba(240, 249, 255, 0.94) 100%);
   border: 1.5px solid var(--primary); box-shadow: var(--glow), 0 0 35px color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 20px 24px 22px 24px / 22px 20px 24px 22px;
   transform: translateY(-2px) scale(1.02); z-index: 3;
@@ -1084,24 +1073,13 @@ body.has-picks .pick { opacity: 1; }
   background-image:
     radial-gradient(1200px 600px at 15% -5%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%),
     radial-gradient(1300px 650px at 85% -5%, color-mix(in srgb, var(--blue-400) 18%, transparent), transparent 70%),
-    linear-gradient(180deg, #131024 0%, var(--canvas-bg) 60%);
+    linear-gradient(180deg, #0f1730 0%, var(--canvas-bg) 60%);
   background-attachment: fixed;
 }
 :root[data-theme="dark"] .step, :root[data-theme="dark"] .sect, :root[data-theme="dark"] .dock {
   background: linear-gradient(160deg, rgba(20, 24, 38, 0.85) 0%, rgba(11, 14, 24, 0.88) 100%);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.04);
-}
-/* Dark header: a pressed-in recess in the canvas — darker at the top edge,
-   a faint light catch-light along the bottom lip. */
-:root[data-theme="dark"] .topbar {
-  background-image: linear-gradient(180deg, rgba(0, 0, 0, 0.22) 0%, rgba(0, 0, 0, 0) 45%);
-  box-shadow:
-    inset 0 2px 8px rgba(0, 0, 0, 0.45),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
-}
-:root[data-theme="dark"] .topbar h1 {
-  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.8), 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 :root[data-theme="dark"] .step.active {
   background: linear-gradient(160deg, rgba(28, 36, 60, 0.9) 0%, rgba(16, 20, 36, 0.92) 100%);
@@ -1114,28 +1092,6 @@ body.has-picks .pick { opacity: 1; }
 }
 :root[data-theme="dark"] .version-pill { color: #fff; }
 :root[data-theme="dark"] .brand b { color: #ffffff; }
-
-/* Light theme high-contrast typography */
-:root:not([data-theme="dark"]) .step p,
-:root:not([data-theme="dark"]) .topbar .sub,
-:root:not([data-theme="dark"]) .sect > .lede,
-:root:not([data-theme="dark"]) .dock-label,
-:root:not([data-theme="dark"]) .navitem,
-:root:not([data-theme="dark"]) .help,
-:root:not([data-theme="dark"]) .scrubber,
-:root:not([data-theme="dark"]) .sidebar-footer {
-  color: #1e293b;
-}
-:root:not([data-theme="dark"]) .navgroup > h2 {
-  color: #334155;
-}
-:root:not([data-theme="dark"]) .field > label,
-:root:not([data-theme="dark"]) .lbl {
-  color: #0f172a;
-}
-:root:not([data-theme="dark"]) .theme-row {
-  color: #1e293b;
-}
 
 .panel-title { font-size: 19px; margin: 8px 0 10px; }
 .action-log {
@@ -1228,7 +1184,7 @@ body.has-picks .pick { opacity: 1; }
 .diffpanel .lede { margin: 0 0 18px; color: var(--mut); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
 .tile { background: var(--well); border-radius: var(--r-sm); padding: 12px 14px; }
-.tile b { display: block; font: 600 26px/1.1 var(--serif); }
+.tile b { display: block; font: 600 26px/1.1 var(--font-display); }
 .tile span { font-size: 12px; color: var(--mut); }
 .tile.bad b { color: var(--err); }
 .tile.warn b { color: var(--warn); }
@@ -1283,8 +1239,6 @@ body.has-picks .pick { opacity: 1; }
 @keyframes stripes { to { background-position: 28px 0; } }
 .progress-sub { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--mut); }
 .progress-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.spinner { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--primary); animation: spin .75s linear infinite; flex: none; }
-@keyframes spin { to { transform: rotate(360deg); } }
 .dismiss-btn { border: 0; background: none; color: var(--mut); border-radius: 6px; padding: 2px 8px; }
 .dismiss-btn:hover { background: var(--well); color: var(--ink); }
 .stop-btn {
@@ -1478,7 +1432,7 @@ body.has-picks .pick { opacity: 1; }
    auto-fills --thumb-min, which the virtual grid reads from computed CSS. */
 @media (max-width: 640px) {
   main { padding-left: 14px; padding-right: 14px; }
-  .topbar { margin: 0 14px 12px; padding: 12px 14px; gap: 10px; border-radius: 22px; }
+  .topbar { margin: 0 14px 12px; padding: 12px 14px; gap: 10px; }
   .topbar h1 { font-size: 20px; }
   .sect { padding: 16px 16px; }
   .step { padding: 16px; }
@@ -1494,11 +1448,9 @@ body.has-picks .pick { opacity: 1; }
 .banner-host:empty { display: none; }
 .banner-host { margin: 4px 0 20px; display: flex; flex-direction: column; gap: 10px; }
 .banner {
-  display: flex; gap: 14px; align-items: flex-start; padding: 16px 20px;
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--warn-soft) 45%, rgba(255, 255, 255, 0.75));
-  color: var(--ink);
-  border: 1px solid color-mix(in srgb, var(--warn) 20%, rgba(255, 255, 255, 0.6));
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px;
+  border-radius: var(--r-sm); border: 1px solid var(--warn); background: var(--warn-soft);
+  color: var(--ink); font-size: 14px;
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
   box-shadow: 0 10px 28px -8px color-mix(in srgb, var(--commit) 10%, transparent);
 }
@@ -1633,11 +1585,9 @@ body.has-picks .pick { opacity: 1; }
 .confirm-buttons { display: flex; gap: 10px; justify-content: flex-end; }
 .restart-box { display: flex; align-items: center; gap: 14px; }
 .restart-box p { margin: 0; color: var(--ink); }
-.spinner { width: 22px; height: 22px; border: 3px solid var(--line); border-top-color: var(--primary); border-radius: 50%; flex: none; }
-@media (prefers-reduced-motion: no-preference) { .spinner { animation: pcur-spin .8s linear infinite; } }
+.spinner { width: 22px; height: 22px; border: 3px solid var(--line); border-top-color: var(--primary); border-radius: 50%; flex: none; animation: pcur-spin .8s linear infinite; }
 @keyframes pcur-spin { to { transform: rotate(360deg); } }
 .banners { position: sticky; bottom: 0; display: flex; flex-direction: column; gap: 8px; padding: 0 16px; z-index: 900; }
-.banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border-radius: var(--r-sm); border: 1px solid var(--warn); background: var(--warn-soft); color: var(--ink); font-size: 14px; }
 .banner span { flex: 1 1 260px; }
 
 /* Highlights: ranking controls, taste panel and the best-of-each-event view. */

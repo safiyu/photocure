@@ -94,3 +94,42 @@ def test_no_indigo_left():
     css = re.sub(r"(?m)^\s*--c-[\w-]+:[^;]*;", "", _css())
     for stale in ("#4f46e5", "#6366f1", "#8b5cf6", "#7c3aed", "139, 92, 246", "99, 102, 241", "79, 70, 229"):
         assert stale not in css.lower(), f"{stale} still present outside --c-* data colors"
+
+
+# ------------------------------------------------------------------ cleanup (Task 2)
+
+def _rules(css: str):
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    return re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+
+
+def test_every_var_reference_is_defined():
+    css = _css()
+    defined = set(re.findall(r"(--[\w-]+)\s*:", css))
+    used = set(re.findall(r"var\(\s*(--[\w-]+)\s*\)", css))
+    assert not (used - defined), f"undefined custom properties: {sorted(used - defined)}"
+
+
+def test_single_definition_of_banner_and_spinner():
+    css = _css()
+    for sel in (".banner", ".spinner", ".devchip"):
+        count = len(re.findall(r"(?m)^" + re.escape(sel) + r"\s*\{", css))
+        assert count == 1, f"{sel} is defined {count} times"
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.xfail(reason="per-id button rules are removed in Task 3", strict=False)
+def test_no_important_on_button_ids():
+    for selector, body in _rules(_css()):
+        if "#btn-" in selector:
+            assert "!important" not in body, f"!important in {selector.strip()}"
+
+
+def test_topbar_is_flat():
+    for selector, body in _rules(_css()):
+        sel = selector.strip()
+        if re.search(r"\.topbar(\s+h1)?$", sel):
+            assert "inset" not in body, f"embossed shadow left in {sel}"
+            assert "text-shadow" not in body, f"engraved text left in {sel}"
