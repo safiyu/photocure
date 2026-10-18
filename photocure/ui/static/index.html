@@ -63,6 +63,7 @@
       </div>
 
       <nav>
+        <span id="nav-indicator" class="nav-indicator" aria-hidden="true"></span>
         <div class="navgroup">
           <h2>Get started</h2>
           <button class="tab navitem active" data-tab="library"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg><span>Import</span><em class="count"></em></button>
@@ -117,8 +118,8 @@
           <svg class="gauge-svg" viewBox="0 0 120 70" aria-hidden="true">
             <defs>
               <linearGradient id="gauge-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#38bdf8"/>
-                <stop offset="100%" stop-color="#ec4899"/>
+                <stop offset="0%" style="stop-color:var(--blue-400)"/>
+                <stop offset="100%" style="stop-color:var(--pink-500)"/>
               </linearGradient>
             </defs>
             <path class="gauge-track" d="M10 62 A50 50 0 0 1 110 62" pathLength="100"/>
@@ -288,12 +289,12 @@
             <span id="rowcount" class="rowcount"></span>
           </div>
           <div class="scrubber" id="scrubber" hidden>
-            <div class="scrub-presets" id="scrub-presets" role="group" aria-label="Date presets">
-              <button type="button" class="preset-btn active" data-preset="all">All</button>
-              <button type="button" class="preset-btn" data-preset="year">This year</button>
-              <button type="button" class="preset-btn" data-preset="90d">Last 90 days</button>
-              <button type="button" class="preset-btn" data-preset="30d">Last 30 days</button>
-              <button type="button" class="preset-btn" data-preset="custom">Custom</button>
+            <div class="scrub-presets seg" id="scrub-presets" role="group" aria-label="Date presets">
+              <button type="button" class="preset-btn seg-btn active" data-preset="all">All</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="year">This year</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="90d">Last 90 days</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="30d">Last 30 days</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="custom">Custom</button>
             </div>
             <label>From <span id="scrub-from-label"></span>
               <input type="range" id="scrub-from" min="0" max="0" value="0" aria-label="Earliest date shown"></label>
@@ -633,11 +634,11 @@
         <p class="help">Choose a category below. Then use Learn from my choices on the Finalize page.</p>
       </section>
       <div class="lb-rate" id="lb-rate" role="group" aria-label="Rating">
-        <button type="button" class="star" data-star="1" aria-label="1 star">&#9733;</button>
-        <button type="button" class="star" data-star="2" aria-label="2 stars">&#9733;</button>
-        <button type="button" class="star" data-star="3" aria-label="3 stars">&#9733;</button>
-        <button type="button" class="star" data-star="4" aria-label="4 stars">&#9733;</button>
-        <button type="button" class="star" data-star="5" aria-label="5 stars">&#9733;</button>
+        <button type="button" class="star" data-star="1" aria-label="1 star"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">1</span></button>
+        <button type="button" class="star" data-star="2" aria-label="2 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">2</span></button>
+        <button type="button" class="star" data-star="3" aria-label="3 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">3</span></button>
+        <button type="button" class="star" data-star="4" aria-label="4 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">4</span></button>
+        <button type="button" class="star" data-star="5" aria-label="5 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">5</span></button>
         <button type="button" class="btn sm" id="lb-fav" aria-pressed="false">&#9829; Favourite</button>
         <button type="button" class="btn sm" id="lb-reject" aria-pressed="false">Reject</button>
       </div>
