@@ -43,7 +43,68 @@
       `<span>${esc(msg)}</span>`;
     box.appendChild(el);
     while (box.children.length > 4) box.firstChild.remove();
-    setTimeout(() => el.remove(), cls === "err" ? 6000 : 3200);
+    setTimeout(() => {
+      el.classList.add("out");
+      afterAnim(el, 260).then(() => el.remove());
+    }, cls === "err" ? 6000 : 3200);
+  }
+
+  // Motion helpers: every close waits on the animation but never depends on it alone.
+  function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  function afterAnim(el, fallbackMs) {
+    if (reducedMotion()) return Promise.resolve();
+    return new Promise((resolve) => {
+      let finished = false;
+      let timer = null;
+      const onEnd = (e) => { if (e.target === el) finish(); };
+      function finish() {
+        if (finished) return;
+        finished = true;
+        el.removeEventListener("animationend", onEnd);
+        clearTimeout(timer);
+        resolve();
+      }
+      el.addEventListener("animationend", onEnd);
+      timer = setTimeout(finish, fallbackMs);
+    });
+  }
+
+  function openOverlay(el) {
+    if (!el) return;
+    el._closeSeq = (el._closeSeq || 0) + 1;
+    el.classList.remove("closing");
+    el.hidden = false;
+  }
+
+  async function closeOverlay(el) {
+    if (!el || el.hidden || el.classList.contains("closing")) return;
+    const seq = el._closeSeq = (el._closeSeq || 0) + 1;
+    el.classList.add("closing");
+    await afterAnim(el, 260);
+    if (el._closeSeq !== seq) return;
+    el.hidden = true;
+    el.classList.remove("closing");
+  }
+
+  function positionNavIndicator() {
+    const ind = $("#nav-indicator");
+    if (!ind) return;
+    const item = $("nav .tab.active");
+    if (!item) { ind.style.opacity = "0"; return; }
+    const y = item.offsetTop + (item.offsetHeight - ind.offsetHeight) / 2;
+    if (!ind.dataset.ready) {
+      ind.style.transition = "none";
+      ind.style.setProperty("--ni-y", y + "px");
+      void ind.offsetWidth;
+      ind.style.transition = "";
+      ind.dataset.ready = "1";
+    } else {
+      ind.style.setProperty("--ni-y", y + "px");
+    }
+    ind.style.opacity = "1";
   }
 
   // Shared focus trap helper (WCAG 2.1 AA focus containment).
@@ -154,7 +215,7 @@
     cancel.textContent = o.cancelText || "Cancel";
     ok.className = "btn " + { danger: "danger", warning: "commit", primary: "primary" }[variant];
     const previous = document.activeElement;
-    modal.hidden = false;
+    openOverlay(modal);
 
     return new Promise((resolve) => {
       let releaseTrap = null;
@@ -163,7 +224,7 @@
           releaseTrap();
           releaseTrap = null;
         }
-        modal.hidden = true;
+        closeOverlay(modal);
         ok.onclick = cancel.onclick = backdrop.onclick = null;
         if (inputEl) inputEl.onkeydown = null;
         if (previous && previous.focus) previous.focus();
@@ -822,7 +883,7 @@
     });
     const n = state.picks.size;
     document.body.classList.toggle("has-picks", n > 0);
-    $("#bulkbar").hidden = n === 0;
+    if (n === 0) closeOverlay($("#bulkbar")); else openOverlay($("#bulkbar"));
     $("#bulk-count").textContent = `${fmtN(n)} selected`;
   }
 
@@ -980,7 +1041,7 @@
     $("#similar-title").textContent = "Photos similar to " + (it ? it.filename : "#" + num(id));
     const sg = $("#similar-grid");
     sg.replaceChildren(...Array.from({ length: 8 }, () => el("div", { class: "skel" })));
-    panel.hidden = false;
+    openOverlay($("#similar-panel"));
     try {
       const data = await api(`/api/images/${num(id)}/similar?k=24`);
       data.items.forEach((x) => { state.byId[x.id] = x; });
@@ -1496,7 +1557,7 @@
   function lbShow(opener) {
     lb.open = true;
     lb.opener = opener || document.activeElement;
-    $("#lightbox").hidden = false;
+    openOverlay($("#lightbox"));
     document.body.style.overflow = "hidden";
     lbRender();
     if (lb.releaseTrap) lb.releaseTrap();
@@ -1511,7 +1572,7 @@
       lb.releaseTrap();
       lb.releaseTrap = null;
     }
-    $("#lightbox").hidden = true;
+    closeOverlay($("#lightbox"));
     document.body.style.overflow = "";
     if (lb.grid) {  // leave the grid on the photo that was last viewed
       const id = lbIdAt(lb.i);
@@ -1553,6 +1614,9 @@
     const img = $("#lb-img");
     const my = ++lb.token;
     img.alt = it.filename || "";
+    img.classList.remove("swap-in");
+    void img.offsetWidth;
+    img.classList.add("swap-in");
     img.src = thumbUrl(id, "micro");  // already cached from the grid: shows instantly
     $("#lb-loading").hidden = false;
     const big = new Image();
@@ -1734,7 +1798,7 @@
     pk.mode = opts.mode || "photos";
     $("#picker-title").textContent = opts.title || "Choose a folder";
     $("#picker-ok").textContent = opts.okLabel || "Use this folder";
-    $("#picker").hidden = false;
+    openOverlay($("#picker"));
     document.body.style.overflow = "hidden";
     if (pk.releaseTrap) pk.releaseTrap();
     pk.releaseTrap = trapFocus($("#picker"), closePicker);
@@ -1750,7 +1814,7 @@
       pk.releaseTrap();
       pk.releaseTrap = null;
     }
-    $("#picker").hidden = true;
+    closeOverlay($("#picker"));
     document.body.style.overflow = "";
     if (pk.opener && document.contains(pk.opener)) {
       pk.opener.focus({ preventScroll: true });
@@ -1849,7 +1913,7 @@
 
   function openHelp() {
     helpOpener = document.activeElement;
-    $("#help").hidden = false;
+    openOverlay($("#help"));
     if (helpReleaseTrap) helpReleaseTrap();
     helpReleaseTrap = trapFocus($("#help"), closeHelp);
     const btn = $("#help-close");
@@ -1861,7 +1925,7 @@
       helpReleaseTrap();
       helpReleaseTrap = null;
     }
-    $("#help").hidden = true;
+    closeOverlay($("#help"));
     if (helpOpener && document.contains(helpOpener)) {
       helpOpener.focus({ preventScroll: true });
     }
@@ -1888,7 +1952,7 @@
       if (open("#picker")) closePicker();
       else if (open("#help")) closeHelp();
       else if (lb.open) closeLightbox();
-      else if (!$("#similar-panel").hidden) $("#similar-panel").hidden = true;
+      else if (!$("#similar-panel").hidden) closeOverlay($("#similar-panel"));
       else if (state.picks.size) clearPicks();
       else document.body.classList.remove("nav-open");
       return;
@@ -2320,6 +2384,7 @@
     // C8: the equalizer spectrum (M5 CSS) animates only while #progress-card
     // is .active, so gate the eq-pulse keyframes on the live running state.
     card.classList.toggle("active", p.active);
+    document.body.classList.toggle("task-running", !!p.active);
     show($("#hero-gauge"), visible);
     if (!visible) return;
     const pct = p.active ? Math.max(num(p.percent), 4) : 100;
@@ -2723,8 +2788,16 @@
     const set = (k, v, alert) => {
       const e = $(`[data-count="${k}"]`);
       if (!e) return;
-      e.textContent = v ? fmtN(v) : "";
+      const next = v ? fmtN(v) : "";
+      const had = e.textContent;
+      e.textContent = next;
       e.classList.toggle("alert", !!(alert && v));
+      if (had && had !== next) {
+        e.classList.remove("tick");
+        void e.offsetWidth;
+        e.classList.add("tick");
+        afterAnim(e, 700).then(() => e.classList.remove("tick"));
+      }
     };
     const junk = Object.entries(ov.by_category).reduce((a, [c, n]) => a + (state.junk.has(c) ? n : 0), 0);
     set("library", ov.total);
@@ -2777,6 +2850,7 @@
   }
 
   function showTab(name, keepPicks) {
+    const changed = state.tab !== name;
     state.tab = name;
     state.triageGrid = null;
     if (!keepPicks) clearPicks();
@@ -2785,7 +2859,17 @@
       t.classList.toggle("active", on);
       if (on) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
     });
-    $$(".panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
+    $$(".panel").forEach((p) => {
+      p.classList.toggle("active", p.id === "tab-" + name);
+      p.classList.remove("enter");
+    });
+    const entering = $("#tab-" + name);
+    if (changed && entering && !reducedMotion()) {
+      void entering.offsetWidth;
+      entering.classList.add("enter");
+      afterAnim(entering, 260).then(() => entering.classList.remove("enter"));
+    }
+    positionNavIndicator();
     const [title, sub] = TITLES[name] || [name, ""];
     $("#page-title").textContent = title;
     $("#page-sub").textContent = sub;
@@ -3149,7 +3233,9 @@
     bindWatch();
     $("#search-form").addEventListener("submit", (e) => { e.preventDefault(); runSearch(); });
     $("#search-dups").addEventListener("change", () => { if ($("#searchq").value.trim()) runSearch(); });
-    $("#similar-close").onclick = () => { $("#similar-panel").hidden = true; };
+    $("#similar-close").onclick = () => { closeOverlay($("#similar-panel")); };
+    window.addEventListener("resize", positionNavIndicator);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionNavIndicator);
     $("#btn-dismiss-progress").onclick = () => { $("#progress-card").hidden = true; $("#hero-gauge").hidden = true; };
 
     $("#btn-learn").onclick = learnNow;

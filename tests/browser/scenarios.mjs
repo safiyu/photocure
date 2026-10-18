@@ -232,7 +232,7 @@ try {
     await page.waitFor("document.querySelector('#lb-img').src.includes('tier=preview')", 8000, "preview tier loaded");
     await shot("06-lightbox");
     await press("Escape");
-    check(await page.eval("document.querySelector('#lightbox').hidden"), "viewer did not close");
+    await page.waitFor("document.querySelector('#lightbox').hidden", 2000, "viewer closes");
     await settle();
     check((await selIdx()) === 202, "the grid cursor is not on the last viewed photo");
     const vis = await page.eval("(() => { const r = document.querySelector('#grid .card.sel').getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; })()");
@@ -391,7 +391,7 @@ try {
     check((await page.eval("document.querySelector('.catmenu-head').textContent")) === "Move 2 selected", "bulk header is wrong");
     await page.eval("document.querySelector('.catmenu-item:not(.current)').click()");
     await page.waitFor(`document.querySelector('#grid .card[data-id="${b}"] .catline .tag') && document.querySelector('#grid .card[data-id="${c}"] .catline .tag')`, 8000, "both selected photos edited");
-    check(await page.eval("document.querySelector('#bulkbar').hidden"), "selection was not cleared");
+    await page.waitFor("document.querySelector('#bulkbar').hidden", 2000, "selection is cleared");
     check(!(await menuOpen()), "picker is still open");
   });
 
@@ -731,6 +731,38 @@ try {
     await shot("19-watching");
     await page.eval("document.querySelector('#watch-toggle').click()");
     await page.waitFor("fetch('/api/watch').then((r) => r.json()).then((w) => w.running === false)", 8000, "stopped");
+  });
+
+  await scenario("motion: rapid tab switching leaves the last panel fully visible", async () => {
+    const tabs = ["categories", "search", "bursts", "highlights", "events", "duplicates", "junk", "uncertain", "actions", "settings", "library"];
+    for (const t of [...tabs, ...tabs]) await page.eval(`document.querySelector('.tab[data-tab="${t}"]').click()`);
+    await sleep(500);
+    const r = await page.eval(`(() => { const p = document.querySelector('#tab-library'); return { opacity: getComputedStyle(p).opacity, active: p.classList.contains('active'), entering: document.querySelectorAll('.panel.enter').length }; })()`);
+    check(r.active && r.opacity === "1" && r.entering === 0, "last panel not fully visible: " + JSON.stringify(r));
+  });
+
+  await scenario("motion: reduced motion closes a dialog at once", async () => {
+    await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    try {
+      await page.eval("document.querySelector('#btn-help').click()");
+      check(await page.eval("!document.querySelector('#help').hidden"), "help did not open");
+      const hidden = await page.eval("(() => { document.querySelector('#help-close').click(); return new Promise((r) => setTimeout(() => r(document.querySelector('#help').hidden), 40)); })()");
+      check(hidden === true, "help still visible 40ms after close under reduced motion");
+    } finally {
+      await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+    }
+  });
+
+  await scenario("motion: reopening a dialog that is closing keeps it open", async () => {
+    await page.eval("document.querySelector('#btn-help').click()");
+    await page.eval("document.querySelector('#help-close').click()");
+    await sleep(60);
+    await page.eval("document.querySelector('#btn-help').click()");
+    await sleep(450);
+    const r = await page.eval("(() => { const h = document.querySelector('#help'); return { hidden: h.hidden, closing: h.classList.contains('closing') }; })()");
+    check(r.hidden === false && r.closing === false, "reopened dialog ended hidden or stuck closing: " + JSON.stringify(r));
+    await page.eval("document.querySelector('#help-close').click()");
+    await page.waitFor("document.querySelector('#help').hidden", 3000, "help closes again");
   });
 
   await scenario("the page raised no script errors", async () => {

@@ -996,10 +996,13 @@ body.has-picks .pick { opacity: 1; }
   position: absolute; right: -14px; top: 50%; transform: translate(50%, -50%);
   display: flex; gap: 2px; z-index: 4; pointer-events: none; color: var(--faint);
 }
-.step-flow .chev { width: 16px; height: 16px; flex: none; }
-.step-flow .chev:nth-child(1) { animation: chev-flow 1.4s ease-in-out infinite; }
-.step-flow .chev:nth-child(2) { animation: chev-flow 1.4s ease-in-out .35s infinite; }
-.step-flow .chev:nth-child(3) { animation: chev-flow 1.4s ease-in-out .7s infinite; }
+.step-flow .chev { width: 16px; height: 16px; flex: none; opacity: .55; }
+body.task-running .step-flow .chev:nth-child(1),
+.step.done:has(+ .step.active) .step-flow .chev:nth-child(1) { animation: chev-flow 1.4s ease-in-out infinite; }
+body.task-running .step-flow .chev:nth-child(2),
+.step.done:has(+ .step.active) .step-flow .chev:nth-child(2) { animation: chev-flow 1.4s ease-in-out .35s infinite; }
+body.task-running .step-flow .chev:nth-child(3),
+.step.done:has(+ .step.active) .step-flow .chev:nth-child(3) { animation: chev-flow 1.4s ease-in-out .7s infinite; }
 @keyframes chev-flow {
   0%, 100% { opacity: .25; transform: translateX(-3px); }
   50% { opacity: 1; transform: translateX(2px); }
@@ -1707,3 +1710,28 @@ body.has-picks .pick { opacity: 1; }
   background: var(--grad-brand); opacity: .35; pointer-events: none;
 }
 .sect, .dup-group, .diffpanel { position: relative; }
+
+/* ------------------------------------------------------------------ motion */
+@keyframes panel-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.panel.enter { animation: panel-in .18s cubic-bezier(.2, .8, .2, 1); }
+@keyframes pop { 0% { transform: scale(.6); } 60% { transform: scale(1.18); } 100% { transform: scale(1); } }
+.step.done .step-num .ic { animation: pop .28s cubic-bezier(.2, .8, .2, 1); }
+@keyframes ov-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ov-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes ov-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes ov-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(.96); } }
+@keyframes slide-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+.modal:not([hidden]), .confirm-modal:not([hidden]), .lb:not([hidden]), .similar:not([hidden]) { animation: ov-fade-in .22s ease-out; }
+.modal:not([hidden]) .modal-card, .confirm-modal:not([hidden]) .confirm-content { animation: ov-in .22s cubic-bezier(.2, .8, .2, 1); }
+.lb:not([hidden]) .lb-info { animation: slide-in .22s cubic-bezier(.2, .8, .2, 1); }
+.modal.closing, .confirm-modal.closing, .lb.closing, .similar.closing { animation: ov-fade-out .2s ease-in forwards; }
+.modal.closing .modal-card, .confirm-modal.closing .confirm-content { animation: ov-out .2s ease-in forwards; }
+#lb-img.swap-in { animation: ov-fade-in .18s ease-out; }
+@keyframes bulk-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translateX(-50%); } }
+@keyframes bulk-out { from { opacity: 1; transform: translateX(-50%); } to { opacity: 0; transform: translate(-50%, 10px); } }
+.bulk:not([hidden]) { animation: bulk-in .2s cubic-bezier(.2, .8, .2, 1); }
+.bulk.closing { animation: bulk-out .18s ease-in forwards; }
+@keyframes toast-out { to { opacity: 0; transform: translateX(12px); } }
+.toast.out { animation: toast-out .2s ease-in forwards; }
+@keyframes tick { from { background: color-mix(in srgb, var(--accent) 45%, transparent); } }
+.count.tick { animation: tick .6s ease-out; }
