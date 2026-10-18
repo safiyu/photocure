@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.0.0" type="stable" date="2026-10-18">
+      <description>
+        <p>Redesigned interface in blue, pink and amber, a simpler import flow where Analyze also groups and sorts, and a clearer duplicates page.</p>
+      </description>
+    </release>
     <release version="0.1.0" type="development" date="2026-10-16">
       <description>
         <p>Initial development release with burst detection, blink flagging, and hardlink organization.</p>

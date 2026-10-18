@@ -11,7 +11,7 @@ STAGING_DIR="$DIST_DIR/deb_staging"
 VERSION="${1:-${VERSION_OVERRIDE:-$(grep -m1 '^version = ' "$PROJECT_ROOT/pyproject.toml" | cut -d '"' -f2)}}"
 VERSION="${VERSION#v}"
 if [ -z "$VERSION" ]; then
-    VERSION="0.1.0"
+    VERSION="1.0.0"
 fi
 ARCH="amd64"
 DEB_NAME="photocure_${VERSION}_${ARCH}.deb"
