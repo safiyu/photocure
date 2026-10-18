@@ -20,9 +20,8 @@ def _coverage_text(cov: dict) -> str:
     src = re.search(r"function coverageText\([^)]*\)\s*\{.*?\n  \}", _read("app.js"), re.S)
     names = re.search(r"const SCALE_NAMES = \{.*?\};", _read("app.js"), re.S)
     assert src and names, "coverageText or SCALE_NAMES not found"
-    out = subprocess.run(["node", "-e", f"{names.group(0)}\n{src.group(0)}\nconsole.log(coverageText({json.dumps(cov)}))"],
-                         capture_output=True, text=True, check=True).stdout.strip()
-    return out
+    return subprocess.run(["node", "-e", f"{names.group(0)}\n{src.group(0)}\nconsole.log(coverageText({json.dumps(cov)}))"],
+                          capture_output=True, text=True, check=True).stdout.strip()
 
 
 @needs_node
