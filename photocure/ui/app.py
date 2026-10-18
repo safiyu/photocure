@@ -150,6 +150,40 @@ class RenameReq(BaseModel):
     name: str
 
 
+def group_matrix_payload(members) -> dict:
+    """The group matrix of one burst's frames, in capture order, as plain JSON."""
+    from ..clustering.group_shots import FaceObs, score_group
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+    def when(r):
+        t = r.taken_at
+        if t is not None and t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return t or epoch
+
+    ordered = sorted(members, key=lambda r: (when(r), r.id or 0))
+    frames = []
+    for r in ordered:
+        faces = []
+        for f in r.faces or []:
+            box = (f.x1, f.y1, f.x2, f.y2)
+            has_box = all(v is not None for v in box)
+            faces.append(FaceObs(box=tuple(float(v) for v in box) if has_box else None,
+                                 eye_status=f.eye_status, eye_closed=f.eye_closed_score,
+                                 sharpness=f.face_sharpness, person_id=f.person_id))
+        frames.append(faces)
+    tiebreak = [float(r.quality.sharpness_norm) if r.quality is not None else 0.0 for r in ordered]
+    m = score_group(frames, tiebreak=tiebreak)
+    return {
+        "status": m.status, "subject_count": m.subject_count,
+        "best_id": ordered[m.best].id if m.best is not None else None,
+        "partner_id": ordered[m.composite[1]].id if m.composite else None,
+        "frames": [{"id": ordered[f.index].id, "min_quality": round(f.min_quality, 3),
+                    "subjects": [{"state": x.state, "q": round(x.quality, 3)} for x in f.subjects]}
+                   for f in m.frames],
+    }
+
+
 def infer_progress_detail(done: int, total: int) -> str:
     """Photos handled in the current phase; the pipeline counts two steps per photo."""
     photos = total // 2
@@ -1511,7 +1545,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             can_reject = bool(movable) and len(blinkers) < len(members)
             return {"burst": bg.name, "members": items, "can_reject_blinks": can_reject,
                     "reject_count": len(movable) if can_reject else 0,
-                    "rejected_blinks": sum(1 for m in members if m.manual_bucket == "junk_blinks")}
+                    "rejected_blinks": sum(1 for m in members if m.manual_bucket == "junk_blinks"),
+                    "group": group_matrix_payload(members)}
 
     @app.get("/api/events")
     def events():
