@@ -124,3 +124,15 @@ def test_photos_without_a_usable_embedding_get_no_scale_tag(env):
     assert by_id[env.ids[2]] is None, "a placeholder photo must not be labelled medium"
     assert by_id[env.ids[0]] == "wide" and by_id[env.ids[1]] == "closeup"
     assert ev["coverage"] == {"wide": 1, "closeup": 1}
+
+
+def test_scale_labelling_runs_outside_the_encoder_lock():
+    import inspect
+
+    from photocure.ui import app as ui_app
+    src = inspect.getsource(ui_app.create_app).splitlines()
+    start = next(i for i, ln in enumerate(src) if "def scale_of(ids):" in ln)
+    block = src[start:start + 8]
+    with_indent = next(len(ln) - len(ln.lstrip()) for ln in block if "with encoder_lock:" in ln)
+    ret_indent = next(len(ln) - len(ln.lstrip()) for ln in block if "narrative.scale_labels" in ln)
+    assert ret_indent < with_indent + 4 and ret_indent == with_indent, "labelling must not hold the lock"

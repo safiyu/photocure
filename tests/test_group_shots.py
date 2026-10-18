@@ -86,3 +86,20 @@ def test_a_face_the_detector_missed_for_one_frame_is_still_the_same_subject():
 def test_bridging_never_joins_two_faces_that_share_a_frame():
     frames = [[face(A), face(A + 0.01)], [face(A), face(A + 0.01)], [face(A), face(A + 0.01)]]
     assert score_group(frames).subject_count == 2
+
+
+def test_a_lost_track_is_rejoined_to_the_best_overlapping_predecessor():
+    from photocure.clustering.group_shots import _bridge
+    first = {0: FaceObs(box=(0.10, 0.3, 0.20, 0.5))}
+    second = {0: FaceObs(box=(0.12, 0.3, 0.22, 0.5))}
+    lost = {2: FaceObs(box=(0.13, 0.3, 0.23, 0.5))}
+    out = _bridge([first, second, lost])
+    assert sorted(len(g) for g in out) == [1, 2]
+    joined = next(g for g in out if 2 in g)
+    assert joined[0].box == (0.12, 0.3, 0.22, 0.5), "must join the closer face"
+
+
+def test_a_short_tiebreak_list_is_padded_instead_of_crashing():
+    frames = [[face(A), face(B)]] * 3
+    m = score_group(frames, tiebreak=[0.0, 0.5])
+    assert m.best == 1

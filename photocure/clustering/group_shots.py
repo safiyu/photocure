@@ -53,16 +53,19 @@ def _bridge(groups: list[dict[int, FaceObs]], max_gap: int = 2,
     out: list[dict[int, FaceObs]] = []
     for g in sorted(groups, key=min):
         start = min(g)
+        best, best_iou = None, min_iou
         for h in out:
             end = max(h)
             if h.keys() & g.keys() or not 2 <= start - end <= max_gap + 1:
                 continue
             a, b = h[end].box, g[start].box
-            if a is not None and b is not None and iou(a, b) >= min_iou:
-                h.update(g)
-                break
-        else:
+            overlap = iou(a, b) if a is not None and b is not None else 0.0
+            if overlap >= best_iou and (best is None or overlap > best_iou):
+                best, best_iou = h, overlap
+        if best is None:
             out.append(dict(g))
+        else:
+            best.update(g)
     return out
 
 
@@ -130,7 +133,7 @@ def score_group(frames: Sequence[Sequence[FaceObs]], *, perfect_at: float = 0.8,
                 subs.append(SubjectFrame(state, _quality(f, ref)))
         qs = [x.quality for x in subs]
         scores.append(FrameScore(t, min(qs), sum(qs) / len(qs), tuple(subs)))
-    tb = list(tiebreak) if tiebreak is not None else [0.0] * n
+    tb = (list(tiebreak) if tiebreak is not None else []) + [0.0] * n  # pad a short list with zeros
     best = max(range(n), key=lambda t: (scores[t].min_quality, scores[t].mean_quality, tb[t], -t))
     if scores[best].min_quality >= perfect_at:
         return GroupMatrix("perfect", len(core), tuple(scores), best, None)
