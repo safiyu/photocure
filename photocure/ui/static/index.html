@@ -14,7 +14,7 @@
   </script>
   <link rel="icon" type="image/png" href="/static/favicon.png">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/style.css?v=2.2.0">
+  <link rel="stylesheet" href="/static/style.css?v=1.0.0">
 </head>
 <body>
   <!-- icon sprite -->
@@ -50,6 +50,7 @@
     <symbol id="i-image" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M9 9.5h.01"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19zM12 10v4M12 17h.01"/></symbol>
     <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2 12h4l2.5-7 4 14 2.5-7H22"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 13 6 5h12l2 8M4 13v6h16v-6M4 13h5l1 2h4l1-2h5"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
   </svg>
 
@@ -63,6 +64,7 @@
       </div>
 
       <nav>
+        <span id="nav-indicator" class="nav-indicator" aria-hidden="true"></span>
         <div class="navgroup">
           <h2>Get started</h2>
           <button class="tab navitem active" data-tab="library"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg><span>Import</span><em class="count"></em></button>
@@ -74,6 +76,7 @@
           <button class="tab navitem" data-tab="bursts"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span>Bursts</span><em class="count" data-count="bursts"></em></button>
           <button class="tab navitem" data-tab="highlights"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg><span>Highlights</span><em class="count"></em></button>
           <button class="tab navitem" data-tab="events"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg><span>Events</span><em class="count"></em></button>
+          <button class="tab navitem" data-tab="utility"><svg class="ic" aria-hidden="true"><use href="#i-inbox"/></svg><span>Utility</span><em class="count" data-count="utility"></em></button>
         </div>
         <div class="navgroup" style="margin-top:18px">
           <h2>Review</h2>
@@ -102,7 +105,7 @@
           </div>
           <button class="icon-btn help-btn" id="btn-help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
         </div>
-        <div class="sidebar-footer"><span class="app-credit">v <button id="sidebar-version" class="sidebar-version-badge" type="button" data-goto="settings" title="Click to view About Photocure">0.1.0</button> by Safiyu</span></div>
+        <div class="sidebar-footer"><span class="app-credit">v <button id="sidebar-version" class="sidebar-version-badge" type="button" data-goto="settings" data-anchor="sect-about" title="Click to view About Photocure">1.0.0</button> by Safiyu</span></div>
       </div>
     </aside>
 
@@ -113,25 +116,13 @@
           <h1 id="page-title">Import</h1>
           <div class="sub" id="page-sub"></div>
         </div>
-        <div id="hero-gauge" class="gauge" hidden role="progressbar" aria-label="Overall progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-          <svg class="gauge-svg" viewBox="0 0 120 70" aria-hidden="true">
-            <defs>
-              <linearGradient id="gauge-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#38bdf8"/>
-                <stop offset="100%" stop-color="#ec4899"/>
-              </linearGradient>
-            </defs>
-            <path class="gauge-track" d="M10 62 A50 50 0 0 1 110 62" pathLength="100"/>
-            <path id="gauge-arc" class="gauge-arc" d="M10 62 A50 50 0 0 1 110 62" pathLength="100"/>
-          </svg>
-          <div class="gauge-text"><span id="gauge-phase" class="gauge-phase">Working</span><b id="gauge-pct">0%</b><span class="gauge-sub">Overall</span></div>
-        </div>
         <div id="progress-card" class="progress-card" hidden>
           <div class="progress-header">
             <div class="progress-task">
               <span class="spinner" id="progress-spinner"></span>
               <span id="progress-status-icon" hidden></span>
               <span id="progress-title">Working</span>
+              <span class="progress-phase" id="progress-phase" hidden></span>
             </div>
             <div class="progress-controls">
               <div class="spectrum-bars" aria-hidden="true">
@@ -143,7 +134,7 @@
               <button id="btn-dismiss-progress" class="dismiss-btn" title="Dismiss" aria-label="Dismiss" style="display:none"><svg class="ic sm" aria-hidden="true"><use href="#i-x"/></svg></button>
             </div>
           </div>
-          <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+          <div class="progress-track" role="progressbar" aria-label="Task progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-fill" class="progress-fill"></div></div>
           <div class="progress-sub">
             <span class="progress-msg" id="progress-msg">Starting</span>
             <span id="progress-counts"></span>
@@ -183,7 +174,7 @@
                 <span id="watch-status" class="muted" role="status"></span>
               </div>
               <div class="actions">
-                <button id="btn-scan" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-camera"/></svg>Scan</button>
+                <button id="btn-scan" data-busy class="btn accent"><svg class="ic sm" aria-hidden="true"><use href="#i-camera"/></svg>Scan</button>
               </div>
               <div class="step-flow" aria-hidden="true">
                 <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
@@ -198,7 +189,7 @@
                 <span class="state" id="state-infer"></span>
                 <button class="step-more" id="step-infer-more" type="button" title="Inference settings" aria-label="Inference settings" data-goto="settings"><svg class="ic sm" aria-hidden="true"><use href="#i-menu"/></svg></button>
               </div>
-              <p>Finds faces, checks sharpness and exposure, and labels what each photo shows.</p>
+              <p>Finds faces, checks sharpness and exposure, labels what each photo shows, then groups burst shots and sorts everything into categories.</p>
               <div class="field">
                 <label for="infer-device">Run on</label>
                 <div class="device-chip">
@@ -216,32 +207,6 @@
               <div class="actions">
                 <button id="btn-infer" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Analyze Now</button>
               </div>
-              <div class="step-flow" aria-hidden="true">
-                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
-                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
-                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
-              </div>
-            </li>
-            <li class="step" id="step-cluster">
-              <div class="step-head">
-                <span class="step-num"><span class="n">3</span><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></span>
-                <h3>Group bursts</h3>
-                <span class="state" id="state-cluster"></span>
-              </div>
-              <p>Finds shots taken seconds apart and keeps the best one from each group.</p>
-              <svg class="burst-art" viewBox="0 0 96 72" aria-hidden="true">
-                <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
-                  <rect x="33" y="44" width="34" height="22" rx="3"/>
-                  <rect x="26" y="27" width="34" height="22" rx="3"/>
-                  <rect x="19" y="10" width="34" height="22" rx="3"/>
-                </g>
-                <g fill="none" stroke="currentColor" stroke-width="1.2" opacity=".65">
-                  <rect x="26" y="15" width="10" height="8" rx="1.5"/>
-                </g>
-              </svg>
-              <div class="actions">
-                <button id="btn-cluster" data-busy class="btn primary" disabled><svg class="ic sm" aria-hidden="true"><use href="#i-swap"/></svg>Group<svg class="ic sm lock" aria-hidden="true"><use href="#i-lock"/></svg></button>
-              </div>
             </li>
           </ol>
 
@@ -249,16 +214,26 @@
             <div class="dock-summary">
               <span class="dock-total" id="dock-total">0</span>
               <span class="dock-label" id="dock-label">photos in your library</span>
-              <button class="btn dock-sort" id="btn-sort-dock" type="button" data-sortnow data-busy>Sort Photos</button>
+
             </div>
             <div class="dock-actions">
-              <button id="btn-ingest-all" data-busy class="btn primary" title="Run All Three Steps" aria-label="Run All Three Steps"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Run All</button>
+              <button id="btn-ingest-all" data-busy class="btn commit" title="Run Scan and Analyze" aria-label="Run Scan and Analyze"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Run All</button>
               <button id="btn-import-reset" data-busy class="btn danger" title="Reset Library" aria-label="Reset Library"><svg class="ic sm" aria-hidden="true"><use href="#i-undo"/></svg>Reset</button>
             </div>
+            <p class="dock-hint" id="dock-hint" role="status"></p>
           </div>
 
-          <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity</h2>
-          <div id="library-log" class="action-log"><div class="logline">Nothing has run yet.</div></div>
+          <section class="activity" data-filter="all">
+            <header class="activity-bar">
+              <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity <span class="activity-count"></span></h2>
+              <div class="seg seg-2 activity-filter" role="group" aria-label="Filter activity">
+                <button type="button" class="seg-btn active" data-act-filter="all">All</button>
+                <button type="button" class="seg-btn" data-act-filter="problems">Problems</button>
+              </div>
+              <button type="button" class="btn sm ghost" data-act-clear>Clear</button>
+            </header>
+            <div id="library-log" class="action-log" role="log" aria-label="Activity"><div class="logline logline-empty">Nothing has run yet.</div></div>
+          </section>
         </section>
 
         <!-- LIBRARY -->
@@ -282,18 +257,18 @@
             </select>
             <select id="f-country" aria-label="Country" hidden><option value="">All countries</option></select>
             <label class="toggle"><input type="checkbox" id="f-fav">Favourites</label>
-            <button id="reset-filters" class="btn sm" type="button" hidden>Reset filters</button>
+            <button id="reset-filters" class="btn sm ghost" type="button" hidden>Reset filters</button>
             <span class="grow"></span>
             <label class="density">Size <input type="range" id="density" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="rowcount" class="rowcount"></span>
           </div>
           <div class="scrubber" id="scrubber" hidden>
-            <div class="scrub-presets" id="scrub-presets" role="group" aria-label="Date presets">
-              <button type="button" class="preset-btn active" data-preset="all">All</button>
-              <button type="button" class="preset-btn" data-preset="year">This year</button>
-              <button type="button" class="preset-btn" data-preset="90d">Last 90 days</button>
-              <button type="button" class="preset-btn" data-preset="30d">Last 30 days</button>
-              <button type="button" class="preset-btn" data-preset="custom">Custom</button>
+            <div class="scrub-presets seg" id="scrub-presets" role="group" aria-label="Date presets">
+              <button type="button" class="preset-btn seg-btn active" data-preset="all">All</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="year">This year</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="90d">Last 90 days</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="30d">Last 30 days</button>
+              <button type="button" class="preset-btn seg-btn" data-preset="custom">Custom</button>
             </div>
             <label>From <span id="scrub-from-label"></span>
               <input type="range" id="scrub-from" min="0" max="0" value="0" aria-label="Earliest date shown"></label>
@@ -335,12 +310,32 @@
               <option value="near">Look-alikes</option>
             </select>
             <label class="toggle"><input type="checkbox" id="dup-reviewed">Show decided groups</label>
-            <button id="btn-dup-all" class="btn" type="button">Keep the suggested photo in every group</button>
+            <button id="btn-dup-all" class="btn commit" type="button" title="Keeps the suggested photo in every group and marks the rest as duplicates.">Accept all suggestions</button>
             <span class="grow"></span>
             <span id="dup-summary" class="rowcount" role="status"></span>
           </div>
+          <p class="dup-intro">Each group holds the same photo more than once. Photocure suggests the best copy to keep. Pick a different one if you prefer, then confirm. Nothing is deleted or moved until you apply a plan.</p>
           <div id="dup-list" class="dup-list"></div>
-          <div class="loadmore"><button id="btn-dup-more" class="btn" type="button" hidden>Show more groups</button></div>
+          <div class="loadmore"><button id="btn-dup-more" class="btn secondary" type="button" hidden>Show more groups</button></div>
+        </section>
+
+        <!-- UTILITY -->
+        <section id="tab-utility" class="panel">
+          <p class="dup-intro">Receipts, notes, screenshots, labels, signs and packaging live here, apart from your photos and from Junk. Nothing in this tab is treated as clutter.</p>
+          <div class="toolbar">
+            <div class="kind-chips" role="group" aria-label="Kind of reference photo">
+              <button type="button" class="chip-btn" data-ukind="" aria-pressed="true">All</button>
+              <button type="button" class="chip-btn" data-ukind="screenshot" aria-pressed="false">Screenshots</button>
+              <button type="button" class="chip-btn" data-ukind="document" aria-pressed="false">Receipts and documents</button>
+              <button type="button" class="chip-btn" data-ukind="slide" aria-pressed="false">Notes and whiteboards</button>
+              <button type="button" class="chip-btn" data-ukind="utility" aria-pressed="false">Labels, signs and packaging</button>
+            </div>
+            <button id="btn-rescore" class="btn sm secondary" type="button" title="Looks at your already analyzed photos again with the latest categories. No photo is read again.">Re-check my photos</button>
+            <span class="grow"></span>
+            <span id="utilitycount" class="rowcount"></span>
+          </div>
+          <div id="utilitygrid" class="grid"></div>
+          <div id="utilitygrid-more" class="loadmore"></div>
         </section>
 
         <!-- JUNK -->
@@ -350,8 +345,6 @@
               <option value="">All junk</option>
               <option value="duplicate">Duplicates</option>
               <option value="near_duplicate">Near duplicates</option>
-              <option value="screenshot">Screenshots</option>
-              <option value="document">Documents</option>
               <option value="graphic">Graphics</option>
               <option value="accidental">Accidental</option>
               <option value="unreadable">Unreadable</option>
@@ -384,10 +377,11 @@
             <select id="hl-view" aria-label="Show">
               <option value="all">All photos, best first</option>
               <option value="events">Best of each event</option>
+              <option value="story">Event stories (balanced)</option>
             </select>
             <label class="inline-num" title="Filters on the AI appeal score, in both views">Minimum appeal <input id="minaes" type="number" step="0.1" placeholder="any"></label>
             <select id="hl-year" aria-label="Year in review"><option value="">Year in review</option></select>
-            <button id="btn-hl-export" class="btn" type="button" disabled>Download page</button>
+            <button id="btn-hl-export" class="btn secondary" type="button" disabled>Download page</button>
             <span class="grow"></span>
             <span id="highlightcount" class="rowcount"></span>
           </div>
@@ -409,8 +403,8 @@
               <h3>Learn my taste</h3>
               <p id="taste-text" class="help" role="status"></p>
               <div class="btn-row">
-                <button id="btn-taste-learn" class="btn" type="button">Learn from my ratings</button>
-                <button id="btn-taste-reset" class="btn" type="button">Forget what it learned</button>
+                <button id="btn-taste-learn" class="btn secondary" type="button">Learn from my ratings</button>
+                <button id="btn-taste-reset" class="btn ghost" type="button">Forget what it learned</button>
               </div>
             </div>
           </details>
@@ -424,7 +418,7 @@
           <div class="toolbar">
             <label class="inline-num">Gap between events <input id="ev-gap" type="number" step="0.5" value="2"> hours</label>
             <label class="inline-num">Distance <input id="ev-km" type="number" step="0.5" value="1"> km</label>
-            <button id="btn-events" class="btn" data-busy>Find events</button>
+            <button id="btn-events" class="btn primary" data-busy>Find events</button>
             <span class="grow"></span>
             <span id="eventcount" class="rowcount"></span>
           </div>
@@ -479,10 +473,10 @@
               </div>
             </div>
             <div class="btn-row">
-              <button id="btn-rebuild" data-busy class="btn">Rebuild plan</button>
-              <button id="btn-diff" data-busy class="btn">Preview changes</button>
+              <button id="btn-rebuild" data-busy class="btn secondary">Rebuild plan</button>
+              <button id="btn-diff" data-busy class="btn secondary">Preview changes</button>
               <span class="grow"></span>
-              <button id="btn-apply" data-busy class="btn primary">Review and apply</button>
+              <button id="btn-apply" data-busy class="btn commit">Review and apply</button>
             </div>
           </div>
 
@@ -501,13 +495,22 @@
             </div>
             <div class="btn-row">
               <button id="btn-undo" data-busy class="btn danger">Undo this change</button>
-              <button id="btn-verify" class="btn">Verify files</button>
-              <button id="btn-repair" data-busy class="btn">Repair paths</button>
+              <button id="btn-verify" class="btn secondary">Verify files</button>
+              <button id="btn-repair" data-busy class="btn secondary">Repair paths</button>
             </div>
           </div>
 
-          <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity</h2>
-          <div id="action-log" class="action-log"><div class="logline">Nothing has run yet.</div></div>
+          <section class="activity" data-filter="all">
+            <header class="activity-bar">
+              <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity <span class="activity-count"></span></h2>
+              <div class="seg seg-2 activity-filter" role="group" aria-label="Filter activity">
+                <button type="button" class="seg-btn active" data-act-filter="all">All</button>
+                <button type="button" class="seg-btn" data-act-filter="problems">Problems</button>
+              </div>
+              <button type="button" class="btn sm ghost" data-act-clear>Clear</button>
+            </header>
+            <div id="action-log" class="action-log" role="log" aria-label="Activity"><div class="logline logline-empty">Nothing has run yet.</div></div>
+          </section>
         </section>
 
         <!-- SETTINGS -->
@@ -564,7 +567,7 @@
 
           <div class="btn-row">
             <button id="btn-save-settings" class="btn primary" type="button">Save settings</button>
-            <button id="btn-reset-settings" class="btn" type="button">Back to saved</button>
+            <button id="btn-reset-settings" class="btn secondary" type="button">Back to saved</button>
             <span id="settings-msg" class="help" role="status"></span>
           </div>
 
@@ -573,13 +576,13 @@
             <p class="lede">Photocure can add its own keywords to each photo's XMP sidecar: its category, an event name you chose, and Highlight for your best photos. Programs such as digiKam or Lightroom can then search and filter by them. Your ratings and other keywords are never changed.</p>
             <label class="toggle"><input type="checkbox" id="set-keywords">Add keywords whenever a rating is saved</label>
             <div class="btn-row" style="margin-top:14px">
-              <button id="btn-kw-write" class="btn" type="button" data-busy>Write keywords for every photo</button>
-              <button id="btn-kw-remove" class="btn" type="button" data-busy>Remove them</button>
+              <button id="btn-kw-write" class="btn secondary" type="button" data-busy>Write keywords for every photo</button>
+              <button id="btn-kw-remove" class="btn danger" type="button" data-busy>Remove them</button>
             </div>
             <p id="kw-note" class="help" style="margin-top:10px" role="status"></p>
           </div>
 
-          <div class="sect" style="margin-top:28px">
+          <div class="sect" id="sect-about" tabindex="-1" style="margin-top:28px">
             <h2>About Photocure</h2>
             <p class="lede"><span>Intelligent image curator</span></p>
             <div id="about-card"></div>
@@ -588,7 +591,7 @@
           <div class="sect" style="margin-top:28px">
             <h2>Restart server</h2>
             <p class="lede">Restart Photocure and reload this page. A restart is refused while files are being moved or restored.</p>
-            <div class="btn-row"><button id="btn-restart" class="btn" type="button">Restart Photocure</button></div>
+            <div class="btn-row"><button id="btn-restart" class="btn secondary" type="button">Restart Photocure</button></div>
           </div>
 
           <div class="sect danger" style="margin-top:28px">
@@ -607,8 +610,8 @@
   <div id="bulkbar" class="bulk" hidden role="region" aria-label="Selected photos">
     <b id="bulk-count">0 selected</b>
     <select id="bulk-cat" aria-label="Move selected to category"></select>
-    <button class="btn" id="bulk-lock">Lock</button>
-    <button class="btn" id="bulk-clear">Clear</button>
+    <button class="btn sm ghost" id="bulk-lock">Lock</button>
+    <button class="btn sm ghost" id="bulk-clear">Clear</button>
   </div>
 
   <!-- lightbox -->
@@ -633,11 +636,11 @@
         <p class="help">Choose a category below. Then use Learn from my choices on the Finalize page.</p>
       </section>
       <div class="lb-rate" id="lb-rate" role="group" aria-label="Rating">
-        <button type="button" class="star" data-star="1" aria-label="1 star">&#9733;</button>
-        <button type="button" class="star" data-star="2" aria-label="2 stars">&#9733;</button>
-        <button type="button" class="star" data-star="3" aria-label="3 stars">&#9733;</button>
-        <button type="button" class="star" data-star="4" aria-label="4 stars">&#9733;</button>
-        <button type="button" class="star" data-star="5" aria-label="5 stars">&#9733;</button>
+        <button type="button" class="star" data-star="1" aria-label="1 star"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">1</span></button>
+        <button type="button" class="star" data-star="2" aria-label="2 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">2</span></button>
+        <button type="button" class="star" data-star="3" aria-label="3 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">3</span></button>
+        <button type="button" class="star" data-star="4" aria-label="4 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">4</span></button>
+        <button type="button" class="star" data-star="5" aria-label="5 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">5</span></button>
         <button type="button" class="btn sm" id="lb-fav" aria-pressed="false">&#9829; Favourite</button>
         <button type="button" class="btn sm" id="lb-reject" aria-pressed="false">Reject</button>
       </div>
@@ -646,9 +649,9 @@
         <select id="lb-cat"></select>
       </div>
       <div class="lb-actions">
-        <button class="btn sm" id="lb-lock"><svg class="ic sm" aria-hidden="true"><use href="#i-lock"/></svg><span>Lock</span></button>
-        <button class="btn sm" id="lb-similar"><svg class="ic sm" aria-hidden="true"><use href="#i-copy"/></svg>Find similar</button>
-        <button class="btn sm" id="lb-clear">Back to AI choice</button>
+        <button class="btn sm secondary" id="lb-lock"><svg class="ic sm" aria-hidden="true"><use href="#i-lock"/></svg><span>Lock</span></button>
+        <button class="btn sm secondary" id="lb-similar"><svg class="ic sm" aria-hidden="true"><use href="#i-copy"/></svg>Find similar</button>
+        <button class="btn sm secondary" id="lb-clear">Back to AI choice</button>
       </div>
       <div class="lb-count" id="lb-count"></div>
       <div class="keys"><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> browse</span><span><kbd>1</kbd>-<kbd>5</kbd> rate</span><span><kbd>0</kbd> clear</span><span><kbd>x</kbd> reject</span><span><kbd>f</kbd> favourite</span><span><kbd>l</kbd> lock</span><span><kbd>Esc</kbd> close</span></div>
@@ -762,6 +765,6 @@
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script type="module" src="/static/virtual_grid.mjs"></script>
-  <script src="/static/app.js?v=2.2.0"></script>
+  <script src="/static/app.js?v=1.0.0"></script>
 </body>
 </html>

@@ -232,7 +232,7 @@ try {
     await page.waitFor("document.querySelector('#lb-img').src.includes('tier=preview')", 8000, "preview tier loaded");
     await shot("06-lightbox");
     await press("Escape");
-    check(await page.eval("document.querySelector('#lightbox').hidden"), "viewer did not close");
+    await page.waitFor("document.querySelector('#lightbox').hidden", 2000, "viewer closes");
     await settle();
     check((await selIdx()) === 202, "the grid cursor is not on the last viewed photo");
     const vis = await page.eval("(() => { const r = document.querySelector('#grid .card.sel').getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; })()");
@@ -391,7 +391,7 @@ try {
     check((await page.eval("document.querySelector('.catmenu-head').textContent")) === "Move 2 selected", "bulk header is wrong");
     await page.eval("document.querySelector('.catmenu-item:not(.current)').click()");
     await page.waitFor(`document.querySelector('#grid .card[data-id="${b}"] .catline .tag') && document.querySelector('#grid .card[data-id="${c}"] .catline .tag')`, 8000, "both selected photos edited");
-    check(await page.eval("document.querySelector('#bulkbar').hidden"), "selection was not cleared");
+    await page.waitFor("document.querySelector('#bulkbar').hidden", 2000, "selection is cleared");
     check(!(await menuOpen()), "picker is still open");
   });
 
@@ -572,14 +572,15 @@ try {
       }));
       return {
         steps,
-        states: { scan: document.getElementById('state-scan').textContent, infer: document.getElementById('state-infer').textContent,
-                  cluster: document.getElementById('state-cluster').textContent },
+        states: { scan: document.getElementById('state-scan').textContent, infer: document.getElementById('state-infer').textContent },
         cols: getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length
       };
     })()`);
-    // Seeded library: 5,000 indexed + 1 burst group, all inferred -> every step is done.
+    // Seeded library: 5,000 indexed + 1 burst group, all analyzed -> Analyze is done and
+    // Scan is the active step again, ready for the next batch.
     const byId = Object.fromEntries(info.steps.map((s) => [s.id, s]));
-    for (const id of ["step-scan", "step-infer", "step-cluster"]) {
+    check(byId["step-scan"].active && !byId["step-scan"].done && !byId["step-scan"].locked, "step-scan should be the active next step");
+    for (const id of ["step-infer"]) {
       check(byId[id].done, id + " is not in the done state");
       check(!byId[id].active && !byId[id].locked, id + " carries a conflicting state class");
       check(byId[id].badgeBg !== "rgba(0, 0, 0, 0)", id + " badge has no painted background");
@@ -587,10 +588,9 @@ try {
     }
     check(/indexed/.test(info.states.scan), "step 1 state text has no index count: " + info.states.scan);
     check(info.states.infer === "Done", "step 1 done but step 2 is not marked done: " + info.states.infer);
-    check(/group/.test(info.states.cluster), "step 3 state text has no group count: " + info.states.cluster);
-    check(info.cols === 3, "wide layout should show 3 step columns, got " + info.cols);
+    check(info.cols === 2, "wide layout should show 2 step columns, got " + info.cols);
 
-    // Tablet: at <= 960px the 3-column grid stacks to a single column.
+    // Tablet: at <= 960px the 2-column grid stacks to a single column.
     await page.viewport(900, 800);
     await page.waitFor(`getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length === 1`, 8000, "steps stack to one column");
     await settle();
@@ -598,38 +598,36 @@ try {
     check(narrow === 1, "tablet layout should show 1 step column, got " + narrow);
     await shot("13-steps-tablet");
     await page.viewport(1400, 900);
-    await page.waitFor(`getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length === 3`, 8000, "steps restore to 3 columns");
+    await page.waitFor(`getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length === 2`, 8000, "steps restore to 2 columns");
     await settle();
   });
 
-  await scenario("activity log rows render monospace tabular time pills", async () => {
+  await scenario("activity timeline rows have an icon and a monospace time, and can be filtered and cleared", async () => {
     await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click()");
     await settle();
-    // An empty scan path is a safe, non-mutating way to make the real logTo() write a row.
+    // An empty scan path is a safe, non-mutating way to make the real logTo() write an error row.
     await page.eval("document.getElementById('scan-path').value = ''");
     await page.eval("document.getElementById('btn-scan').click()");
-    await page.waitFor(`(() => { const l = document.querySelector('#library-log .logline .time-pill'); return l && /\\d{1,2}:\\d{2}/.test(l.textContent); })()`, 8000, "a time-pill appears in the activity log");
+    await page.waitFor(`(() => { const l = document.querySelector('#library-log .logline .log-time'); return l && /\\d{1,2}:\\d{2}/.test(l.textContent); })()`, 8000, "a time appears in the activity log");
     const log = await page.eval(`(() => {
-      const rows = [...document.querySelectorAll('#library-log .logline')];
+      const rows = [...document.querySelectorAll('#library-log .logline[data-t]')];
       const err = rows.find((r) => r.textContent.includes('Choose a photo folder'));
-      const anyPill = document.querySelector('#library-log .logline .time-pill');
-      const cs = getComputedStyle(anyPill);
+      const cs = getComputedStyle(document.querySelector('#library-log .logline .log-time'));
       return {
-        hasErrRow: !!err,
-        errPillClass: err ? err.querySelector('.time-pill').className : "",
-        errHighlighted: err ? err.classList.contains('active-highlight') : false,
+        hasErrRow: !!err, errClass: err ? err.className : "", hasIcon: !!(err && err.querySelector('.log-ico')),
         fontFamily: cs.fontFamily, fontVariant: cs.fontVariantNumeric,
-        pillText: anyPill.textContent,
-        terminalBg: getComputedStyle(document.getElementById('library-log')).backgroundColor
+        bg: getComputedStyle(document.getElementById('library-log')).backgroundColor
       };
     })()`);
-    check(/\d{1,2}:\d{2}/.test(log.pillText), "time-pill has no readable time: " + log.pillText);
-    check(/JetBrains Mono/.test(log.fontFamily), "time-pill is not monospace: " + log.fontFamily);
-    check(/tabular-nums/.test(log.fontVariant), "time-pill is not tabular: " + log.fontVariant);
-    check(log.hasErrRow && log.errPillClass.includes("muted"), "the error row should carry a muted time-pill: " + log.errPillClass);
-    check(!log.errHighlighted, "an error row should not be a completion highlight");
-    check(log.terminalBg !== "rgba(0, 0, 0, 0)", "the activity terminal has no painted background");
-    await shot("14-log-pills");
+    check(log.hasErrRow && /\berr\b/.test(log.errClass) && log.hasIcon, "the error row needs the err class and a status icon: " + JSON.stringify(log));
+    check(/JetBrains Mono/.test(log.fontFamily) && /tabular-nums/.test(log.fontVariant), "time is not monospace and tabular: " + log.fontFamily + " / " + log.fontVariant);
+    check(log.bg !== "rgba(0, 0, 0, 0)", "the activity panel has no painted background");
+    await shot("14-activity-timeline");
+    await page.eval("document.querySelector('#tab-library [data-act-filter=\"problems\"]').click()");
+    check(await page.eval("document.querySelector('#tab-library .activity').dataset.filter === 'problems' && [...document.querySelectorAll('#library-log .logline.err')].every((r) => getComputedStyle(r).display !== 'none')"), "problems filter must keep error rows visible");
+    await page.eval("document.querySelector('#tab-library [data-act-filter=\"all\"]').click()");
+    await page.eval("document.querySelector('#tab-library [data-act-clear]').click()");
+    check(await page.eval("document.querySelectorAll('#library-log .logline[data-t]').length === 0 && !!document.querySelector('#library-log .logline-empty')"), "Clear must remove entries and restore the empty message");
   });
 
   const clickTab = async (t) => {
@@ -694,7 +692,7 @@ try {
       return Number(second.dataset.mid);
     })()`);
     await page.waitFor(`(() => { const g = ${exactGroup}; return g && g.querySelector('.dup-member.keep') && Number(g.querySelector('.dup-member.keep').dataset.mid) === ${alt}; })()`, 5000, "the second photo is now the one kept");
-    check(/discard 1 other/.test(await page.eval(`${exactGroup}.querySelector('[data-dup-apply]').textContent`)), "the apply button says what it will do");
+    check(/mark 1 other as a duplicate/.test(await page.eval(`${exactGroup}.querySelector('.dup-plan').textContent`)), "the footer says what Confirm will do");
     await page.eval(`${exactGroup}.querySelector('[data-dup-apply]').click()`);
     await page.waitFor("document.querySelectorAll('#dup-list .dup-group').length === 1", 8000, "the resolved group left the queue");
     const done = (await api("/api/duplicates?reviewed=true&kind=exact")).groups.find((g) => g.reviewed);
@@ -731,6 +729,221 @@ try {
     await shot("19-watching");
     await page.eval("document.querySelector('#watch-toggle').click()");
     await page.waitFor("fetch('/api/watch').then((r) => r.json()).then((w) => w.running === false)", 8000, "stopped");
+  });
+
+  await scenario("motion: rapid tab switching leaves the last panel fully visible", async () => {
+    const tabs = ["categories", "search", "bursts", "highlights", "events", "duplicates", "junk", "uncertain", "actions", "settings", "library"];
+    for (const t of [...tabs, ...tabs]) await page.eval(`document.querySelector('.tab[data-tab="${t}"]').click()`);
+    await sleep(500);
+    const r = await page.eval(`(() => { const p = document.querySelector('#tab-library'); return { opacity: getComputedStyle(p).opacity, active: p.classList.contains('active'), entering: document.querySelectorAll('.panel.enter').length }; })()`);
+    check(r.active && r.opacity === "1" && r.entering === 0, "last panel not fully visible: " + JSON.stringify(r));
+  });
+
+  await scenario("motion: reduced motion closes a dialog at once", async () => {
+    await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    try {
+      await page.eval("document.querySelector('#btn-help').click()");
+      check(await page.eval("!document.querySelector('#help').hidden"), "help did not open");
+      const hidden = await page.eval("(() => { document.querySelector('#help-close').click(); return new Promise((r) => setTimeout(() => r(document.querySelector('#help').hidden), 40)); })()");
+      check(hidden === true, "help still visible 40ms after close under reduced motion");
+    } finally {
+      await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+    }
+  });
+
+  await scenario("motion: reopening a dialog that is closing keeps it open", async () => {
+    await page.eval("document.querySelector('#btn-help').click()");
+    await page.eval("document.querySelector('#help-close').click()");
+    await sleep(60);
+    await page.eval("document.querySelector('#btn-help').click()");
+    await sleep(450);
+    const r = await page.eval("(() => { const h = document.querySelector('#help'); return { hidden: h.hidden, closing: h.classList.contains('closing') }; })()");
+    check(r.hidden === false && r.closing === false, "reopened dialog ended hidden or stuck closing: " + JSON.stringify(r));
+    await page.eval("document.querySelector('#help-close').click()");
+    await page.waitFor("document.querySelector('#help').hidden", 3000, "help closes again");
+  });
+
+  await scenario("import flow: the next step is the long button", async () => {
+    const total = (await api("/api/overview")).total;
+    const install = () => page.eval(`(() => { if (!window.__rf) window.__rf = window.fetch.bind(window); window.__patch = {}; window.__pg = null; window.fetch = (u, i) => { const url = String(u); if (/\\/api\\/progress/.test(url) && window.__pg) return Promise.resolve(new Response(JSON.stringify(window.__pg), { status: 200, headers: { "Content-Type": "application/json" } })); if (/\\/api\\/overview/.test(url)) return window.__rf(u, i).then((r) => r.json()).then((o) => { o.stats = Object.assign({}, o.stats, window.__patch.stats || {}); return new Response(JSON.stringify(o), { status: 200, headers: { "Content-Type": "application/json" } }); }); return window.__rf(u, i); }; return true; })()`);
+    const idle = { active: false, task: "", step: "", done: 0, total: 0, percent: 0, message: "", detail: "", error: null, stopping: false, stopped: false, run: 98 };
+    const busy = { ...idle, active: true, task: "Scan", step: "Scan", done: 1, total: 10, percent: 10, message: "working", run: 99 };
+    const stored = (v) => page.eval(`localStorage.setItem('pcur-grouped-total', ${JSON.stringify(String(v))}); true`);
+    // The app refreshes its stats when the progress poll sees a task finish, so replay exactly that.
+    const refresh = async (patch) => {
+      await page.eval(`window.__patch = ${JSON.stringify(patch)}; window.__pg = ${JSON.stringify(busy)}; true`);
+      await page.waitFor("!document.querySelector('#progress-card').hidden && document.querySelector('#progress-card').classList.contains('active')", 15000, "the poll sees a running task");
+      await page.eval(`window.__pg = ${JSON.stringify(idle)}; true`);
+    };
+    const tall = (id) => page.eval(`getComputedStyle(document.querySelector('#${id}')).height === '48px'`);
+    const hint = () => page.eval("document.querySelector('#dock-hint').textContent");
+    const dump = () => page.eval("JSON.stringify({ infer: document.querySelector('#step-infer').className, scan: document.querySelector('#step-scan').className, stateInfer: document.querySelector('#state-infer').textContent, cardHidden: document.querySelector('#progress-card').hidden, pgActive: window.__pg && window.__pg.active, patch: window.__patch, grouped: localStorage.getItem('pcur-grouped-total') })");
+    const until = (expr, ms, label) => page.waitFor(expr, ms, label).catch(async (e) => { throw new Error(e.message + " | state " + (await dump())); });
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); true");
+    try {
+      await install();
+      await stored(total); await refresh({});
+      await until("document.querySelector('#step-scan').classList.contains('active')", 15000, "scan is next");
+      check(await tall("btn-scan") && !(await tall("btn-infer")), "only Scan should be the long button");
+      check(/Scan/.test(await hint()), "hint should invite the next scan: " + (await hint()));
+
+      await refresh({ stats: { pending_inference: 3 } });
+      await until("document.querySelector('#step-infer').classList.contains('active')", 15000, "analyze is next");
+      check(await tall("btn-infer") && !(await tall("btn-scan")), "Analyze should be the long button");
+      check(/Analyze/.test(await hint()) && /group/i.test(await hint()) && /sort/i.test(await hint()), "hint should say Analyze, group and sort: " + (await hint()));
+
+      await stored(total - 1); await refresh({});
+      await page.waitFor("document.querySelector('#step-infer').classList.contains('active') && document.querySelector('#state-infer').textContent === 'Needs grouping'", 15000, "analyze stays next until the new photos are grouped");
+      check(await tall("btn-infer"), "Analyze should stay the long button until grouping is done");
+    } finally {
+      await page.eval("if (window.__rf) window.fetch = window.__rf; window.__pg = null; localStorage.removeItem('pcur-grouped-total'); true");
+      await sleep(3500);
+    }
+  });
+
+  await scenario("keyboard focus shows a visible ring on brand buttons", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); true");
+    await settle();
+    await press("Tab");
+    const r = await page.eval(`(() => { const out = {}; for (const id of ['btn-scan', 'btn-infer', 'btn-ingest-all']) { const b = document.getElementById(id); b.focus(); const cs = getComputedStyle(b); out[id] = { visible: b.matches(':focus-visible'), style: cs.outlineStyle, width: cs.outlineWidth }; } document.activeElement.blur(); return out; })()`);
+    for (const [id, v] of Object.entries(r)) check(v.visible && v.style === "solid" && v.width === "2px", `#${id} has no visible focus ring: ` + JSON.stringify(v));
+  });
+
+  await scenario("clicking the version opens Settings scrolled to the About section", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); window.scrollTo(0, 0); true");
+    await settle();
+    await page.eval("document.querySelector('#sidebar-version').click(); true");
+    await page.waitFor("document.querySelector('.tab.active').dataset.tab === 'settings'", 5000, "settings opens");
+    await page.waitFor("(() => { const r = document.querySelector('#sect-about').getBoundingClientRect(); return r.top < innerHeight - 100 && r.bottom > 0 && window.scrollY > 0; })()", 5000, "About scrolled into view");
+    check(await page.eval("document.querySelector('#about-card .about-name').textContent === 'Photocure' && /^v/.test(document.querySelector('#about-card .about-ver').textContent)"), "About card is not rendered");
+  });
+
+  await scenario("empty states sit near the vertical middle of the page", async () => {
+    for (const tab of ["search"]) {
+      await page.eval(`document.querySelector('.tab[data-tab="${tab}"]').click(); window.scrollTo(0, 0); true`);
+      await page.waitFor(`!!document.querySelector('#tab-${tab} .empty')`, 8000, tab + " empty state");
+      await settle();
+      const r = await page.eval(`(() => { const e = document.querySelector('#tab-${tab} .empty').getBoundingClientRect(); const c = (e.top + e.bottom) / 2; return { c, mid: innerHeight / 2, h: innerHeight }; })()`);
+      check(Math.abs(r.c - r.mid) < r.h * 0.16, `${tab} empty state is at y=${Math.round(r.c)}, page middle is ${Math.round(r.mid)}`);
+    }
+  });
+
+  await scenario("step chevrons are centered in the gaps and animate", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); true");
+    await settle();
+    const r = await page.eval(`(() => {
+      const steps = [...document.querySelectorAll('.steps > .step')];
+      return steps.slice(0, 1).map((s, i) => {
+        const a = s.getBoundingClientRect(), b = steps[i + 1].getBoundingClientRect(), f = s.querySelector('.step-flow').getBoundingClientRect();
+        return { gap: (a.right + b.left) / 2, flow: (f.left + f.right) / 2, anim: getComputedStyle(s.querySelector('.chev')).animationName };
+      });
+    })()`);
+    for (const x of r) {
+      check(Math.abs(x.gap - x.flow) <= 3, `chevrons are ${Math.round(x.flow - x.gap)}px off the gap center`);
+      check(x.anim === "chev-flow", "chevrons are not animating: " + x.anim);
+    }
+  });
+
+  await scenario("a dismissed progress card stays dismissed until a new task starts", async () => {
+    const stub = (run, active) => page.eval(`(() => { if (!window.__rf2) window.__rf2 = window.fetch.bind(window); window.fetch = (u, i) => /\\/api\\/progress/.test(String(u)) ? Promise.resolve(new Response(JSON.stringify({ active: ${active}, task: "Scan", step: "Scan", done: ${active ? 3 : 10}, total: 10, percent: ${active ? 30 : 100}, message: "Scan complete", detail: "", error: null, stopping: false, stopped: false, run: ${run} }), { status: 200, headers: { "Content-Type": "application/json" } })) : window.__rf2(u, i); return true; })()`);
+    try {
+      await stub(7, false);
+      await page.waitFor("!document.querySelector('#progress-card').hidden && document.querySelector('#progress-title').textContent === 'Scan finished'", 12000, "the stubbed finished task shows");
+      await page.eval("document.querySelector('#btn-dismiss-progress').click(); true");
+      await sleep(7500);
+      check(await page.eval("document.querySelector('#progress-card').hidden"), "the dismissed card came back");
+      await stub(8, true);
+      await page.waitFor("!document.querySelector('#progress-card').hidden", 12000, "a new task shows the card again");
+    } finally {
+      await page.eval("if (window.__rf2) window.fetch = window.__rf2; true");
+      await sleep(3500);
+    }
+  });
+
+  await scenario("category dropdown is alphabetical and the grid fades in after a filter change", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); true");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
+    const labels = await page.eval("[...document.querySelectorAll('#catfilter option')].slice(1).map((o) => o.textContent)");
+    check(labels.length > 3, "too few categories to judge the order");
+    check(JSON.stringify(labels) === JSON.stringify([...labels].sort((a, b) => a.localeCompare(b))), "categories are not alphabetical: " + labels.join(", "));
+    check((await page.eval("document.querySelector('#catfilter option').textContent")) === "All categories", "All categories must stay first");
+    await page.eval("document.querySelector('#catfilter').dispatchEvent(new Event('change')); true");
+    await page.waitFor("[...document.querySelectorAll('#grid .vg-window .card')].some((c) => getComputedStyle(c).animationName === 'card-in')", 4000, "cards fade in after the filter changed");
+  });
+
+  await scenario("toolbar and sliders stay put whether or not the page scrolls", async () => {
+    await page.viewport(1400, 1900);
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); window.scrollTo(0, 0); true");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
+    const geo = () => page.eval(`JSON.stringify(['#density', '#scrub-from', '#scrub-to', '#rowcount', '#q'].map((s) => { const r = document.querySelector(s).getBoundingClientRect(); return [s, Math.round(r.left), Math.round(r.top), Math.round(r.width)]; }))`);
+    const tall = await geo();
+    await page.eval("(() => { const q = document.querySelector('#q'); q.value = 'zzz-no-such-photo'; q.dispatchEvent(new Event('input', { bubbles: true })); return true; })()");
+    await page.waitFor("document.querySelector('#rowcount').textContent === '0 photos'", 10000, "no results");
+    await page.waitFor("document.documentElement.scrollHeight <= innerHeight + 2", 8000, "the page no longer scrolls");
+    const short = await geo();
+    await page.eval("(() => { const q = document.querySelector('#q'); q.value = ''; q.dispatchEvent(new Event('input', { bubbles: true })); return true; })()");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 10000, "cards are back");
+    await page.viewport(1400, 900);
+    check(tall === short, "toolbar moved when the scrollbar went away:\n" + tall + "\n" + short);
+  });
+
+  await scenario("burst detail shows the group matrix that the API reports", async () => {
+    const list = await api("/api/bursts");
+    check(list.items.length > 0, "the seeded library needs a burst");
+    const g = (await api("/api/burst/" + list.items[0].id)).group;
+    await page.eval("document.querySelector('.tab[data-tab=\"bursts\"]').click(); true");
+    await page.waitFor("!!document.querySelector('#burstdetail .burstgrid .card')", 15000, "burst detail renders");
+    if (g.status === "not_group") {
+      check(await page.eval("!document.querySelector('#burstdetail .gm-banner')"), "a single-subject burst must show no banner");
+    } else {
+      check(await page.eval("document.querySelector('#burstdetail .gm-banner').textContent.length > 20"), "the banner needs a sentence");
+      check((await page.eval("document.querySelectorAll('#burstdetail .gm-bar').length")) === g.frames.length, "every frame needs a score bar");
+    }
+  });
+
+  await scenario("utility tab collects reference shots apart from Junk", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); true");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
+    const first = Number(await page.eval("document.querySelector('#grid .vg-window .card').dataset.id"));
+    await page.eval("document.querySelector('#grid .vg-window .card .catpick').click(); true");
+    await page.waitFor("!!document.querySelector('.catmenu')", 5000, "the category menu opens");
+    await page.eval("[...document.querySelectorAll('.catmenu-item')].find((b) => b.textContent.trim() === 'Label or sign').click(); true");
+    await page.waitFor(`fetch('/api/images?group=utility').then((r) => r.json()).then((j) => j.items.some((i) => i.id === ${first}))`, 10000, "the photo is in the vault");
+    check(!(await api("/api/images?group=junk")).items.some((i) => i.id === first), "a utility photo must not be offered in Junk");
+    await page.eval("document.querySelector('.tab[data-tab=\"utility\"]').click(); true");
+    await page.waitFor("document.querySelector('#page-title').textContent === 'Utility'", 8000, "the Utility page opens");
+    await page.waitFor("/^\\d/.test(document.querySelector('#utilitycount').textContent)", 15000, "the vault lists photos");
+    await page.eval("document.querySelector('#tab-utility [data-ukind=\"screenshot\"]').click(); true");
+    await page.waitFor("document.querySelector('#tab-utility [data-ukind=\"screenshot\"]').getAttribute('aria-pressed') === 'true'", 5000, "the chip is pressed");
+    await page.eval("document.querySelector('#tab-utility [data-ukind=\"\"]').click(); true");
+    await page.waitFor("/^\\d/.test(document.querySelector('#utilitycount').textContent)", 15000, "all kinds list again");
+    const ov = await api("/api/overview");
+    const sum = ["utility", "screenshot", "document", "slide"].reduce((a, c) => a + (ov.by_category[c] || 0), 0);
+    await page.waitFor(`document.querySelector('[data-count="utility"]').textContent === ${JSON.stringify(sum.toLocaleString("en-US"))}`, 8000, "the nav badge matches the family total");
+  });
+
+  await scenario("event stories fall back to the top photos with a note when the AI model is a placeholder", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"highlights\"]').click(); true");
+    await page.waitFor("!!document.querySelector('#hl-view option[value=\"story\"]')", 8000, "the stories option exists");
+    await page.eval("(() => { const v = document.querySelector('#hl-view'); v.value = 'story'; v.dispatchEvent(new Event('change')); return true; })()");
+    await page.waitFor("!document.querySelector('#hl-events').hidden && !!document.querySelector('#hl-events .ev-block')", 15000, "events render in stories mode");
+    check(await page.eval("/AI model/.test(document.querySelector('#hl-events').textContent)"), "the placeholder fallback must explain itself");
+    check((await page.eval("document.querySelectorAll('#hl-events .ev-block .card').length")) > 0, "the fallback still lists photos");
+    await page.eval("(() => { const v = document.querySelector('#hl-view'); v.value = 'all'; v.dispatchEvent(new Event('change')); return true; })()");
+  });
+
+  await scenario("on a wide screen the frame is centered and both step cards match", async () => {
+    await page.viewport(1912, 960);
+    try {
+      await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); window.scrollTo(0, 0); true");
+      await settle();
+      const g = await page.eval(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); const c = r('.content'), m = r('.steps'), t = r('.topbar'), a = r('#step-scan'), b = r('#step-infer'); return { left: m.left - c.left, right: c.right - m.right, topL: t.left - m.left, topR: t.right - m.right, dw: Math.abs(a.width - b.width), dh: Math.abs(a.height - b.height) }; })()`);
+      check(Math.abs(g.left - g.right) <= 4, `content gaps differ: left ${Math.round(g.left)}px, right ${Math.round(g.right)}px`);
+      check(Math.abs(g.topL) <= 1 && Math.abs(g.topR) <= 1, `header is not aligned with the content: ${Math.round(g.topL)} / ${Math.round(g.topR)}`);
+      check(g.dw <= 1 && g.dh <= 1, `step cards differ in size by ${Math.round(g.dw)} x ${Math.round(g.dh)}`);
+    } finally {
+      await page.viewport(1400, 900);
+    }
   });
 
   await scenario("the page raised no script errors", async () => {

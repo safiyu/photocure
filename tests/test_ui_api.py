@@ -102,7 +102,7 @@ def test_config_endpoint(env):
     assert Path(d["default_output_dir"]).is_absolute()
     vals = {c["value"]: c["junk"] for c in d["categories"]}
     assert vals["uncertain"] is False
-    assert vals["screenshot"] is True
+    assert vals["screenshot"] is False and vals["graphic"] is True
 
 
 # ------------------------------------------------------------------ images
@@ -128,11 +128,11 @@ def test_images_filters(env):
     assert c.get("/api/images?q=_").json()["total"] == 3  # literal underscore
     items = c.get("/api/images").json()["items"]
     target = items[0]["id"]
-    assert c.post(f"/api/images/{target}/reassign", json={"bucket": "screenshot"}).status_code == 200
+    assert c.post(f"/api/images/{target}/reassign", json={"bucket": "graphic"}).status_code == 200
     assert c.get("/api/images?manual=true").json()["total"] == 1
-    assert c.get("/api/images?category=screenshot").json()["total"] >= 1
+    assert c.get("/api/images?category=graphic").json()["total"] >= 1
     assert c.get("/api/images?group=junk").json()["total"] >= 1
-    got = c.get("/api/images?categories=screenshot,food").json()
+    got = c.get("/api/images?categories=graphic,food").json()
     assert target in [i["id"] for i in got["items"]]
     assert c.get("/api/images?group=bogus").status_code == 422
 

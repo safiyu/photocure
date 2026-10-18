@@ -57,6 +57,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from .. import __version__
 from ..auth import COOKIE_NAME, AuthManager, build_allowed_hosts, origin_allowed
 from ..config import CuratorConfig, default_db_path
 from ..db import models as M
@@ -73,6 +74,7 @@ TOKEN_PLACEHOLDER = "__PCUR_TOKEN__"
 OPERATIONS = ("move", "copy", "hardlink", "symlink")
 CATEGORY_VALUES = tuple(c.value for c in CategoryType)
 JUNK_VALUES = tuple(c.value for c in CategoryType if c.is_junk)
+UTILITY_VALUES = tuple(c.value for c in CategoryType if c.is_utility)
 
 # Only one long-running task at a time across the whole process.
 _BUSY = threading.Lock()
@@ -149,24 +151,68 @@ class RenameReq(BaseModel):
     name: str
 
 
+def group_matrix_payload(members) -> dict:
+    """The group matrix of one burst's frames, in capture order, as plain JSON."""
+    from ..clustering.group_shots import FaceObs, score_group
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+    def when(r):
+        t = r.taken_at
+        if t is not None and t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return t or epoch
+
+    ordered = sorted(members, key=lambda r: (when(r), r.id or 0))
+    frames = []
+    for r in ordered:
+        faces = []
+        for f in r.faces or []:
+            box = (f.x1, f.y1, f.x2, f.y2)
+            has_box = all(v is not None for v in box)
+            faces.append(FaceObs(box=tuple(float(v) for v in box) if has_box else None,
+                                 eye_status=f.eye_status, eye_closed=f.eye_closed_score,
+                                 sharpness=f.face_sharpness, person_id=f.person_id))
+        frames.append(faces)
+    tiebreak = [float(r.quality.sharpness_norm) if r.quality is not None else 0.0 for r in ordered]
+    m = score_group(frames, tiebreak=tiebreak)
+    return {
+        "status": m.status, "subject_count": m.subject_count,
+        "best_id": ordered[m.best].id if m.best is not None else None,
+        "partner_id": ordered[m.composite[1]].id if m.composite else None,
+        "frames": [{"id": ordered[f.index].id, "min_quality": round(f.min_quality, 3),
+                    "subjects": [{"state": x.state, "q": round(x.quality, 3)} for x in f.subjects]}
+                   for f in m.frames],
+    }
+
+
+def infer_progress_detail(done: int, total: int) -> str:
+    """Photos handled in the current phase; the pipeline counts two steps per photo."""
+    photos = total // 2
+    if photos <= 0:
+        return ""
+    return f"{done if done <= photos else done - photos} / {photos} photos"
+
+
 class ProgressManager:
     def __init__(self):
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._run = 0
         self.state = {
             "active": False, "task": "", "step": "", "done": 0, "total": 0,
             "percent": 0, "message": "", "detail": "", "error": None,
-            "stopping": False, "stopped": False,
+            "stopping": False, "stopped": False, "run": 0,
         }
 
     def start(self, task: str, step: str = "", total: int = 0, message: str = ""):
         self._stop_event.clear()
         with self._lock:
+            self._run += 1
             self.state = {
                 "active": True, "task": task, "step": step or task, "done": 0,
                 "total": total, "percent": 0, "message": message,
                 "detail": f"0 / {total}" if total > 0 else "", "error": None,
-                "stopping": False, "stopped": False,
+                "stopping": False, "stopped": False, "run": self._run,
             }
 
     def update(self, done: int, total: int, message: str = "", detail: str = ""):
@@ -219,7 +265,7 @@ class ProgressManager:
             self.state = {
                 "active": False, "task": "", "step": "", "done": 0, "total": 0,
                 "percent": 0, "message": "", "detail": "", "error": None,
-                "stopping": False, "stopped": False,
+                "stopping": False, "stopped": False, "run": self._run,
             }
 
     def get(self) -> dict:
@@ -488,7 +534,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     cfg = CuratorConfig.load(dbp)
     db_fp = hashlib.sha1(str(dbp.resolve()).encode()).hexdigest()[:8]
 
-    app = FastAPI(title="Photocure Review", version="0.1.0")
+    app = FastAPI(title="Photocure Review", version=__version__)
     app.state.db = dbp
     app.state.cfg = cfg
     auth_mgr = AuthManager(cfg.cache_dir)
@@ -717,7 +763,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return {
             "default_output_dir": os.environ.get("PCUR_DEFAULT_OUTPUT")
             or str((dbp.resolve().parent / "Organized")),
-            "categories": [{"value": c.value, "junk": c.is_junk} for c in CategoryType],
+            "categories": [{"value": c.value, "junk": c.is_junk, "utility": c.is_utility}
+                           for c in CategoryType],
             "backend": backend_info(),
             "thresholds": {"min_confidence": tax.min_confidence,
                            "min_margin": tax.min_margin},
@@ -725,7 +772,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.get("/api/about")
     def get_about():
-        from photocure import __version__
         info = backend_info()
         device = info.get("device", "unknown")
         models = []
@@ -835,7 +881,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def images(
         category: str | None = Query(None),
         categories: str | None = Query(None),
-        group: Literal["junk"] | None = Query(None),
+        group: Literal["junk", "utility"] | None = Query(None),
         manual: bool = Query(False),
         q: str | None = Query(None),
         near_dup: bool = Query(False),
@@ -863,6 +909,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             conds.append(eff.in_([c for c in categories.split(",") if c]))
         if group == "junk":
             conds.append(eff.in_(JUNK_VALUES))
+        elif group == "utility":
+            conds.append(eff.in_(UTILITY_VALUES))
         if manual:
             conds.append(I.manual_bucket.is_not(None))
         if q:
@@ -1094,23 +1142,44 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.get("/api/highlights/events")
     def highlights_by_event(per_event: int = Query(1, ge=1, le=12),
-                            min_score: float | None = Query(None, ge=0, le=2)):
+                            min_score: float | None = Query(None, ge=0, le=2),
+                            balanced: bool = Query(False)):
+        from .. import narrative
+        from .. import search as search_mod
         from ..highlights import best_of_events
         with get_session(dbp) as s:
-            events = best_of_events(s, hl_weights(), per_event, min_score)
+            scale_of = None
+            if balanced:
+                def scale_of(ids):
+                    with encoder_lock:
+                        encoder = getattr(app.state, "text_encoder", None)
+                        if encoder is None:
+                            encoder = app.state.text_encoder = search_mod.default_encoder(run_cfg())
+                    return narrative.scale_labels(s, ids, encoder)
+            events = best_of_events(s, hl_weights(), per_event, min_score, scale_of)
             items = {it["id"]: it for it in _load_items(
                 s, [i for e in events for i, _ in e["items"]], app.state.cfg)}
             out = []
             for e in events:
+                scales = e.get("scales")
                 row_items = []
                 for image_id, score in e["items"]:
                     if image_id in items:
-                        row_items.append({**items[image_id], "highlight": round(score, 3)})
-                out.append({"event_id": e["event_id"], "label": e["label"],
-                            "start": e["start"].isoformat() if e["start"] else None,
-                            "end": e["end"].isoformat() if e["end"] else None,
-                            "total": e["total"], "count": len(row_items), "items": row_items})
-        return {"events": out}
+                        row = {**items[image_id], "highlight": round(score, 3)}
+                        if scales is not None:
+                            row["scale"] = scales.get(image_id)
+                        row_items.append(row)
+                entry = {"event_id": e["event_id"], "label": e["label"],
+                         "start": e["start"].isoformat() if e["start"] else None,
+                         "end": e["end"].isoformat() if e["end"] else None,
+                         "total": e["total"], "count": len(row_items), "items": row_items}
+                if scales is not None:
+                    entry["coverage"] = e["coverage"]
+                out.append(entry)
+        used = any("coverage" in e for e in out)
+        note = ("" if used or not balanced else
+                "Event stories need the AI model and analyzed photos. Showing top photos instead.")
+        return {"events": out, "balanced": used, "note": note}
 
     @app.get("/api/highlights/years")
     def highlight_years():
@@ -1501,7 +1570,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             can_reject = bool(movable) and len(blinkers) < len(members)
             return {"burst": bg.name, "members": items, "can_reject_blinks": can_reject,
                     "reject_count": len(movable) if can_reject else 0,
-                    "rejected_blinks": sum(1 for m in members if m.manual_bucket == "junk_blinks")}
+                    "rejected_blinks": sum(1 for m in members if m.manual_bucket == "junk_blinks"),
+                    "group": group_matrix_payload(members)}
 
     @app.get("/api/events")
     def events():
@@ -1661,7 +1731,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         def on_prog(done, total, curr):
             fn = Path(curr).name if not curr.startswith("Phase") else curr
-            progress_mgr.update(done, total, fn, detail=f"{done} / {total}" if total > 0 else "")
+            progress_mgr.update(done, total, fn, detail=infer_progress_detail(done, total))
 
         try:
             pipeline = InferencePipeline(c, backend=detect_for(c))
@@ -1999,6 +2069,28 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         job = spawn("undo", work)
         return {"ok": True, "job_id": job["id"], "transaction_id": tid}
+
+    @app.post("/api/rescore", dependencies=auth)
+    def rescore():
+        """Re-classify every analyzed photo from its stored embedding, with no image decoding."""
+        if backend_info().get("semantic_is_stub", True):
+            return JSONResponse({"updated": 0, "note": "Re-checking needs the AI model, which is "
+                                                       "not installed. Run: photocure setup"})
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+
+        def work(job: dict) -> dict:
+            from ..inference.semantic_engine import rescore_from_embeddings
+            progress_mgr.start("Re-checking", "Re-checking photos with the latest categories", 0,
+                               "Reading stored embeddings...")
+            with get_session(dbp) as s:
+                updated = int(rescore_from_embeddings(s, run_cfg()))
+            progress_mgr.finish(f"Re-checked {updated} photos")
+            jlog(job, f"re-checked {updated} photos")
+            return {"ok": True, "updated": updated}
+
+        job = spawn("rescore", work, cancellable=False)
+        return JSONResponse({"ok": True, "job_id": job["id"]}, status_code=202)
 
     @app.post("/api/learn", dependencies=auth, status_code=202)
     def learn():

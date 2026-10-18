@@ -74,8 +74,8 @@ jobs:
             echo "version=${{ needs.tag-and-release.outputs.new_version }}" >> "$GITHUB_OUTPUT"
             echo "tag=${{ needs.tag-and-release.outputs.new_tag }}" >> "$GITHUB_OUTPUT"
           else
-            echo "version=0.1.0" >> "$GITHUB_OUTPUT"
-            echo "tag=v0.1.0" >> "$GITHUB_OUTPUT"
+            echo "version=1.0.0" >> "$GITHUB_OUTPUT"
+            echo "tag=v1.0.0" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build Debian Package

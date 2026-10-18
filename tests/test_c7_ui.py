@@ -26,24 +26,6 @@ def test_no_native_dialogs_in_static_ui():
     assert not violating_files, f"Found native dialog usage in static files: {violating_files}"
 
 
-def test_wcag_light_theme_warn_token():
-    """Light-theme --warn token is #b45309 (WCAG AA compliant contrast on white >= 4.5:1)."""
-    root = Path(__file__).parent.parent
-    style_css = (root / "photocure" / "ui" / "static" / "style.css").read_text(encoding="utf-8")
-
-    # Match light theme root block
-    match = re.search(r':root\s*\{([^}]+)\}', style_css)
-    assert match, "Light theme root block not found"
-    light_tokens = match.group(1)
-
-    warn_match = re.search(r'--warn:\s*(#[0-9a-fA-F]{6})', light_tokens)
-    assert warn_match, "--warn token not found in light theme root"
-    warn_hex = warn_match.group(1).lower()
-
-    # #b45309 is the target
-    assert warn_hex == "#b45309", f"Expected light-theme --warn to be #b45309, got {warn_hex}"
-
-
 def test_header_version_badge_is_native_button():
     """#header-version-badge is a native <button> element with type, title, and data-goto."""
     root = Path(__file__).parent.parent

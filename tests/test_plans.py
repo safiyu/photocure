@@ -176,12 +176,12 @@ def test_only_category_filter(tmp_path):
 
 def test_trash_stages_junk_and_purge_removes_it(tmp_path):
     w = build_world(tmp_path, n=3)
-    set_bucket(w, w.ids[0], "screenshot")
+    set_bucket(w, w.ids[0], "graphic")
     set_bucket(w, w.ids[1], "food")
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     rep = w.planner.execute_plan(p, trash=True)
     trash_dir = w.out / ".trash" / rep.transaction_id
-    assert (trash_dir / "Junk_Review" / "Screenshots" / _src(w, 0).name).exists()
+    assert (trash_dir / "Junk_Review" / "Graphics" / _src(w, 0).name).exists()
     assert (w.out / "Non-Human" / "Food" / "2024" / "05" / "02").exists() or \
         any((w.out / "Non-Human" / "Food").rglob("*.jpg"))
     # trash is journaled, so undo still restores the junk file
@@ -192,7 +192,7 @@ def test_trash_stages_junk_and_purge_removes_it(tmp_path):
 
 def test_purge_trash_respects_retention_and_marks_ledger(tmp_path):
     w = build_world(tmp_path, n=1)
-    set_bucket(w, w.ids[0], "screenshot")
+    set_bucket(w, w.ids[0], "graphic")
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     rep = w.planner.execute_plan(p, trash=True)
     kept = w.planner.purge_trash(w.out, older_than_days=30)

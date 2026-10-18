@@ -12,12 +12,13 @@
 
   const PAGE = 200;
   const state = {
-    tab: "library", cats: [], junk: new Set(), byId: {}, busy: false, taskRunning: false,
+    tab: "library", cats: [], junk: new Set(), utility: new Set(), utilityKind: "", byId: {}, busy: false, taskRunning: false,
     inferred: false,
     triageSel: -1, triageGrid: null, undo: [], picks: new Set(), lastPick: null,
     overview: null, eventId: null,
     backend: null, thresholds: null, manualCount: 0,
-    settings: null, draft: { device: "auto", device_index: 0 },
+    settings: null, draft: { device: "auto", device_index: 0 }, busyBtn: null,
+    dismissedRun: null, lastRun: null,
   };
 
   const TITLES = {
@@ -28,7 +29,8 @@
     bursts: ["Bursts", "Shots taken seconds apart. The best one of each group is kept."],
     highlights: ["Highlights", "Your most appealing photos first."],
     events: ["Events", "Photos grouped by when and where they were taken."],
-    junk: ["Junk review", "Screenshots, documents, duplicates and accidents. Move anything that does not belong."],
+    junk: ["Junk review", "Duplicates, graphics and accidents. Move anything that does not belong."],
+    utility: ["Utility", "Receipts, notes, screenshots, labels and signs, kept apart from your photos and from Junk."],
     uncertain: ["Finalize", "The analysis was not sure about these. Choose a category for each."],
     settings: ["Settings", "Choose what runs the analysis and how many workers it uses."],
     actions: ["Apply and undo", "Review the plan, then organize your files. Every change can be undone."],
@@ -43,7 +45,68 @@
       `<span>${esc(msg)}</span>`;
     box.appendChild(el);
     while (box.children.length > 4) box.firstChild.remove();
-    setTimeout(() => el.remove(), cls === "err" ? 6000 : 3200);
+    setTimeout(() => {
+      el.classList.add("out");
+      afterAnim(el, 260).then(() => el.remove());
+    }, cls === "err" ? 6000 : 3200);
+  }
+
+  // Motion helpers: every close waits on the animation but never depends on it alone.
+  function reducedMotion() {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  function afterAnim(el, fallbackMs) {
+    if (reducedMotion()) return Promise.resolve();
+    return new Promise((resolve) => {
+      let finished = false;
+      let timer = null;
+      const onEnd = (e) => { if (e.target === el) finish(); };
+      function finish() {
+        if (finished) return;
+        finished = true;
+        el.removeEventListener("animationend", onEnd);
+        clearTimeout(timer);
+        resolve();
+      }
+      el.addEventListener("animationend", onEnd);
+      timer = setTimeout(finish, fallbackMs);
+    });
+  }
+
+  function openOverlay(el) {
+    if (!el) return;
+    el._closeSeq = (el._closeSeq || 0) + 1;
+    el.classList.remove("closing");
+    el.hidden = false;
+  }
+
+  async function closeOverlay(el) {
+    if (!el || el.hidden || el.classList.contains("closing")) return;
+    const seq = el._closeSeq = (el._closeSeq || 0) + 1;
+    el.classList.add("closing");
+    await afterAnim(el, 260);
+    if (el._closeSeq !== seq) return;
+    el.hidden = true;
+    el.classList.remove("closing");
+  }
+
+  function positionNavIndicator() {
+    const ind = $("#nav-indicator");
+    if (!ind) return;
+    const item = $("nav .tab.active");
+    if (!item) { ind.style.opacity = "0"; return; }
+    const y = item.offsetTop + (item.offsetHeight - ind.offsetHeight) / 2;
+    if (!ind.dataset.ready) {
+      ind.style.transition = "none";
+      ind.style.setProperty("--ni-y", y + "px");
+      void ind.offsetWidth;
+      ind.style.transition = "";
+      ind.dataset.ready = "1";
+    } else {
+      ind.style.setProperty("--ni-y", y + "px");
+    }
+    ind.style.opacity = "1";
   }
 
   // Shared focus trap helper (WCAG 2.1 AA focus containment).
@@ -152,9 +215,9 @@
 
     ok.textContent = o.confirmText || "OK";
     cancel.textContent = o.cancelText || "Cancel";
-    ok.className = "btn " + variant;
+    ok.className = "btn " + { danger: "danger", warning: "commit", primary: "primary" }[variant];
     const previous = document.activeElement;
-    modal.hidden = false;
+    openOverlay(modal);
 
     return new Promise((resolve) => {
       let releaseTrap = null;
@@ -163,7 +226,7 @@
           releaseTrap();
           releaseTrap = null;
         }
-        modal.hidden = true;
+        closeOverlay(modal);
         ok.onclick = cancel.onclick = backdrop.onclick = null;
         if (inputEl) inputEl.onkeydown = null;
         if (previous && previous.focus) previous.focus();
@@ -286,7 +349,7 @@
   const catKey = (c) => String(c || "unrouted").replace(/[^a-z_]/g, "") || "unknown";
   // Most useful first, so the number keys 1-9 cover the categories people assign most.
   const CAT_ORDER = ["people", "food", "scenery", "animal", "screenshot", "document", "graphic",
-    "illustration", "slide", "architecture", "vehicle", "plant", "product", "accidental",
+    "illustration", "slide", "utility", "architecture", "vehicle", "plant", "product", "accidental",
     "uncertain", "duplicate", "near_duplicate", "burst_alternate", "unreadable", "custom", "unknown"];
   const TRIAGE_SKIP = new Set(["unknown", "duplicate", "near_duplicate", "uncertain",
     "burst_alternate", "unreadable", "custom"]);
@@ -296,6 +359,7 @@
   });
   const catStyle = (c) => `--cat:var(--c-${catKey(c)}, var(--c-unknown))`;
   const catLabel = (c) => {
+    if (c === "utility") return "Label or sign";
     const t = String(c || "Not sorted yet").replace(/_/g, " ");
     return t.charAt(0).toUpperCase() + t.slice(1);
   };
@@ -306,30 +370,55 @@
     return v.toFixed(i ? 1 : 0) + " " + u[i];
   };
 
+  // "Scan finished: 600 files seen" becomes a bold headline plus a quieter detail line.
+  function splitLog(msg) {
+    const m = String(msg).match(/^(.{3,48}?):\s+(.+)$/);
+    return m ? { title: m[1], detail: m[2] } : { title: String(msg), detail: "" };
+  }
+
+  function updateActivityCount(box) {
+    const panel = box.closest(".activity");
+    const badge = panel && panel.querySelector(".activity-count");
+    if (badge) {
+      const n = box.querySelectorAll(".logline[data-t]").length;
+      badge.textContent = n ? String(n) : "";
+    }
+  }
+
   function logTo(boxSel, msg, cls) {
     const box = $(boxSel);
     if (!box) return;
     $$(":scope > .logline:not([data-t])", box).forEach((e) => e.remove());
-    // Pill tint per log type: success=green, error/warn=muted, progress/info=blue.
-    const pillCls = cls === "ok" ? "ok" : (cls === "err" || cls === "warn") ? "muted" : "info";
-    // A completed phase gets the green checkmark row. Detected by text (not cls, since
-    // start messages like "Apply started" are also cls=ok) and never on err/warn rows.
-    const completion =
-      cls !== "err" && cls !== "warn" &&
-      /\b(finished|done|rebuilt|verified|repaired|learned|applied)\b/i.test(msg);
-    const el = document.createElement("div");
-    el.className = "logline" + (cls ? " " + cls : "") + (completion ? " active-highlight" : "");
-    el.dataset.t = "1";
-    const pill = document.createElement("span");
-    pill.className = "time-pill " + pillCls;
-    pill.textContent = new Date().toLocaleTimeString();
-    const body = document.createElement("span");
-    body.textContent = msg;
-    el.appendChild(pill);
-    el.appendChild(body);
-    box.prepend(el);
+    $$(":scope > .logline.running", box).forEach((e) => e.classList.remove("running"));
+    const running = !cls && /(\.\.\.|\u2026)$/.test(msg);
+    const { title, detail } = splitLog(msg);
+    const row = document.createElement("div");
+    row.className = "logline" + (cls ? " " + cls : "") + (running ? " running" : "");
+    row.dataset.t = "1";
+    const ico = document.createElement("span");
+    ico.className = "log-ico";
+    ico.setAttribute("aria-hidden", "true");
+    ico.textContent = cls === "err" || cls === "warn" ? "!" : cls === "ok" ? "\u2713" : "";
+    const body = document.createElement("div");
+    body.className = "log-body";
+    const head = document.createElement("span");
+    head.className = "log-title";
+    head.textContent = title;
+    body.appendChild(head);
+    if (detail) {
+      const more = document.createElement("span");
+      more.className = "log-detail";
+      more.textContent = detail;
+      body.appendChild(more);
+    }
+    const time = document.createElement("time");
+    time.className = "log-time";
+    time.textContent = new Date().toLocaleTimeString();
+    row.append(ico, body, time);
+    box.prepend(row);
     box.scrollTop = 0;
     while (box.children.length > 200) box.lastChild.remove();
+    updateActivityCount(box);
   }
   const logLine = (m, c) => logTo("#action-log", m, c);
   const libLog = (m, c) => logTo("#library-log", m, c);
@@ -445,6 +534,18 @@
     return d.firstElementChild || d;
   }
 
+  // Cards fade in only while a freshly replaced grid fills, so single edits never replay it.
+  function flashGrid(host) {
+    host.classList.add("anim-in");
+    clearTimeout(host._flash);
+    host._flash = setTimeout(() => host.classList.remove("anim-in"), 1500);
+  }
+
+  // The Utility tab asks for the whole family, or for one kind (which is one category).
+  function utilityQuery(kind) {
+    return kind ? "category=" + encodeURIComponent(kind) : "group=utility";
+  }
+
   function makeGrid(key, cfg) {
     if (!window.PCUR_GRID) throw new Error("virtual_grid.mjs did not load");
     const host = $(cfg.el);
@@ -477,7 +578,10 @@
       }
     };
     Object.defineProperty(g, "total", { get: () => g.vg.total });
-    g.reset = () => g.vg.reset();
+    g.reset = () => {
+      flashGrid(host);
+      return g.vg.reset();
+    };
     g.update = () => { if (g.vg) g.vg.update(); };
     g.loadMore = async () => {};
     g.cards = () => $$(".card", host);
@@ -563,7 +667,16 @@
         const c = val("junkfilter");
         return c ? eff(it) === c : state.junk.has(eff(it));
       },
-      empty: { icon: "trash", title: "No junk to review", text: "Screenshots, documents and duplicates show up here after you analyze your photos." },
+      empty: { icon: "trash", title: "No junk to review", text: "Duplicates, graphics and accidental shots show up here after you analyze your photos." },
+    });
+    makeGrid("utility", {
+      el: "#utilitygrid", more: "#utilitygrid-more", count: "#utilitycount",
+      params: () => utilityQuery(state.utilityKind),
+      matches(it) {
+        const k = state.utilityKind;
+        return k ? eff(it) === k : state.utility.has(eff(it));
+      },
+      empty: { icon: "inbox", title: "Nothing here yet", text: "Receipts, notes, screenshots, labels, signs and packaging show up here after you analyze your photos. Already analyzed? Press Re-check my photos." },
     });
     makeGrid("uncertain", {
       el: "#uncertaingrid", more: "#uncertaingrid-more", count: "#uncertaincount",
@@ -822,7 +935,7 @@
     });
     const n = state.picks.size;
     document.body.classList.toggle("has-picks", n > 0);
-    $("#bulkbar").hidden = n === 0;
+    if (n === 0) closeOverlay($("#bulkbar")); else openOverlay($("#bulkbar"));
     $("#bulk-count").textContent = `${fmtN(n)} selected`;
   }
 
@@ -980,7 +1093,7 @@
     $("#similar-title").textContent = "Photos similar to " + (it ? it.filename : "#" + num(id));
     const sg = $("#similar-grid");
     sg.replaceChildren(...Array.from({ length: 8 }, () => el("div", { class: "skel" })));
-    panel.hidden = false;
+    openOverlay($("#similar-panel"));
     try {
       const data = await api(`/api/images/${num(id)}/similar?k=24`);
       data.items.forEach((x) => { state.byId[x.id] = x; });
@@ -1032,33 +1145,54 @@
     $("#btn-hl-export").disabled = !sel.value;
   }
 
+  const SCALE_NAMES = { wide: "wide", closeup: "close-up", action: "action", ambient: "ambient", medium: "medium" };
+  const SCALE_BADGES = { wide: "Wide", closeup: "Close-up", action: "Action", ambient: "Ambient", medium: "Medium" };
+  const isEventView = () => ["events", "story"].includes($("#hl-view").value);
+
+  // "1 wide, 2 close-up": how many photos of each shot scale a story holds, in story order.
+  function coverageText(cov) {
+    return Object.keys(SCALE_NAMES).filter((s) => cov && cov[s]).map((s) => `${cov[s]} ${SCALE_NAMES[s]}`).join(", ");
+  }
+
   async function renderEventHighlights() {
     const host = $("#hl-events");
     const m = $("#minaes").value;
+    const story = $("#hl-view").value === "story";
     host.replaceChildren(...Array.from({ length: 6 }, () => el("div", { class: "skel" })));
     try {
-      const data = await api("/api/highlights/events?per_event=3" + (m !== "" ? "&min_score=" + encodeURIComponent(m) : ""));
+      const data = await api(`/api/highlights/events?per_event=${story ? 8 : 3}` + (story ? "&balanced=true" : "") +
+        (m !== "" ? "&min_score=" + encodeURIComponent(m) : ""));
       $("#highlightcount").textContent = `${fmtN(data.events.length)} event${data.events.length === 1 ? "" : "s"}`;
       if (!data.events.length) {
         host.replaceChildren(emptyNode({ icon: "cal", title: "No events with scored photos",
           text: "Find events first, then analyze your photos so they can be scored." }));
         return;
       }
-      host.replaceChildren(...data.events.map((ev) => {
+      const blocks = data.events.map((ev) => {
         ev.items.forEach((x) => { state.byId[x.id] = x; });
         const when = ev.start ? String(ev.start).slice(0, 10) : "";
+        const cards = ev.items.map((x) => {
+          const node = cardNode(x);
+          const flags = $(".flags", node);
+          if (x.scale && flags) flags.append(el("span", { class: "badge scale", "data-scale": x.scale, text: SCALE_BADGES[x.scale] || x.scale }));
+          return node;
+        });
+        const cover = ev.coverage ? coverageText(ev.coverage) : "";
         return el("div", { class: "ev-block" },
           el("div", { class: "ev-head" }, el("h3", { text: ev.label }),
-            el("span", { text: [when, `top ${ev.count} of ${fmtN(ev.total)}`].filter(Boolean).join(", ") })),
-          el("div", { class: "grid" }, ev.items.map(cardNode)));
-      }));
+            el("span", { text: [when, `${story && data.balanced ? "" : "top "}${ev.count} of ${fmtN(ev.total)}`].filter(Boolean).join(", ") })),
+          cover ? el("div", { class: "ev-cover" }, el("span", { class: "scale-chip", text: "Covers " + cover })) : null,
+          el("div", { class: "grid" }, cards));
+      });
+      if (story && !data.balanced && data.note) blocks.unshift(el("p", { class: "help", role: "status", text: data.note }));
+      host.replaceChildren(...blocks);
     } catch (e) {
       host.replaceChildren(emptyNode({ icon: "alert", title: "Could not load highlights", text: e.message }));
     }
   }
 
   function applyHighlightView() {
-    const events = $("#hl-view").value === "events";
+    const events = isEventView();
     $("#highlightgrid").hidden = events;
     $("#hl-events").hidden = !events;
     if (events) renderEventHighlights(); else grids.highlights.reset();
@@ -1235,27 +1369,32 @@
       .filter(Boolean).join(", ");
     const img = el("img", { loading: "lazy", decoding: "async", src: thumbUrl(m.id, "medium"), alt: m.filename || "" });
     img.onerror = () => { img.style.opacity = ".15"; };
+    const badge = el("span", { class: "dup-badge " + (chosen ? "keep" : "out") },
+      chosen ? el("span", { "aria-hidden": "true", text: "\u2713" }) : null,
+      el("span", { text: chosen ? (g.reviewed ? "Kept" : "Keep") : "Duplicate" }));
     return el("figure", { class: "dup-member" + (chosen ? " keep" : " out"), "data-mid": m.id },
-      el("button", { class: "dup-thumb", type: "button", "data-dup-open": m.id, "aria-label": "Open " + (m.filename || "photo") }, img),
+      el("button", { class: "dup-thumb", type: "button", "data-dup-open": m.id, "aria-label": "Open " + (m.filename || "photo") }, img, badge),
       el("figcaption", {},
         el("div", { class: "fn", title: m.path, text: m.filename }),
         el("div", { class: "facts", text: facts }),
         m.suggested ? el("span", { class: "tag sug", text: "Suggested" }) : null,
-        g.reviewed ? null : el("button", { class: "btn sm" + (chosen ? " primary" : ""), type: "button",
-          "data-dup-keep": m.id, "aria-pressed": String(chosen), text: chosen ? "Keeping this one" : "Keep this one" })));
+        g.reviewed || chosen ? null : el("button", { class: "btn sm ghost", type: "button",
+          "data-dup-keep": m.id, text: "Keep this one instead" })));
   }
 
   function dupGroupNode(g) {
     const chosen = dup.pick[g.id] != null && g.members.some((m) => m.id === dup.pick[g.id]) ? dup.pick[g.id] : g.keeper_id;
     const others = g.members.filter((m) => m.id !== chosen);
+    const keeper = g.members.find((m) => m.id === chosen);
     const frees = others.reduce((a, m) => a + num(m.file_size), 0);
     const title = g.kind === "exact" ? `${g.members.length} identical files` : `${g.members.length} look-alike photos`;
     const foot = g.reviewed
       ? el("div", { class: "dup-foot" }, el("span", { class: "done", text: "Decided. The others will be treated as duplicates when you apply a plan." }))
       : el("div", { class: "dup-foot" },
-        el("button", { class: "btn primary", type: "button", "data-dup-apply": g.id,
-          text: `Keep this one, discard ${others.length} other${others.length === 1 ? "" : "s"}` }),
-        g.kind === "near" ? el("button", { class: "btn", type: "button", "data-dup-dismiss": g.id, text: "These are not duplicates" }) : null);
+        el("p", { class: "dup-plan", text: `Keep ${keeper ? keeper.filename : "this photo"}, mark ${others.length} other${others.length === 1 ? "" : "s"} as a duplicate${others.length === 1 ? "" : "s"}.` }),
+        el("div", { class: "dup-actions" },
+          g.kind === "near" ? el("button", { class: "btn ghost", type: "button", "data-dup-dismiss": g.id, text: "Not duplicates" }) : null,
+          el("button", { class: "btn commit", type: "button", "data-dup-apply": g.id, text: "Confirm" })));
     return el("article", { class: "dup-group", "data-gid": g.id },
       el("header", { class: "dup-head" }, el("h3", { text: title }),
         el("span", { class: "saves", text: `Frees ${fmtBytes(frees)}` })),
@@ -1330,8 +1469,8 @@
 
   async function dupResolveAll() {
     const n = dup.summary ? dup.summary.groups : 0;
-    const ok = await showConfirmDialog({ title: "Keep the suggested photo in every group?",
-      confirmText: "Resolve all", cancelText: "Cancel",
+    const ok = await showConfirmDialog({ title: "Accept the suggested photo in every group?",
+      confirmText: "Accept all", cancelText: "Cancel",
       message: `${fmtN(n)} group${n === 1 ? "" : "s"} will be resolved. In each, the suggested photo stays and the rest are marked as duplicates. ` +
         "Nothing is moved or deleted until you apply a plan, and you can change any photo's category afterwards." });
     if (!ok) return;
@@ -1339,6 +1478,27 @@
       const res = await post("/api/duplicates/resolve-all", {});
       dupFinish(res, `Resolved ${fmtN(res.result.groups)} groups, ${fmtN(res.result.discarded)} photos marked as duplicates.`);
     } catch (e) { toast(e.message, "err"); }
+  }
+
+  function bindActivity() {
+    document.addEventListener("click", (ev) => {
+      const filter = ev.target.closest && ev.target.closest("[data-act-filter]");
+      if (filter) {
+        const panel = filter.closest(".activity");
+        panel.dataset.filter = filter.dataset.actFilter;
+        $$("[data-act-filter]", panel).forEach((b) => b.classList.toggle("active", b === filter));
+        return;
+      }
+      const clear = ev.target.closest && ev.target.closest("[data-act-clear]");
+      if (clear) {
+        const box = $(".action-log", clear.closest(".activity"));
+        const empty = document.createElement("div");
+        empty.className = "logline logline-empty";
+        empty.textContent = "Nothing has run yet.";
+        box.replaceChildren(empty);
+        updateActivityCount(box);
+      }
+    });
   }
 
   function bindDuplicates() {
@@ -1423,7 +1583,7 @@
         } else if (t.dataset.more) {
           const g = grids[t.dataset.more];
           if (g) await g.loadMore();
-        } else if (t.dataset.goto) { ev.preventDefault(); showTab(t.dataset.goto); }
+        } else if (t.dataset.goto) { ev.preventDefault(); gotoTarget(t); }
         else if (t.hasAttribute("data-clearfilters")) {
           resetAllFilters();
         } else if (t.hasAttribute("data-copytext")) {
@@ -1444,7 +1604,7 @@
         const goto = ev.target.closest && ev.target.closest("[data-goto]");
         if (goto && goto.dataset.goto) {
           ev.preventDefault();
-          showTab(goto.dataset.goto);
+          gotoTarget(goto);
           return;
         }
       }
@@ -1496,7 +1656,7 @@
   function lbShow(opener) {
     lb.open = true;
     lb.opener = opener || document.activeElement;
-    $("#lightbox").hidden = false;
+    openOverlay($("#lightbox"));
     document.body.style.overflow = "hidden";
     lbRender();
     if (lb.releaseTrap) lb.releaseTrap();
@@ -1511,7 +1671,7 @@
       lb.releaseTrap();
       lb.releaseTrap = null;
     }
-    $("#lightbox").hidden = true;
+    closeOverlay($("#lightbox"));
     document.body.style.overflow = "";
     if (lb.grid) {  // leave the grid on the photo that was last viewed
       const id = lbIdAt(lb.i);
@@ -1553,6 +1713,9 @@
     const img = $("#lb-img");
     const my = ++lb.token;
     img.alt = it.filename || "";
+    img.classList.remove("swap-in");
+    void img.offsetWidth;
+    img.classList.add("swap-in");
     img.src = thumbUrl(id, "micro");  // already cached from the grid: shows instantly
     $("#lb-loading").hidden = false;
     const big = new Image();
@@ -1734,7 +1897,7 @@
     pk.mode = opts.mode || "photos";
     $("#picker-title").textContent = opts.title || "Choose a folder";
     $("#picker-ok").textContent = opts.okLabel || "Use this folder";
-    $("#picker").hidden = false;
+    openOverlay($("#picker"));
     document.body.style.overflow = "hidden";
     if (pk.releaseTrap) pk.releaseTrap();
     pk.releaseTrap = trapFocus($("#picker"), closePicker);
@@ -1750,7 +1913,7 @@
       pk.releaseTrap();
       pk.releaseTrap = null;
     }
-    $("#picker").hidden = true;
+    closeOverlay($("#picker"));
     document.body.style.overflow = "";
     if (pk.opener && document.contains(pk.opener)) {
       pk.opener.focus({ preventScroll: true });
@@ -1834,7 +1997,7 @@
   }
 
   function activeGrid() {
-    const key = { categories: "cat", highlights: "highlights", events: "event", junk: "junk", uncertain: "uncertain" }[state.tab];
+    const key = { categories: "cat", highlights: "highlights", events: "event", junk: "junk", utility: "utility", uncertain: "uncertain" }[state.tab];
     return key ? grids[key] || null : null;
   }
 
@@ -1849,7 +2012,7 @@
 
   function openHelp() {
     helpOpener = document.activeElement;
-    $("#help").hidden = false;
+    openOverlay($("#help"));
     if (helpReleaseTrap) helpReleaseTrap();
     helpReleaseTrap = trapFocus($("#help"), closeHelp);
     const btn = $("#help-close");
@@ -1861,7 +2024,7 @@
       helpReleaseTrap();
       helpReleaseTrap = null;
     }
-    $("#help").hidden = true;
+    closeOverlay($("#help"));
     if (helpOpener && document.contains(helpOpener)) {
       helpOpener.focus({ preventScroll: true });
     }
@@ -1888,7 +2051,7 @@
       if (open("#picker")) closePicker();
       else if (open("#help")) closeHelp();
       else if (lb.open) closeLightbox();
-      else if (!$("#similar-panel").hidden) $("#similar-panel").hidden = true;
+      else if (!$("#similar-panel").hidden) closeOverlay($("#similar-panel"));
       else if (state.picks.size) clearPicks();
       else document.body.classList.remove("nav-open");
       return;
@@ -2079,10 +2242,46 @@
     } catch (e) { toast(e.message, "err"); }
   }
 
+  // One sentence for what the group matrix found in a burst; null when it is not a group shot.
+  function groupSummary(group, nameOf) {
+    if (!group || group.status === "not_group") return null;
+    const best = nameOf(group.best_id);
+    if (group.status === "perfect") {
+      return { tone: "ok", text: `Everyone's eyes open in ${best}. This is the frame to keep.` };
+    }
+    if (group.status === "composite") {
+      return { tone: "warn", text: `No single frame is perfect. Keep ${best} and ${nameOf(group.partner_id)}: between them everyone looks good, so you can combine them into one photo.` };
+    }
+    return { tone: "warn", text: `No frame has everyone looking good. ${best} is the closest.` };
+  }
+
+  const GM_WORDS = { open: "eyes open", possible: "eyes may be closing", closed: "eyes closed",
+    unknown: "eyes not measured", missing: "not seen in this frame" };
+
   async function showBurst(id) {
     $$(".burstrow", $("#burstlist")).forEach((r) => r.classList.toggle("on", num(r.dataset.burst) === id));
     const data = await api("/api/burst/" + num(id));
-    $("#burstdetail").innerHTML = `<h3>${esc(data.burst)}</h3>
+    const group = data.group;
+    const gmById = {};
+    ((group && group.frames) || []).forEach((f) => { gmById[f.id] = f; });
+    const nameById = Object.fromEntries(data.members.map((m) => [m.id, m.filename]));
+    const summary = groupSummary(group, (i) => nameById[i] || "this frame");
+    const banner = summary ? `<div class="gm-banner ${summary.tone}" role="status">${esc(summary.text)}</div>` : "";
+    const gmBadge = (m) => {
+      if (!summary) return "";
+      if (group.status === "perfect" && m.id === group.best_id) return '<span class="badge best">All eyes open</span>';
+      if (group.status === "composite" && (m.id === group.best_id || m.id === group.partner_id)) return '<span class="badge best">Composite pair</span>';
+      if (group.status === "best_effort" && m.id === group.best_id) return '<span class="badge warn">Closest</span>';
+      return "";
+    };
+    const gmDetail = (m) => {
+      const f = gmById[m.id];
+      if (!f) return "";
+      const dots = f.subjects.map((s, i) => `<i class="gm-dot" data-s="${esc(s.state)}" title="Person ${i + 1}: ${esc(GM_WORDS[s.state] || GM_WORDS.unknown)}"></i>`).join("");
+      return `<div class="gm-dots" role="img" aria-label="Faces in this frame">${dots}</div>
+        <div class="gm-bar" title="Weakest face in this frame"><span style="width:${Math.round(num(f.min_quality) * 100)}%"></span></div>`;
+    };
+    $("#burstdetail").innerHTML = `<h3>${esc(data.burst)}</h3>${banner}
       <div class="btn-row" id="blinkbar"></div>
       <div class="burstgrid">` +
       data.members.map((m) => {
@@ -2093,12 +2292,13 @@
         return `<figure class="card${m.is_best_shot ? " best" : ""}" data-id="${num(m.id)}" tabindex="0">
           <div class="thumb">
             <img loading="lazy" src="${thumbUrl(m.id)}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
-            <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}</div>
+            <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}${gmBadge(m)}</div>
           </div>
           <figcaption class="caption">
             <div class="fn">${esc(m.filename)}</div>
             <div class="meta">${num(m.width)}×${num(m.height)}${m.taken_at ? ", " + esc(String(m.taken_at).slice(11, 19)) : ""}</div>
             <div class="meta">${esc(bits.join(", "))}</div>
+            ${gmDetail(m)}
             ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}">Inspect faces</button>` : ""}
           </figcaption>
         </figure>`;
@@ -2250,7 +2450,7 @@
            <span class="n">${fmtN(n)}</span></div>`).join("")}</div>
       ${notices.map(([k, w]) => `<div class="notice ${k}">${icon("alert", "sm")}<span>${esc(w)}</span></div>`).join("")}
       ${(d.collision_samples || []).length ? `<p class="help">Example clashes: ${esc(d.collision_samples.slice(0, 3).join(", "))}</p>` : ""}
-      ${confirmable ? `<div class="btn-row" style="margin-top:14px"><button id="diff-confirm" class="btn primary" ${d.enough_space ? "" : "disabled"}>${verb} ${fmtN(d.total)} photos</button>
+      ${confirmable ? `<div class="btn-row" style="margin-top:14px"><button id="diff-confirm" class="btn commit" ${d.enough_space ? "" : "disabled"}>${verb} ${fmtN(d.total)} photos</button>
         <button id="diff-cancel" class="btn">Cancel</button></div>`
         : `<div class="btn-row" style="margin-top:14px"><button id="diff-cancel" class="btn">Close</button></div>`}`;
     el.hidden = false;
@@ -2315,12 +2515,15 @@
     const done = !p.active && !p.error && !p.stopped && p.percent === 100;
     const bad = !p.active && !!p.error;
     const stopped = !p.active && !!p.stopped;
-    const visible = p.active || done || bad || stopped;
+    state.lastRun = p.run != null ? p.run : null;
+    if (p.active) state.dismissedRun = null;
+    const dismissed = !p.active && p.run != null && p.run === state.dismissedRun;
+    const visible = (p.active || done || bad || stopped) && !dismissed;
     show(card, visible);
     // C8: the equalizer spectrum (M5 CSS) animates only while #progress-card
     // is .active, so gate the eq-pulse keyframes on the live running state.
     card.classList.toggle("active", p.active);
-    show($("#hero-gauge"), visible);
+    document.body.classList.toggle("task-running", !!p.active);
     if (!visible) return;
     const pct = p.active ? Math.max(num(p.percent), 4) : 100;
     const cls = p.active ? "active" : (bad || stopped ? "error" : "done");
@@ -2342,16 +2545,12 @@
     $("#progress-counts").textContent = p.detail || (p.total > 0 ? `${fmtN(p.done)} of ${fmtN(p.total)}` : "");
     // C8: live tabular ratio (e.g. "135 / 3,194"); empty when there's no total,
     // which the :empty CSS rule uses to hide the element.
-    $("#progress-ratio").textContent = p.total > 0 ? `${fmtN(p.done)} / ${fmtN(p.total)}` : "";
-    // Gauge: the arc is 100 units long (pathLength), so the dash length is the percent.
-    const gaugePct = p.active ? Math.max(num(p.percent), 2) : (done ? 100 : Math.max(num(p.percent), 0));
+    $("#progress-ratio").textContent = p.detail || (p.total > 0 ? `${fmtN(p.done)} / ${fmtN(p.total)}` : "");
     const phase = (String(p.message || "").match(/Phase\s+\d+\s*\/\s*\d+/i) || [""])[0];
-    const gauge = $("#hero-gauge");
-    gauge.setAttribute("aria-valuenow", String(Math.round(gaugePct)));
-    $("#gauge-arc").style.strokeDasharray = `${gaugePct} 100`;
-    $("#gauge-arc").setAttribute("class", "gauge-arc " + cls);
-    $("#gauge-phase").textContent = bad ? "Error" : (stopped ? "Stopped" : (phase || p.task || "Working"));
-    $("#gauge-pct").textContent = bad || stopped ? "-" : `${num(p.percent)}%`;
+    const phaseEl = $("#progress-phase");
+    if (phaseEl) { phaseEl.textContent = phase; phaseEl.hidden = !phase || !p.active; }
+    const track = $("#progress-card .progress-track");
+    if (track) track.setAttribute("aria-valuenow", String(Math.round(p.active ? num(p.percent) : 100)));
 
     const isBusy = p.active || p.busy;
     [$("#btn-stop-progress")].forEach((btn) => {
@@ -2373,10 +2572,11 @@
   function applyBusy(busy) {
     state.busy = busy;
     $$("[data-busy]").forEach((b) => {
-      b.disabled = busy || (b.id === "btn-cluster" && !state.inferred)
-        || (b.id === "btn-sort-dock" && !(state.overview && state.overview.total));
+      b.disabled = busy;
       b.classList.toggle("busy", busy);
+      b.classList.toggle("loading", busy && b === state.busyBtn);
     });
+    if (!busy) state.busyBtn = null;
     updateLearn();
   }
 
@@ -2696,7 +2896,6 @@
     if (dockTotal) {
       dockTotal.textContent = fmtN(total);
       $("#dock-label").textContent = total === 1 ? "photo in your library" : "photos in your library";
-      $("#btn-sort-dock").disabled = !total;
     }
     $$(".comp-host").forEach((host) => {
       const head = `<div class="comp-head"><span class="comp-total">${fmtN(total)}</span>
@@ -2712,8 +2911,29 @@
       const unsorted = cats.length === 1 && cats[0][0] === "unrouted";
       host.innerHTML = head + `<div class="comp-strip">${strip}</div>
         <div class="comp-legend">${active ? '<button data-cat="">Show all</button>' : ""}${legend}</div>` +
-        (unsorted ? `<p class="help" style="margin-top:12px">Photos are placed in categories when a plan is built. <button class="btn sm" data-sortnow>Sort photos now</button></p>` : "");
+        (unsorted ? `<p class="help" style="margin-top:12px">Photos are placed in categories when a plan is built. <button class="btn sm secondary" data-sortnow>Sort photos now</button></p>` : "");
     });
+  }
+
+  // Which import step is next: Scan, then Analyze (which also groups and sorts), then Scan again.
+  function flowStates(total, pending, bursts, stored) {
+    const inferred = total > 0 && pending === 0;
+    const stale = stored === null ? bursts === 0 : String(total) !== stored;
+    const next = !total ? "scan" : pending > 0 || stale ? "infer" : "scan";
+    const cls = (id, rest) => (next === id ? "active" : rest);
+    return { next, inferred, scan: cls("scan", "done"), infer: cls("infer", inferred ? "done" : "locked") };
+  }
+
+  // One plain sentence for what to do next, shown in the dock.
+  function nextHint(flow, total) {
+    if (!total) return "Start here: choose a folder, then press Scan.";
+    if (flow.next === "infer") return "Next: press Analyze Now. It reads your photos, groups burst shots and sorts them into categories.";
+    return "All caught up. Choose a folder and press Scan to add more photos.";
+  }
+
+  function markGrouped() {
+    if (!state.overview) return;
+    try { localStorage.setItem("pcur-grouped-total", String(state.overview.total)); } catch (e) { /* storage unavailable */ }
   }
 
   function renderCounts(ov) {
@@ -2721,8 +2941,16 @@
     const set = (k, v, alert) => {
       const e = $(`[data-count="${k}"]`);
       if (!e) return;
-      e.textContent = v ? fmtN(v) : "";
+      const next = v ? fmtN(v) : "";
+      const had = e.textContent;
+      e.textContent = next;
       e.classList.toggle("alert", !!(alert && v));
+      if (had && had !== next) {
+        e.classList.remove("tick");
+        void e.offsetWidth;
+        e.classList.add("tick");
+        afterAnim(e, 700).then(() => e.classList.remove("tick"));
+      }
     };
     const junk = Object.entries(ov.by_category).reduce((a, [c, n]) => a + (state.junk.has(c) ? n : 0), 0);
     set("library", ov.total);
@@ -2730,11 +2958,17 @@
     set("bursts", s.burst_groups);
     set("uncertain", ov.by_category.uncertain || 0, true);
     set("junk", junk);
+    set("utility", Object.entries(ov.by_category).reduce((a, [c, n]) => a + (state.utility.has(c) ? n : 0), 0));
     set("actions", s.planned_actions);
 
     const total = ov.total, pending = num(s.pending_inference), bursts = num(s.burst_groups);
-    const inferred = total > 0 && pending === 0;
-    state.inferred = inferred;
+    let stored = null;
+    try {
+      stored = localStorage.getItem("pcur-grouped-total");
+      if (!total) localStorage.removeItem("pcur-grouped-total");
+    } catch (e) { /* storage unavailable */ }
+    const flow = flowStates(total, pending, bursts, stored);
+    state.inferred = flow.inferred;
     const step = (id, cls, text) => {
       const li = $("#step-" + id);
       if (!li) return;
@@ -2743,14 +2977,11 @@
       li.classList.toggle("locked", cls === "locked");
       $("#state-" + id).textContent = text;
     };
-    // Step 1 — done once indexed, otherwise the actionable focus (never locked).
-    step("scan", total > 0 ? "done" : "active", total > 0 ? `${fmtN(total)} indexed` : "Not started");
-    // Step 2 — done once inferred, the active focus while photos await analysis, locked with no library.
-    step("infer", inferred ? "done" : total > 0 ? "active" : "locked",
-      pending > 0 ? `${fmtN(pending)} waiting` : total > 0 ? "Done" : "Needs step 1");
-    // Step 3 — done once grouped, active when analysis is ready, locked until step 2 completes.
-    step("cluster", bursts > 0 ? "done" : inferred ? "active" : "locked",
-      bursts > 0 ? `${fmtN(bursts)} groups` : inferred ? "Not run yet" : "Needs step 2");
+    step("scan", flow.scan, total > 0 ? `${fmtN(total)} indexed` : "Not started");
+    step("infer", flow.infer, pending > 0 ? `${fmtN(pending)} waiting`
+      : flow.next === "infer" ? "Needs grouping" : total > 0 ? "Done" : "Needs step 1");
+    const hint = $("#dock-hint");
+    if (hint) hint.textContent = nextHint(flow, total);
   }
 
   async function loadStats() {
@@ -2768,13 +2999,15 @@
 
   // ------------------------------------------------------------------- tabs
   function fillCatFilters() {
-    const opts = state.cats.map((c) => `<option value="${esc(c)}">${esc(catLabel(c))}</option>`).join("");
+    const sorted = state.cats.slice().sort((a, b) => catLabel(a).localeCompare(catLabel(b)));
+    const opts = sorted.map((c) => `<option value="${esc(c)}">${esc(catLabel(c))}</option>`).join("");
     $("#catfilter").innerHTML = '<option value="">All categories</option>' + opts;
     $("#onlycat").innerHTML = '<option value="">Every category</option>' + opts;
     $("#bulk-cat").innerHTML = '<option value="" disabled selected>Move to category</option>' + opts;
   }
 
   function showTab(name, keepPicks) {
+    const changed = state.tab !== name;
     state.tab = name;
     state.triageGrid = null;
     if (!keepPicks) clearPicks();
@@ -2783,7 +3016,18 @@
       t.classList.toggle("active", on);
       if (on) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
     });
-    $$(".panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
+    $$(".panel").forEach((p) => {
+      p.classList.toggle("active", p.id === "tab-" + name);
+      p.classList.remove("enter");
+    });
+    const entering = $("#tab-" + name);
+    if (changed && entering && !reducedMotion()) {
+      void entering.offsetWidth;
+      entering.classList.add("enter");
+      const seq = entering._enterSeq = (entering._enterSeq || 0) + 1;
+      afterAnim(entering, 260).then(() => { if (entering._enterSeq === seq) entering.classList.remove("enter"); });
+    }
+    positionNavIndicator();
     const [title, sub] = TITLES[name] || [name, ""];
     $("#page-title").textContent = title;
     $("#page-sub").textContent = sub;
@@ -2792,7 +3036,7 @@
     try { history.replaceState(null, "", "#" + name); } catch (e) { /* ignore */ }
     window.scrollTo(0, 0);
 
-    const gridTab = { categories: "cat", junk: "junk", uncertain: "uncertain", highlights: "highlights" }[name];
+    const gridTab = { categories: "cat", junk: "junk", utility: "utility", uncertain: "uncertain", highlights: "highlights" }[name];
     if (gridTab) {
       const g = grids[gridTab];
       if (g) {
@@ -2810,7 +3054,7 @@
       loadFeatures().catch(() => {});
       refreshTaste().catch(() => {});
       loadHighlightYears().catch(() => {});
-      if ($("#hl-view").value === "events") renderEventHighlights();
+      if (isEventView()) renderEventHighlights();
     }
     if (name === "bursts") renderBursts().catch((e) => toast(e.message, "err"));
     if (name === "events") loadEvents().catch((e) => toast(e.message, "err"));
@@ -2823,6 +3067,8 @@
   // ------------------------------------------------------------------- init
   async function runTask(label, fn) {
     state.taskRunning = true;
+    const started = document.activeElement;
+    state.busyBtn = started && started.matches && started.matches("[data-busy]") ? started : null;
     applyBusy(true);
     libLog(label + "...");
     try {
@@ -2888,7 +3134,7 @@
         pathInput.value = "";
         if (window.__syncScanPathDisplay) window.__syncScanPathDisplay();
       }
-      ["#state-scan", "#state-infer", "#state-cluster"].forEach((sel) => {
+      ["#state-scan", "#state-infer"].forEach((sel) => {
         const el = $(sel);
         if (el) el.textContent = "";
       });
@@ -2927,20 +3173,25 @@
 
   // Placing photos in categories happens when a plan is built, so do it after analysis.
   async function sortNow(silent) {
+    let ok = true;
     try {
       await post("/api/plan/rebuild", planBody());
       if (!silent) toast("Photos sorted into categories", "ok");
     } catch (e) {
+      ok = false;
       if (!silent) toast(e.message, "err");
     }
     await loadStats();
     resetVisibleGrids();
+    return ok;
   }
 
   async function afterTask(sort) {
-    if (sort) await sortNow(true);
+    let ok = true;
+    if (sort) ok = await sortNow(true);
     else { await loadStats(); resetVisibleGrids(); }
     refreshBackend();
+    return ok;
   }
 
   // ------------------------------------------------------- lifecycle
@@ -3026,6 +3277,17 @@
     });
   }
 
+  // Open a tab and, when the link names an anchor, scroll that section into view.
+  function gotoTarget(el) {
+    showTab(el.dataset.goto);
+    const anchor = el.dataset.anchor && $("#" + el.dataset.anchor);
+    if (!anchor) return;
+    requestAnimationFrame(() => {
+      anchor.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
+      anchor.focus({ preventScroll: true });
+    });
+  }
+
   async function loadAboutInfo() {
     try {
       const about = await api("/api/about");
@@ -3036,19 +3298,26 @@
 
       const aboutCard = $("#about-card");
       if (aboutCard) {
-        const modelsList = (about.models || []).length > 0
-          ? `<div style="margin-top:12px;"><strong>Active models:</strong><ul style="margin:6px 0;padding-left:20px;">${about.models.map(m => `<li>${esc(m.name)}</li>`).join("")}</ul></div>`
-          : "";
+        const chips = (about.models || []).map((m) => `<span class="about-chip">${esc(m.name)}</span>`).join("");
         aboutCard.innerHTML = `
-          <div style="font-size:13px;line-height:1.6;color:var(--mut);">
-            <p style="margin:0 0 8px;">Version: <strong>${esc(about.version || "0.0.0")}</strong></p>
-            <p style="margin:0 0 8px;">By <strong>${esc(about.author || "Unknown")}</strong> • ${esc(about.license || "MIT")}</p>
-            <p style="margin:0 0 8px;">Acceleration: <strong>${esc(about.device || "CPU")}</strong></p>
-            <p style="margin:0 0 8px;">Python: ${esc(about.python || "unknown")}</p>
-            ${modelsList}
-            <p style="margin:10px 0 0;"><a href="/licenses" target="_blank" class="link">View full licenses</a></p>
-          </div>
-        `;
+          <div class="about">
+            <img class="about-logo" src="/static/logo.png" alt="" width="64" height="64">
+            <div class="about-main">
+              <div class="about-title"><span class="about-name">Photocure</span><span class="about-ver">v${esc(about.version || "0.0.0")}</span></div>
+              <p class="about-tag">Offline photo curation. Your photos never leave this computer.</p>
+              <dl class="about-facts">
+                <div><dt>Acceleration</dt><dd>${esc(about.device || "CPU")}</dd></div>
+                <div><dt>Python</dt><dd>${esc(about.python || "unknown")}</dd></div>
+                <div><dt>License</dt><dd>${esc(about.license || "MIT License")}</dd></div>
+                <div><dt>Author</dt><dd>${esc(about.author || "Unknown")}</dd></div>
+              </dl>
+              ${chips ? `<div class="about-models" aria-label="Active models">${chips}</div>` : ""}
+              <div class="about-links">
+                <a class="btn sm secondary" href="/licenses" target="_blank" rel="noopener">Licenses</a>
+                <a class="btn sm ghost" href="https://github.com/safiyu/photocure" target="_blank" rel="noopener">GitHub</a>
+              </div>
+            </div>
+          </div>`;
       }
     } catch (e) {
       /* ignore */
@@ -3067,11 +3336,13 @@
       state.backend = cfg.backend || null;
       state.thresholds = cfg.thresholds || null;
       state.junk = new Set(cfg.categories.filter((c) => c.junk).map((c) => c.value));
+      state.utility = new Set(cfg.categories.filter((c) => c.utility).map((c) => c.value));
       if (!$("#orgroot").value) $("#orgroot").value = cfg.default_output_dir;
     } catch (e) {
       state.cats = sortCats(["people", "food", "scenery", "animal", "screenshot", "document",
         "graphic", "accidental", "duplicate", "uncertain", "unknown"]);
-      state.junk = new Set(["screenshot", "document", "graphic", "accidental", "duplicate"]);
+      state.junk = new Set(["graphic", "accidental", "duplicate"]);
+      state.utility = new Set(["utility", "screenshot", "document", "slide"]);
     }
     await loadAboutInfo();
     fillCatFilters();
@@ -3136,17 +3407,35 @@
       qt = setTimeout(() => grids.cat.reset(), 250);
     });
     $("#junkfilter").addEventListener("change", () => grids.junk.reset());
+    $$("#tab-utility [data-ukind]").forEach((b) => b.addEventListener("click", () => {
+      state.utilityKind = b.dataset.ukind;
+      $$("#tab-utility [data-ukind]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      grids.utility.reset();
+    }));
+    $("#btn-rescore").onclick = async () => {
+      try {
+        const r = await post("/api/rescore", {});
+        if (r.note) { toast(r.note, "err"); return; }
+        const res = await followJob(r.job_id, "Re-check");
+        toast(`Re-checked ${fmtN(res.updated)} photos`, "ok");
+        await sortNow(true);
+        grids.utility.reset();
+      } catch (e) { toast(e.message, "err"); }
+    };
     $("#minaes").addEventListener("change", () => {
-      if ($("#hl-view").value === "events") renderEventHighlights(); else grids.highlights.reset();
+      if (isEventView()) renderEventHighlights(); else grids.highlights.reset();
     });
     bindHighlights();
     bindDuplicates();
+    bindActivity();
     bindKeywords();
     bindWatch();
     $("#search-form").addEventListener("submit", (e) => { e.preventDefault(); runSearch(); });
     $("#search-dups").addEventListener("change", () => { if ($("#searchq").value.trim()) runSearch(); });
-    $("#similar-close").onclick = () => { $("#similar-panel").hidden = true; };
-    $("#btn-dismiss-progress").onclick = () => { $("#progress-card").hidden = true; $("#hero-gauge").hidden = true; };
+    $("#similar-close").onclick = () => { closeOverlay($("#similar-panel")); };
+    window.addEventListener("resize", positionNavIndicator);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionNavIndicator);
+    $("#btn-dismiss-progress").onclick = () => { state.dismissedRun = state.lastRun; $("#progress-card").hidden = true; };
 
     $("#btn-learn").onclick = learnNow;
     renderBanner();
@@ -3228,19 +3517,20 @@
     };
     $("#btn-infer").onclick = async () => {
       const device = $("#infer-device").value;
-      const r = await runTask(`Analyzing photos (${device})`, () => post("/api/infer", { device }));
+      const r = await runTask(`Analyzing photos (${device})`, async () => {
+        const inferred = await post("/api/infer", { device });
+        if (inferred && inferred.stopped) return inferred;
+        const grouped = await post("/api/cluster", {});
+        if (grouped && grouped.stopped) return grouped;
+        return { inferred, grouped };
+      });
       if (r) {
-        libLog(`Analysis finished: ${fmtN(r.processed)} photos, ${fmtN(r.faces_total)} faces in ${r.duration_s}s`, "ok");
-        toast(`Analyzed ${fmtN(r.processed)} photos`, "ok");
-        await afterTask(true);
-      }
-    };
-    $("#btn-cluster").onclick = async () => {
-      const r = await runTask("Grouping bursts", () => post("/api/cluster", {}));
-      if (r) {
-        libLog(`Grouping finished: ${fmtN(r.burst_groups)} burst groups`, "ok");
-        toast(`Found ${fmtN(r.burst_groups)} burst groups`, "ok");
-        await afterTask(true);
+        libLog(`Analysis finished: ${fmtN(r.inferred.processed)} photos, ${fmtN(r.inferred.faces_total)} faces in ${r.inferred.duration_s}s`, "ok");
+        libLog(`Grouping finished: ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
+        toast(`Analyzed ${fmtN(r.inferred.processed)} photos, found ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
+        markGrouped();
+        const sorted = await afterTask(true);
+        libLog(sorted ? "Photos sorted into categories" : "Could not sort photos into categories", sorted ? "ok" : "warn");
       }
     };
     $("#btn-ingest-all").onclick = async () => {
@@ -3250,6 +3540,7 @@
       if (r) {
         libLog(`Import finished: ${fmtN(r.scan.new)} new, ${fmtN(r.infer.processed)} analyzed, ${fmtN(r.cluster.burst_groups)} burst groups`, "ok");
         toast("Import finished", "ok");
+        markGrouped();
         await afterTask(true);
       }
     };
