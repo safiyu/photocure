@@ -12,7 +12,7 @@
 
   const PAGE = 200;
   const state = {
-    tab: "library", cats: [], junk: new Set(), byId: {}, busy: false, taskRunning: false,
+    tab: "library", cats: [], junk: new Set(), utility: new Set(), utilityKind: "", byId: {}, busy: false, taskRunning: false,
     inferred: false,
     triageSel: -1, triageGrid: null, undo: [], picks: new Set(), lastPick: null,
     overview: null, eventId: null,
@@ -29,7 +29,8 @@
     bursts: ["Bursts", "Shots taken seconds apart. The best one of each group is kept."],
     highlights: ["Highlights", "Your most appealing photos first."],
     events: ["Events", "Photos grouped by when and where they were taken."],
-    junk: ["Junk review", "Screenshots, documents, duplicates and accidents. Move anything that does not belong."],
+    junk: ["Junk review", "Duplicates, graphics and accidents. Move anything that does not belong."],
+    utility: ["Utility", "Receipts, notes, screenshots, labels and signs, kept apart from your photos and from Junk."],
     uncertain: ["Finalize", "The analysis was not sure about these. Choose a category for each."],
     settings: ["Settings", "Choose what runs the analysis and how many workers it uses."],
     actions: ["Apply and undo", "Review the plan, then organize your files. Every change can be undone."],
@@ -348,7 +349,7 @@
   const catKey = (c) => String(c || "unrouted").replace(/[^a-z_]/g, "") || "unknown";
   // Most useful first, so the number keys 1-9 cover the categories people assign most.
   const CAT_ORDER = ["people", "food", "scenery", "animal", "screenshot", "document", "graphic",
-    "illustration", "slide", "architecture", "vehicle", "plant", "product", "accidental",
+    "illustration", "slide", "utility", "architecture", "vehicle", "plant", "product", "accidental",
     "uncertain", "duplicate", "near_duplicate", "burst_alternate", "unreadable", "custom", "unknown"];
   const TRIAGE_SKIP = new Set(["unknown", "duplicate", "near_duplicate", "uncertain",
     "burst_alternate", "unreadable", "custom"]);
@@ -358,6 +359,7 @@
   });
   const catStyle = (c) => `--cat:var(--c-${catKey(c)}, var(--c-unknown))`;
   const catLabel = (c) => {
+    if (c === "utility") return "Label or sign";
     const t = String(c || "Not sorted yet").replace(/_/g, " ");
     return t.charAt(0).toUpperCase() + t.slice(1);
   };
@@ -539,6 +541,11 @@
     host._flash = setTimeout(() => host.classList.remove("anim-in"), 1500);
   }
 
+  // The Utility tab asks for the whole family, or for one kind (which is one category).
+  function utilityQuery(kind) {
+    return kind ? "category=" + encodeURIComponent(kind) : "group=utility";
+  }
+
   function makeGrid(key, cfg) {
     if (!window.PCUR_GRID) throw new Error("virtual_grid.mjs did not load");
     const host = $(cfg.el);
@@ -661,6 +668,15 @@
         return c ? eff(it) === c : state.junk.has(eff(it));
       },
       empty: { icon: "trash", title: "No junk to review", text: "Screenshots, documents and duplicates show up here after you analyze your photos." },
+    });
+    makeGrid("utility", {
+      el: "#utilitygrid", more: "#utilitygrid-more", count: "#utilitycount",
+      params: () => utilityQuery(state.utilityKind),
+      matches(it) {
+        const k = state.utilityKind;
+        return k ? eff(it) === k : state.utility.has(eff(it));
+      },
+      empty: { icon: "inbox", title: "Nothing here yet", text: "Receipts, notes, screenshots, labels, signs and packaging show up here after you analyze your photos. Already analyzed? Press Re-check my photos." },
     });
     makeGrid("uncertain", {
       el: "#uncertaingrid", more: "#uncertaingrid-more", count: "#uncertaincount",
@@ -1960,7 +1976,7 @@
   }
 
   function activeGrid() {
-    const key = { categories: "cat", highlights: "highlights", events: "event", junk: "junk", uncertain: "uncertain" }[state.tab];
+    const key = { categories: "cat", highlights: "highlights", events: "event", junk: "junk", utility: "utility", uncertain: "uncertain" }[state.tab];
     return key ? grids[key] || null : null;
   }
 
@@ -2921,6 +2937,7 @@
     set("bursts", s.burst_groups);
     set("uncertain", ov.by_category.uncertain || 0, true);
     set("junk", junk);
+    set("utility", Object.entries(ov.by_category).reduce((a, [c, n]) => a + (state.utility.has(c) ? n : 0), 0));
     set("actions", s.planned_actions);
 
     const total = ov.total, pending = num(s.pending_inference), bursts = num(s.burst_groups);
@@ -2998,7 +3015,7 @@
     try { history.replaceState(null, "", "#" + name); } catch (e) { /* ignore */ }
     window.scrollTo(0, 0);
 
-    const gridTab = { categories: "cat", junk: "junk", uncertain: "uncertain", highlights: "highlights" }[name];
+    const gridTab = { categories: "cat", junk: "junk", utility: "utility", uncertain: "uncertain", highlights: "highlights" }[name];
     if (gridTab) {
       const g = grids[gridTab];
       if (g) {
@@ -3298,11 +3315,13 @@
       state.backend = cfg.backend || null;
       state.thresholds = cfg.thresholds || null;
       state.junk = new Set(cfg.categories.filter((c) => c.junk).map((c) => c.value));
+      state.utility = new Set(cfg.categories.filter((c) => c.utility).map((c) => c.value));
       if (!$("#orgroot").value) $("#orgroot").value = cfg.default_output_dir;
     } catch (e) {
       state.cats = sortCats(["people", "food", "scenery", "animal", "screenshot", "document",
         "graphic", "accidental", "duplicate", "uncertain", "unknown"]);
-      state.junk = new Set(["screenshot", "document", "graphic", "accidental", "duplicate"]);
+      state.junk = new Set(["graphic", "accidental", "duplicate"]);
+      state.utility = new Set(["utility", "screenshot", "document", "slide"]);
     }
     await loadAboutInfo();
     fillCatFilters();
@@ -3367,6 +3386,20 @@
       qt = setTimeout(() => grids.cat.reset(), 250);
     });
     $("#junkfilter").addEventListener("change", () => grids.junk.reset());
+    $$("#tab-utility [data-ukind]").forEach((b) => b.addEventListener("click", () => {
+      state.utilityKind = b.dataset.ukind;
+      $$("#tab-utility [data-ukind]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      grids.utility.reset();
+    }));
+    $("#btn-rescore").onclick = async () => {
+      try {
+        const r = await post("/api/rescore", {});
+        if (r.note) { toast(r.note, "err"); return; }
+        toast(`Re-checked ${fmtN(r.updated)} photos`, "ok");
+        await sortNow(true);
+        grids.utility.reset();
+      } catch (e) { toast(e.message, "err"); }
+    };
     $("#minaes").addEventListener("change", () => {
       if ($("#hl-view").value === "events") renderEventHighlights(); else grids.highlights.reset();
     });

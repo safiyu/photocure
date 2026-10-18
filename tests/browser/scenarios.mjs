@@ -901,6 +901,27 @@ try {
     }
   });
 
+  await scenario("utility tab collects reference shots apart from Junk", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); true");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
+    const first = Number(await page.eval("document.querySelector('#grid .vg-window .card').dataset.id"));
+    await page.eval("document.querySelector('#grid .vg-window .card .catpick').click(); true");
+    await page.waitFor("!!document.querySelector('.catmenu')", 5000, "the category menu opens");
+    await page.eval("[...document.querySelectorAll('.catmenu-item')].find((b) => b.textContent.trim() === 'Label or sign').click(); true");
+    await page.waitFor(`fetch('/api/images?group=utility').then((r) => r.json()).then((j) => j.items.some((i) => i.id === ${first}))`, 10000, "the photo is in the vault");
+    check(!(await api("/api/images?group=junk")).items.some((i) => i.id === first), "a utility photo must not be offered in Junk");
+    await page.eval("document.querySelector('.tab[data-tab=\"utility\"]').click(); true");
+    await page.waitFor("document.querySelector('#page-title').textContent === 'Utility'", 8000, "the Utility page opens");
+    await page.waitFor("/^\\d/.test(document.querySelector('#utilitycount').textContent)", 15000, "the vault lists photos");
+    await page.eval("document.querySelector('#tab-utility [data-ukind=\"screenshot\"]').click(); true");
+    await page.waitFor("document.querySelector('#tab-utility [data-ukind=\"screenshot\"]').getAttribute('aria-pressed') === 'true'", 5000, "the chip is pressed");
+    await page.eval("document.querySelector('#tab-utility [data-ukind=\"\"]').click(); true");
+    await page.waitFor("/^\\d/.test(document.querySelector('#utilitycount').textContent)", 15000, "all kinds list again");
+    const ov = await api("/api/overview");
+    const sum = ["utility", "screenshot", "document", "slide"].reduce((a, c) => a + (ov.by_category[c] || 0), 0);
+    await page.waitFor(`document.querySelector('[data-count="utility"]').textContent === ${JSON.stringify(sum.toLocaleString("en-US"))}`, 8000, "the nav badge matches the family total");
+  });
+
   await scenario("the page raised no script errors", async () => {
     check(page.errors.length === 0, "script errors: " + page.errors.join(" | ").slice(0, 400));
   });

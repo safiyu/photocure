@@ -50,6 +50,7 @@
     <symbol id="i-image" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M9 9.5h.01"/></symbol>
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19zM12 10v4M12 17h.01"/></symbol>
     <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2 12h4l2.5-7 4 14 2.5-7H22"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 13 6 5h12l2 8M4 13v6h16v-6M4 13h5l1 2h4l1-2h5"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
   </svg>
 
@@ -75,6 +76,7 @@
           <button class="tab navitem" data-tab="bursts"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span>Bursts</span><em class="count" data-count="bursts"></em></button>
           <button class="tab navitem" data-tab="highlights"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg><span>Highlights</span><em class="count"></em></button>
           <button class="tab navitem" data-tab="events"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg><span>Events</span><em class="count"></em></button>
+          <button class="tab navitem" data-tab="utility"><svg class="ic" aria-hidden="true"><use href="#i-inbox"/></svg><span>Utility</span><em class="count" data-count="utility"></em></button>
         </div>
         <div class="navgroup" style="margin-top:18px">
           <h2>Review</h2>
@@ -317,6 +319,25 @@
           <div class="loadmore"><button id="btn-dup-more" class="btn secondary" type="button" hidden>Show more groups</button></div>
         </section>
 
+        <!-- UTILITY -->
+        <section id="tab-utility" class="panel">
+          <p class="dup-intro">Receipts, notes, screenshots, labels, signs and packaging live here, apart from your photos and from Junk. Nothing in this tab is treated as clutter.</p>
+          <div class="toolbar">
+            <div class="kind-chips" role="group" aria-label="Kind of reference photo">
+              <button type="button" class="chip-btn" data-ukind="" aria-pressed="true">All</button>
+              <button type="button" class="chip-btn" data-ukind="screenshot" aria-pressed="false">Screenshots</button>
+              <button type="button" class="chip-btn" data-ukind="document" aria-pressed="false">Receipts and documents</button>
+              <button type="button" class="chip-btn" data-ukind="slide" aria-pressed="false">Notes and whiteboards</button>
+              <button type="button" class="chip-btn" data-ukind="utility" aria-pressed="false">Labels, signs and packaging</button>
+            </div>
+            <button id="btn-rescore" class="btn sm secondary" type="button" title="Looks at your already analyzed photos again with the latest categories. No photo is read again.">Re-check my photos</button>
+            <span class="grow"></span>
+            <span id="utilitycount" class="rowcount"></span>
+          </div>
+          <div id="utilitygrid" class="grid"></div>
+          <div id="utilitygrid-more" class="loadmore"></div>
+        </section>
+
         <!-- JUNK -->
         <section id="tab-junk" class="panel">
           <div class="toolbar">
@@ -324,8 +345,6 @@
               <option value="">All junk</option>
               <option value="duplicate">Duplicates</option>
               <option value="near_duplicate">Near duplicates</option>
-              <option value="screenshot">Screenshots</option>
-              <option value="document">Documents</option>
               <option value="graphic">Graphics</option>
               <option value="accidental">Accidental</option>
               <option value="unreadable">Unreadable</option>

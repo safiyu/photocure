@@ -90,6 +90,7 @@
   --c-burst_alternate: #6366f1;
   --c-custom: #14b8a6;
   --c-illustration: #38bdf8;
+  --c-utility: #06b6d4;
   --c-slide: #eab308;
   --c-vehicle: #3b82f6;
   --c-architecture: #6366f1;
@@ -1735,3 +1736,14 @@ body.has-picks .pick { opacity: 1; }
 .gm-dot[data-s="missing"] { background: transparent; border: 1.5px dashed var(--faint); }
 .gm-bar { height: 4px; margin-top: 6px; border-radius: 4px; background: var(--well); overflow: hidden; }
 .gm-bar > span { display: block; height: 100%; border-radius: 4px; background: var(--grad-brand); }
+
+/* Utility tab kind chips. */
+.kind-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip-btn {
+  display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border: 1px solid var(--line);
+  border-radius: 999px; background: var(--sheet); color: var(--mut); font: 600 13px/1 var(--font-body);
+  cursor: pointer; transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.chip-btn:hover { border-color: var(--faint); color: var(--ink); }
+.chip-btn[aria-pressed="true"] { background: var(--primary-soft); border-color: var(--primary); color: var(--link); }
+.chip-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
