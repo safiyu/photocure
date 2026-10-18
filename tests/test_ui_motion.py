@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Subtle, reduced-motion-safe animation: keyframes, gated loops, and the JS helpers."""
 import re
 from pathlib import Path

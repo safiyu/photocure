@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Logo-derived blue, pink and amber token system: values, contrast, and no leftovers."""
 import re
 from pathlib import Path
@@ -52,7 +53,7 @@ def test_role_tokens_defined_in_both_themes():
     for token in ROLE_TOKENS:
         assert token in light, f"{token} missing from :root"
         assert token in dark, f"{token} missing from dark theme"
-    for token in SCALES + ["--navy"]:
+    for token in [*SCALES, "--navy"]:
         assert token in light, f"{token} missing from :root"
 
 

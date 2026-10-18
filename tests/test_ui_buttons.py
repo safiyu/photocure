@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Unified pill button family: base, variants, states, role mapping in markup and JS."""
 import re
 from pathlib import Path

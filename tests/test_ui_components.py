@@ -1,6 +1,9 @@
+# ruff: noqa: E501
 """Modern components on the new tokens: inputs, seg control, nav indicator, cards, stars, bulk bar, toast."""
 import re
 from pathlib import Path
+
+import pytest
 
 STATIC = Path(__file__).parent.parent / "photocure" / "ui" / "static"
 BRAND_HEX = ("#3b82f6", "#60a5fa", "#93c5fd", "#2563eb", "#f472b6", "#ec4899",
@@ -29,7 +32,7 @@ def _body(selector_part: str) -> str:
     for selector, body in _rules():
         if (selector.strip() == key) if exact else (key in selector):
             return body
-    raise AssertionError(f"no rule with selector {'equal to' if exact else 'containing'} {key!r}")
+    pytest.fail(f"no rule with selector {'equal to' if exact else 'containing'} {key!r}")
 
 
 def test_inputs_have_focus_ring_and_data_uri_chevron():
@@ -63,7 +66,7 @@ def test_cards_have_brand_hairline():
                 assert part in selector, part
             assert "var(--grad-brand)" in body
             return
-    raise AssertionError("shared ::before hairline rule not found")
+    pytest.fail("shared ::before hairline rule not found")
 
 
 def test_bulk_bar_not_pinned_to_sidebar_width():
