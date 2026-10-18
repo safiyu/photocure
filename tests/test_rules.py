@@ -176,8 +176,8 @@ def test_taxonomy_prompts_cover_all_clip_categories():
 
 
 def test_category_folders_match_spec():
-    assert CategoryType.SCREENSHOT.folder == "Junk_Review/Screenshots"
-    assert CategoryType.DOCUMENT.folder == "Junk_Review/Documents"
+    assert CategoryType.SCREENSHOT.folder == "Utility_Reference/Screenshots"
+    assert CategoryType.DOCUMENT.folder == "Utility_Reference/Documents"
     assert CategoryType.FOOD.folder == "Non-Human/Food"
     assert CategoryType.ANIMAL.folder == "Non-Human/Animals"
     assert CategoryType.SCENERY.folder == "Non-Human/Scenery"
@@ -213,7 +213,7 @@ def test_organizer_screenshot_no_date(cfg):
     from photocure.rules.decision_matrix import Decision
     rec = _rec(path="/lib/c.jpg", filename="c.jpg")
     dec = Decision(CategoryType.SCREENSHOT, "clip")
-    assert org.full_target(rec, dec) == Path("/org/Junk_Review/Screenshots/c.jpg")
+    assert org.full_target(rec, dec) == Path("/org/Utility_Reference/Screenshots/c.jpg")
 
 
 def test_organizer_missing_date_uses_unknown(cfg):

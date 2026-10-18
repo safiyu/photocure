@@ -24,7 +24,7 @@ from .test_rules import _good_quality, _rec
 NEW = ("illustration", "slide", "vehicle", "architecture", "plant", "product")
 FOLDERS = {
     "illustration": "Non-Human/Art_and_Diagrams",
-    "slide": "Non-Human/Slides_and_Notes",
+    "slide": "Utility_Reference/Notes_and_Whiteboards",
     "vehicle": "Non-Human/Vehicles",
     "architecture": "Non-Human/Architecture",
     "plant": "Non-Human/Plants",
@@ -74,7 +74,7 @@ def test_every_builtin_class_has_a_rich_prompt_ensemble_and_group():
 def test_groups():
     t = DEFAULT_TAXONOMY
     assert set(t.group_members("screen")) == {"screenshot", "document", "graphic",
-                                              "illustration", "slide"}
+                                              "illustration", "slide", "utility"}
     assert set(t.group_members("nature")) == {"scenery", "plant", "animal"}
     assert set(t.group_members("objects")) == {"food", "vehicle", "product", "architecture"}
     assert t.group_members("people") == ["people"]

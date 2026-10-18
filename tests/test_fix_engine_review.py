@@ -89,7 +89,7 @@ def test_failed_mutation_still_marks_ledger_failed(tmp_path, monkeypatch):
 
 def test_purge_trash_marks_ledger_with_relative_output_dir(tmp_path, monkeypatch):
     w = build_world(tmp_path, n=1)
-    set_bucket(w, w.ids[0], "screenshot")
+    set_bucket(w, w.ids[0], "graphic")
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     rep = w.planner.execute_plan(p, trash=True)
     monkeypatch.chdir(tmp_path)
@@ -105,12 +105,12 @@ def test_purge_trash_marks_ledger_with_relative_output_dir(tmp_path, monkeypatch
 def test_only_category_partial_apply_does_not_need_force(tmp_path):
     w = build_world(tmp_path, n=4)
     set_bucket(w, w.ids[0], "food")
-    set_bucket(w, w.ids[1], "screenshot")
+    set_bucket(w, w.ids[1], "graphic")
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     first = w.planner.execute_plan(p.plan_id, only_category="food")
     assert first.executed == 1
     assert w.planner.load_plan(p.plan_id).applied_transaction in (None, "")
-    second = w.planner.execute_plan(p.plan_id, only_category="screenshot")
+    second = w.planner.execute_plan(p.plan_id, only_category="graphic")
     assert second.executed == 1 and second.failures == 0
     rest = w.planner.execute_plan(p.plan_id)
     assert rest.executed == 2 and rest.in_place == 2
@@ -124,7 +124,7 @@ def test_partial_apply_still_detects_later_drift(tmp_path):
     set_bucket(w, w.ids[0], "food")
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     w.planner.execute_plan(p.plan_id, only_category="food")
-    set_bucket(w, w.ids[1], "screenshot")
+    set_bucket(w, w.ids[1], "graphic")
     with pytest.raises(PlanDriftError, match="stale"):
         w.planner.execute_plan(p.plan_id)
 

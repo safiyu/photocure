@@ -42,6 +42,7 @@ class CategoryType(str, Enum):
     UNREADABLE = "unreadable"      # decode failed
     BURST_ALTERNATE = "burst_alternate"
     JUNK_BLINKS = "junk_blinks"    # burst alternates with closed eyes, set by "Reject All Blinks"
+    UTILITY = "utility"            # labels, serial numbers, parking pillars, medicine packaging
     CUSTOM = "custom"              # user-defined YAML class
     UNKNOWN = "unknown"
 
@@ -49,15 +50,16 @@ class CategoryType(str, Enum):
     def folder(self) -> str:
         """Relative target folder under the organize root (Option 1)."""
         return {
-            CategoryType.SCREENSHOT: "Junk_Review/Screenshots",
-            CategoryType.DOCUMENT: "Junk_Review/Documents",
+            CategoryType.SCREENSHOT: "Utility_Reference/Screenshots",
+            CategoryType.DOCUMENT: "Utility_Reference/Documents",
             CategoryType.GRAPHIC: "Junk_Review/Graphics",
             CategoryType.FOOD: "Non-Human/Food",
             CategoryType.ANIMAL: "Non-Human/Animals",
             CategoryType.SCENERY: "Non-Human/Scenery",
             CategoryType.PEOPLE: "People",
             CategoryType.ILLUSTRATION: "Non-Human/Art_and_Diagrams",
-            CategoryType.SLIDE: "Non-Human/Slides_and_Notes",
+            CategoryType.SLIDE: "Utility_Reference/Notes_and_Whiteboards",
+            CategoryType.UTILITY: "Utility_Reference/Labels_and_Signs",
             CategoryType.VEHICLE: "Non-Human/Vehicles",
             CategoryType.ARCHITECTURE: "Non-Human/Architecture",
             CategoryType.PLANT: "Non-Human/Plants",
@@ -76,11 +78,16 @@ class CategoryType(str, Enum):
     @property
     def is_junk(self) -> bool:
         return self in (
-            CategoryType.SCREENSHOT, CategoryType.DOCUMENT,
             CategoryType.GRAPHIC, CategoryType.ACCIDENTAL,
             CategoryType.DUPLICATE, CategoryType.NEAR_DUPLICATE,
             CategoryType.UNREADABLE, CategoryType.JUNK_BLINKS,
         )
+
+    @property
+    def is_utility(self) -> bool:
+        """Reference shots kept in the Utility vault instead of Junk or the photo categories."""
+        return self in (CategoryType.UTILITY, CategoryType.SCREENSHOT,
+                        CategoryType.DOCUMENT, CategoryType.SLIDE)
 
     @property
     def is_date_grouped(self) -> bool:
@@ -220,6 +227,15 @@ TAXONOMY: tuple[TaxonomyEntry, ...] = (
         "a slide deck page with text and a chart",
     ),
     _entry(
+        CategoryType.UTILITY, "screen",
+        "a close-up photo of a sticker label with a serial number or barcode",
+        "a photo of a wifi router or modem with the label showing its password",
+        "a photo of a parking garage pillar with a level and bay number painted on it",
+        "a photo of a parking space sign, street sign or location marker",
+        "a photo of a medicine bottle, pill box or prescription label",
+        "a photo of a product rating plate or model number sticker",
+    ),
+    _entry(
         CategoryType.FOOD, "objects",
         "a close-up photo of food on a plate",
         "a photo of a meal at a restaurant",
@@ -285,6 +301,9 @@ TAXONOMY: tuple[TaxonomyEntry, ...] = (
 )
 
 DEFAULT_TAXONOMY = Taxonomy(TAXONOMY, source="builtin")
+
+# Shots kept for reference: shown together in the Utility tab, never mixed into Junk.
+UTILITY_CATEGORIES: tuple[CategoryType, ...] = tuple(c for c in CategoryType if c.is_utility)
 
 # Prompt lists keyed by category for quick lookup / the CLIP text tower.
 TAXONOMY_PROMPTS: dict[CategoryType, tuple[str, ...]] = {
