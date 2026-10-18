@@ -1145,33 +1145,54 @@
     $("#btn-hl-export").disabled = !sel.value;
   }
 
+  const SCALE_NAMES = { wide: "wide", closeup: "close-up", action: "action", ambient: "ambient", medium: "medium" };
+  const SCALE_BADGES = { wide: "Wide", closeup: "Close-up", action: "Action", ambient: "Ambient", medium: "Medium" };
+  const isEventView = () => ["events", "story"].includes($("#hl-view").value);
+
+  // "1 wide, 2 close-up": how many photos of each shot scale a story holds, in story order.
+  function coverageText(cov) {
+    return Object.keys(SCALE_NAMES).filter((s) => cov && cov[s]).map((s) => `${cov[s]} ${SCALE_NAMES[s]}`).join(", ");
+  }
+
   async function renderEventHighlights() {
     const host = $("#hl-events");
     const m = $("#minaes").value;
+    const story = $("#hl-view").value === "story";
     host.replaceChildren(...Array.from({ length: 6 }, () => el("div", { class: "skel" })));
     try {
-      const data = await api("/api/highlights/events?per_event=3" + (m !== "" ? "&min_score=" + encodeURIComponent(m) : ""));
+      const data = await api(`/api/highlights/events?per_event=${story ? 8 : 3}` + (story ? "&balanced=true" : "") +
+        (m !== "" ? "&min_score=" + encodeURIComponent(m) : ""));
       $("#highlightcount").textContent = `${fmtN(data.events.length)} event${data.events.length === 1 ? "" : "s"}`;
       if (!data.events.length) {
         host.replaceChildren(emptyNode({ icon: "cal", title: "No events with scored photos",
           text: "Find events first, then analyze your photos so they can be scored." }));
         return;
       }
-      host.replaceChildren(...data.events.map((ev) => {
+      const blocks = data.events.map((ev) => {
         ev.items.forEach((x) => { state.byId[x.id] = x; });
         const when = ev.start ? String(ev.start).slice(0, 10) : "";
+        const cards = ev.items.map((x) => {
+          const node = cardNode(x);
+          const flags = $(".flags", node);
+          if (x.scale && flags) flags.append(el("span", { class: "badge scale", "data-scale": x.scale, text: SCALE_BADGES[x.scale] || x.scale }));
+          return node;
+        });
+        const cover = ev.coverage ? coverageText(ev.coverage) : "";
         return el("div", { class: "ev-block" },
           el("div", { class: "ev-head" }, el("h3", { text: ev.label }),
-            el("span", { text: [when, `top ${ev.count} of ${fmtN(ev.total)}`].filter(Boolean).join(", ") })),
-          el("div", { class: "grid" }, ev.items.map(cardNode)));
-      }));
+            el("span", { text: [when, `${story && data.balanced ? "" : "top "}${ev.count} of ${fmtN(ev.total)}`].filter(Boolean).join(", ") })),
+          cover ? el("div", { class: "ev-cover" }, el("span", { class: "scale-chip", text: "Covers " + cover })) : null,
+          el("div", { class: "grid" }, cards));
+      });
+      if (story && !data.balanced && data.note) blocks.unshift(el("p", { class: "help", role: "status", text: data.note }));
+      host.replaceChildren(...blocks);
     } catch (e) {
       host.replaceChildren(emptyNode({ icon: "alert", title: "Could not load highlights", text: e.message }));
     }
   }
 
   function applyHighlightView() {
-    const events = $("#hl-view").value === "events";
+    const events = isEventView();
     $("#highlightgrid").hidden = events;
     $("#hl-events").hidden = !events;
     if (events) renderEventHighlights(); else grids.highlights.reset();
@@ -3033,7 +3054,7 @@
       loadFeatures().catch(() => {});
       refreshTaste().catch(() => {});
       loadHighlightYears().catch(() => {});
-      if ($("#hl-view").value === "events") renderEventHighlights();
+      if (isEventView()) renderEventHighlights();
     }
     if (name === "bursts") renderBursts().catch((e) => toast(e.message, "err"));
     if (name === "events") loadEvents().catch((e) => toast(e.message, "err"));
@@ -3401,7 +3422,7 @@
       } catch (e) { toast(e.message, "err"); }
     };
     $("#minaes").addEventListener("change", () => {
-      if ($("#hl-view").value === "events") renderEventHighlights(); else grids.highlights.reset();
+      if (isEventView()) renderEventHighlights(); else grids.highlights.reset();
     });
     bindHighlights();
     bindDuplicates();

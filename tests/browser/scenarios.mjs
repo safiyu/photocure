@@ -922,6 +922,16 @@ try {
     await page.waitFor(`document.querySelector('[data-count="utility"]').textContent === ${JSON.stringify(sum.toLocaleString("en-US"))}`, 8000, "the nav badge matches the family total");
   });
 
+  await scenario("event stories fall back to the top photos with a note when the AI model is a placeholder", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"highlights\"]').click(); true");
+    await page.waitFor("!!document.querySelector('#hl-view option[value=\"story\"]')", 8000, "the stories option exists");
+    await page.eval("(() => { const v = document.querySelector('#hl-view'); v.value = 'story'; v.dispatchEvent(new Event('change')); return true; })()");
+    await page.waitFor("!document.querySelector('#hl-events').hidden && !!document.querySelector('#hl-events .ev-block')", 15000, "events render in stories mode");
+    check(await page.eval("/AI model/.test(document.querySelector('#hl-events').textContent)"), "the placeholder fallback must explain itself");
+    check((await page.eval("document.querySelectorAll('#hl-events .ev-block .card').length")) > 0, "the fallback still lists photos");
+    await page.eval("(() => { const v = document.querySelector('#hl-view'); v.value = 'all'; v.dispatchEvent(new Event('change')); return true; })()");
+  });
+
   await scenario("the page raised no script errors", async () => {
     check(page.errors.length === 0, "script errors: " + page.errors.join(" | ").slice(0, 400));
   });

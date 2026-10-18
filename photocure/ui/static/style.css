@@ -1747,3 +1747,13 @@ body.has-picks .pick { opacity: 1; }
 .chip-btn:hover { border-color: var(--faint); color: var(--ink); }
 .chip-btn[aria-pressed="true"] { background: var(--primary-soft); border-color: var(--primary); color: var(--link); }
 .chip-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* Event stories: coverage line and scale badges. */
+.ev-cover { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 10px; }
+.scale-chip { padding: 4px 10px; border-radius: 999px; background: var(--primary-soft); color: var(--link); font: 600 12px/1.2 var(--font-body); }
+.badge.scale { padding-left: 9px; }
+.badge.scale[data-scale="wide"] { box-shadow: inset 3px 0 0 var(--blue-400); }
+.badge.scale[data-scale="closeup"] { box-shadow: inset 3px 0 0 var(--pink-400); }
+.badge.scale[data-scale="action"] { box-shadow: inset 3px 0 0 var(--amber-400); }
+.badge.scale[data-scale="ambient"] { box-shadow: inset 3px 0 0 var(--blue-700); }
+.badge.scale[data-scale="medium"] { box-shadow: inset 3px 0 0 var(--faint); }
