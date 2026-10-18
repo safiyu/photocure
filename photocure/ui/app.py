@@ -74,6 +74,7 @@ TOKEN_PLACEHOLDER = "__PCUR_TOKEN__"
 OPERATIONS = ("move", "copy", "hardlink", "symlink")
 CATEGORY_VALUES = tuple(c.value for c in CategoryType)
 JUNK_VALUES = tuple(c.value for c in CategoryType if c.is_junk)
+UTILITY_VALUES = tuple(c.value for c in CategoryType if c.is_utility)
 
 # Only one long-running task at a time across the whole process.
 _BUSY = threading.Lock()
@@ -762,7 +763,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return {
             "default_output_dir": os.environ.get("PCUR_DEFAULT_OUTPUT")
             or str((dbp.resolve().parent / "Organized")),
-            "categories": [{"value": c.value, "junk": c.is_junk} for c in CategoryType],
+            "categories": [{"value": c.value, "junk": c.is_junk, "utility": c.is_utility}
+                           for c in CategoryType],
             "backend": backend_info(),
             "thresholds": {"min_confidence": tax.min_confidence,
                            "min_margin": tax.min_margin},
@@ -879,7 +881,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def images(
         category: str | None = Query(None),
         categories: str | None = Query(None),
-        group: Literal["junk"] | None = Query(None),
+        group: Literal["junk", "utility"] | None = Query(None),
         manual: bool = Query(False),
         q: str | None = Query(None),
         near_dup: bool = Query(False),
@@ -907,6 +909,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             conds.append(eff.in_([c for c in categories.split(",") if c]))
         if group == "junk":
             conds.append(eff.in_(JUNK_VALUES))
+        elif group == "utility":
+            conds.append(eff.in_(UTILITY_VALUES))
         if manual:
             conds.append(I.manual_bucket.is_not(None))
         if q:
@@ -2044,6 +2048,17 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         job = spawn("undo", work)
         return {"ok": True, "job_id": job["id"], "transaction_id": tid}
+
+    @app.post("/api/rescore", dependencies=auth)
+    def rescore():
+        """Re-classify every analyzed photo from its stored embedding, with no image decoding."""
+        if backend_info().get("semantic_is_stub", True):
+            return {"updated": 0, "note": "Re-checking needs the AI model, which is not installed. "
+                                          "Run: photocure setup"}
+        from ..inference.semantic_engine import rescore_from_embeddings
+        with exclusive(), get_session(dbp) as s:
+            updated = rescore_from_embeddings(s, req_cfg())
+        return {"updated": int(updated), "note": ""}
 
     @app.post("/api/learn", dependencies=auth, status_code=202)
     def learn():
