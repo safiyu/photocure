@@ -368,30 +368,55 @@
     return v.toFixed(i ? 1 : 0) + " " + u[i];
   };
 
+  // "Scan finished: 600 files seen" becomes a bold headline plus a quieter detail line.
+  function splitLog(msg) {
+    const m = String(msg).match(/^(.{3,48}?):\s+(.+)$/);
+    return m ? { title: m[1], detail: m[2] } : { title: String(msg), detail: "" };
+  }
+
+  function updateActivityCount(box) {
+    const panel = box.closest(".activity");
+    const badge = panel && panel.querySelector(".activity-count");
+    if (badge) {
+      const n = box.querySelectorAll(".logline[data-t]").length;
+      badge.textContent = n ? String(n) : "";
+    }
+  }
+
   function logTo(boxSel, msg, cls) {
     const box = $(boxSel);
     if (!box) return;
     $$(":scope > .logline:not([data-t])", box).forEach((e) => e.remove());
-    // Pill tint per log type: success=green, error/warn=muted, progress/info=blue.
-    const pillCls = cls === "ok" ? "ok" : (cls === "err" || cls === "warn") ? "muted" : "info";
-    // A completed phase gets the green checkmark row. Detected by text (not cls, since
-    // start messages like "Apply started" are also cls=ok) and never on err/warn rows.
-    const completion =
-      cls !== "err" && cls !== "warn" &&
-      /\b(finished|done|rebuilt|verified|repaired|learned|applied)\b/i.test(msg);
-    const el = document.createElement("div");
-    el.className = "logline" + (cls ? " " + cls : "") + (completion ? " active-highlight" : "");
-    el.dataset.t = "1";
-    const pill = document.createElement("span");
-    pill.className = "time-pill " + pillCls;
-    pill.textContent = new Date().toLocaleTimeString();
-    const body = document.createElement("span");
-    body.textContent = msg;
-    el.appendChild(pill);
-    el.appendChild(body);
-    box.prepend(el);
+    $$(":scope > .logline.running", box).forEach((e) => e.classList.remove("running"));
+    const running = !cls && /(\.\.\.|\u2026)$/.test(msg);
+    const { title, detail } = splitLog(msg);
+    const row = document.createElement("div");
+    row.className = "logline" + (cls ? " " + cls : "") + (running ? " running" : "");
+    row.dataset.t = "1";
+    const ico = document.createElement("span");
+    ico.className = "log-ico";
+    ico.setAttribute("aria-hidden", "true");
+    ico.textContent = cls === "err" || cls === "warn" ? "!" : cls === "ok" ? "\u2713" : "";
+    const body = document.createElement("div");
+    body.className = "log-body";
+    const head = document.createElement("span");
+    head.className = "log-title";
+    head.textContent = title;
+    body.appendChild(head);
+    if (detail) {
+      const more = document.createElement("span");
+      more.className = "log-detail";
+      more.textContent = detail;
+      body.appendChild(more);
+    }
+    const time = document.createElement("time");
+    time.className = "log-time";
+    time.textContent = new Date().toLocaleTimeString();
+    row.append(ico, body, time);
+    box.prepend(row);
     box.scrollTop = 0;
     while (box.children.length > 200) box.lastChild.remove();
+    updateActivityCount(box);
   }
   const logLine = (m, c) => logTo("#action-log", m, c);
   const libLog = (m, c) => logTo("#library-log", m, c);
@@ -1416,6 +1441,27 @@
       const res = await post("/api/duplicates/resolve-all", {});
       dupFinish(res, `Resolved ${fmtN(res.result.groups)} groups, ${fmtN(res.result.discarded)} photos marked as duplicates.`);
     } catch (e) { toast(e.message, "err"); }
+  }
+
+  function bindActivity() {
+    document.addEventListener("click", (ev) => {
+      const filter = ev.target.closest && ev.target.closest("[data-act-filter]");
+      if (filter) {
+        const panel = filter.closest(".activity");
+        panel.dataset.filter = filter.dataset.actFilter;
+        $$("[data-act-filter]", panel).forEach((b) => b.classList.toggle("active", b === filter));
+        return;
+      }
+      const clear = ev.target.closest && ev.target.closest("[data-act-clear]");
+      if (clear) {
+        const box = $(".action-log", clear.closest(".activity"));
+        const empty = document.createElement("div");
+        empty.className = "logline logline-empty";
+        empty.textContent = "Nothing has run yet.";
+        box.replaceChildren(empty);
+        updateActivityCount(box);
+      }
+    });
   }
 
   function bindDuplicates() {
@@ -3288,6 +3334,7 @@
     });
     bindHighlights();
     bindDuplicates();
+    bindActivity();
     bindKeywords();
     bindWatch();
     $("#search-form").addEventListener("submit", (e) => { e.preventDefault(); runSearch(); });

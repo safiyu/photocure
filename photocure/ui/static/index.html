@@ -221,8 +221,17 @@
             <p class="dock-hint" id="dock-hint" role="status"></p>
           </div>
 
-          <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity</h2>
-          <div id="library-log" class="action-log"><div class="logline">Nothing has run yet.</div></div>
+          <section class="activity" data-filter="all">
+            <header class="activity-bar">
+              <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity <span class="activity-count"></span></h2>
+              <div class="seg seg-2 activity-filter" role="group" aria-label="Filter activity">
+                <button type="button" class="seg-btn active" data-act-filter="all">All</button>
+                <button type="button" class="seg-btn" data-act-filter="problems">Problems</button>
+              </div>
+              <button type="button" class="btn sm ghost" data-act-clear>Clear</button>
+            </header>
+            <div id="library-log" class="action-log" role="log" aria-label="Activity"><div class="logline logline-empty">Nothing has run yet.</div></div>
+          </section>
         </section>
 
         <!-- LIBRARY -->
@@ -471,8 +480,17 @@
             </div>
           </div>
 
-          <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity</h2>
-          <div id="action-log" class="action-log"><div class="logline">Nothing has run yet.</div></div>
+          <section class="activity" data-filter="all">
+            <header class="activity-bar">
+              <h2 class="panel-title activity-head"><svg class="ic pulse" aria-hidden="true"><use href="#i-pulse"/></svg>Activity <span class="activity-count"></span></h2>
+              <div class="seg seg-2 activity-filter" role="group" aria-label="Filter activity">
+                <button type="button" class="seg-btn active" data-act-filter="all">All</button>
+                <button type="button" class="seg-btn" data-act-filter="problems">Problems</button>
+              </div>
+              <button type="button" class="btn sm ghost" data-act-clear>Clear</button>
+            </header>
+            <div id="action-log" class="action-log" role="log" aria-label="Activity"><div class="logline logline-empty">Nothing has run yet.</div></div>
+          </section>
         </section>
 
         <!-- SETTINGS -->

@@ -1017,77 +1017,53 @@ body.has-picks .pick { opacity: 1; }
 :root[data-theme="dark"] .brand b { color: #ffffff; }
 
 .panel-title { font-size: 19px; margin: 8px 0 10px; }
+
+/* Activity timeline. */
+.activity { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.activity-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.panel-title.activity-head { display: flex; align-items: center; gap: 9px; margin: 0; flex: 1 1 auto; }
+.panel-title.activity-head .ic.pulse { width: 20px; height: 20px; color: var(--primary); }
+.activity-count { font: 600 12px/1 var(--font-mono); padding: 4px 8px; border-radius: 999px; background: var(--well); color: var(--mut); }
+.activity-count:empty { display: none; }
+.activity-filter { --seg-n: 2; }
 .action-log {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 13px;
-  height: 180px;
-  min-height: 180px;
-  max-height: 180px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-gutter: stable;
-  background: var(--terminal-bg);
-  border: 1px solid var(--terminal-border);
-  border-radius: 10px;
-  padding: 8px;
-  scrollbar-width: thin;
-  scrollbar-color: #26324a transparent;
+  display: flex; flex-direction: column; height: 220px; min-height: 180px; overflow-y: auto; overflow-x: hidden;
+  scrollbar-gutter: stable; scrollbar-width: thin; padding: 6px;
+  background: var(--sheet); border: 1px solid var(--line); border-radius: 16px;
 }
-#tab-library #library-log {
-  flex: 1 1 0%;
-  min-height: 180px;
-  height: auto;
-  max-height: none;
+#tab-library > .activity { flex: 1 0 300px; }
+#tab-library #library-log { flex: 1 1 0%; height: auto; max-height: none; }
+.logline {
+  display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 10px; align-items: start;
+  padding: 9px 10px; border-radius: 10px; border-left: 3px solid transparent;
+  color: var(--ink); font-variant-numeric: tabular-nums;
 }
-.logline { padding: 6px 10px; border-radius: 6px; color: var(--mut); font-variant-numeric: tabular-nums; }
-.logline.ok { color: var(--ok); background: var(--ok-soft); }
-.logline.err { color: var(--err); background: var(--err-soft); }
-
-/* C8: terminal-grade Activity feed — header glyph, always-dark container, monospace time pills, completion highlight. */
-.panel-title.activity-head { display: flex; align-items: center; gap: 9px; }
-.panel-title.activity-head .ic.pulse { width: 20px; height: 20px; color: var(--primary); filter: drop-shadow(0 0 8px color-mix(in srgb, var(--primary) 65%, transparent)); }
-.action-log::-webkit-scrollbar { width: 8px; height: 8px; }
-.action-log::-webkit-scrollbar-track { background: transparent; }
-.action-log::-webkit-scrollbar-thumb { background: #26324a; border-radius: 8px; }
-.action-log::-webkit-scrollbar-thumb:hover { background: #33436a; }
-.action-log .logline { display: flex; align-items: center; gap: 8px; color: #c3cbd9; background: transparent; border: 1px solid transparent; padding: 6px 10px; border-radius: 7px; }
-.action-log .logline.ok { color: #a7f3c9; background: color-mix(in srgb, var(--ok) 15%, transparent); }
-.action-log .logline.err { color: #fca5a5; background: rgba(239, 68, 68, 0.14); }
-.action-log .time-pill { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 11.5px; line-height: 1; padding: 3px 7px; border-radius: 999px; flex: none; background: rgba(148, 158, 178, 0.12); color: #949eb2; }
-.action-log .time-pill.info { background: color-mix(in srgb, var(--primary) 18%, transparent); color: var(--primary-hover); border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent); }
-.action-log .time-pill.warn, .action-log .time-pill.alert { background: color-mix(in srgb, var(--commit) 18%, transparent); color: var(--amber-400); border: 1px solid color-mix(in srgb, var(--commit) 35%, transparent); }
-.action-log .time-pill.ok { background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); }
-.action-log .time-pill.muted { background: rgba(148, 158, 178, 0.12); color: #949eb2; }
-.action-log .logline.active-highlight { border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); background: rgba(34, 197, 94, 0.12); }
-.action-log .logline.active-highlight::after { content: "\2713"; margin-left: auto; color: #22c55e; font-weight: 700; }
-
-/* Light mode Activity terminal feed */
-:root:not([data-theme="dark"]) .action-log {
-  background: rgba(255, 255, 255, 0.85);
-  border: 1px solid var(--line);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.02);
-  scrollbar-color: #cbd5e1 transparent;
+.logline + .logline { box-shadow: 0 -1px 0 color-mix(in srgb, var(--line) 70%, transparent); }
+.logline.ok { border-left-color: var(--ok); }
+.logline.err { border-left-color: var(--err); background: color-mix(in srgb, var(--err) 8%, transparent); }
+.logline.warn { border-left-color: var(--commit); background: color-mix(in srgb, var(--commit) 10%, transparent); }
+.log-ico {
+  display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--well); color: var(--mut); font: 700 12px/1 var(--font-body);
 }
-:root:not([data-theme="dark"]) .action-log::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 8px;
+.logline.ok .log-ico { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.logline.err .log-ico { background: color-mix(in srgb, var(--err) 18%, transparent); color: var(--err); }
+.logline.warn .log-ico { background: color-mix(in srgb, var(--commit) 24%, transparent); color: var(--warn); }
+.logline.running .log-ico { background: transparent; }
+.logline.running .log-ico::before {
+  content: ""; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--primary); border-right-color: transparent; animation: pcur-spin .8s linear infinite;
 }
-:root:not([data-theme="dark"]) .action-log::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+.log-body { min-width: 0; }
+.log-title { font-weight: 600; overflow-wrap: anywhere; }
+.log-detail { display: block; margin-top: 2px; color: var(--mut); font-size: 12.5px; overflow-wrap: anywhere; }
+.log-time { font: 500 11.5px/1.9 var(--font-mono); font-variant-numeric: tabular-nums; color: var(--faint); white-space: nowrap; }
+.logline-empty { grid-template-columns: minmax(0, 1fr); text-align: center; color: var(--mut); padding: 28px 12px; border-left: 0; }
+.activity[data-filter="problems"] .logline:not(.err):not(.warn):not(.logline-empty) { display: none; }
+.activity[data-filter="problems"] .logline-empty { display: none; }
+.activity[data-filter="problems"] .action-log:not(:has(.logline.err, .logline.warn))::after {
+  content: "No problems so far."; display: block; padding: 28px 12px; text-align: center; color: var(--mut);
 }
-:root:not([data-theme="dark"]) .action-log .logline { color: var(--ink); }
-:root:not([data-theme="dark"]) .action-log .logline.ok { color: #047857; background: rgba(16, 185, 129, 0.1); }
-:root:not([data-theme="dark"]) .action-log .logline.err { color: #b91c1c; background: rgba(239, 68, 68, 0.1); }
-:root:not([data-theme="dark"]) .action-log .time-pill { background: rgba(15, 23, 42, 0.06); color: #475569; }
-:root:not([data-theme="dark"]) .action-log .time-pill.info { background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--link); border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent); }
-:root:not([data-theme="dark"]) .action-log .time-pill.warn,
-:root:not([data-theme="dark"]) .action-log .time-pill.alert { background: color-mix(in srgb, var(--commit) 12%, transparent); color: #b45309; border: 1px solid color-mix(in srgb, var(--commit) 25%, transparent); }
-:root:not([data-theme="dark"]) .action-log .time-pill.ok { background: rgba(16, 185, 129, 0.12); color: #059669; border: 1px solid rgba(16, 185, 129, 0.25); }
-:root:not([data-theme="dark"]) .action-log .time-pill.muted { background: rgba(15, 23, 42, 0.06); color: #64748b; }
-:root:not([data-theme="dark"]) .action-log .logline.active-highlight { border: 1px solid rgba(16, 185, 129, 0.45); background: rgba(16, 185, 129, 0.1); }
-:root:not([data-theme="dark"]) .action-log .logline.active-highlight::after { color: #10b981; }
 
 .plan-summary { color: var(--mut); margin: 4px 0 16px; }
 .plan-summary b { color: var(--ink); }

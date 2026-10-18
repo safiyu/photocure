@@ -602,34 +602,32 @@ try {
     await settle();
   });
 
-  await scenario("activity log rows render monospace tabular time pills", async () => {
+  await scenario("activity timeline rows have an icon and a monospace time, and can be filtered and cleared", async () => {
     await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click()");
     await settle();
-    // An empty scan path is a safe, non-mutating way to make the real logTo() write a row.
+    // An empty scan path is a safe, non-mutating way to make the real logTo() write an error row.
     await page.eval("document.getElementById('scan-path').value = ''");
     await page.eval("document.getElementById('btn-scan').click()");
-    await page.waitFor(`(() => { const l = document.querySelector('#library-log .logline .time-pill'); return l && /\\d{1,2}:\\d{2}/.test(l.textContent); })()`, 8000, "a time-pill appears in the activity log");
+    await page.waitFor(`(() => { const l = document.querySelector('#library-log .logline .log-time'); return l && /\\d{1,2}:\\d{2}/.test(l.textContent); })()`, 8000, "a time appears in the activity log");
     const log = await page.eval(`(() => {
-      const rows = [...document.querySelectorAll('#library-log .logline')];
+      const rows = [...document.querySelectorAll('#library-log .logline[data-t]')];
       const err = rows.find((r) => r.textContent.includes('Choose a photo folder'));
-      const anyPill = document.querySelector('#library-log .logline .time-pill');
-      const cs = getComputedStyle(anyPill);
+      const cs = getComputedStyle(document.querySelector('#library-log .logline .log-time'));
       return {
-        hasErrRow: !!err,
-        errPillClass: err ? err.querySelector('.time-pill').className : "",
-        errHighlighted: err ? err.classList.contains('active-highlight') : false,
+        hasErrRow: !!err, errClass: err ? err.className : "", hasIcon: !!(err && err.querySelector('.log-ico')),
         fontFamily: cs.fontFamily, fontVariant: cs.fontVariantNumeric,
-        pillText: anyPill.textContent,
-        terminalBg: getComputedStyle(document.getElementById('library-log')).backgroundColor
+        bg: getComputedStyle(document.getElementById('library-log')).backgroundColor
       };
     })()`);
-    check(/\d{1,2}:\d{2}/.test(log.pillText), "time-pill has no readable time: " + log.pillText);
-    check(/JetBrains Mono/.test(log.fontFamily), "time-pill is not monospace: " + log.fontFamily);
-    check(/tabular-nums/.test(log.fontVariant), "time-pill is not tabular: " + log.fontVariant);
-    check(log.hasErrRow && log.errPillClass.includes("muted"), "the error row should carry a muted time-pill: " + log.errPillClass);
-    check(!log.errHighlighted, "an error row should not be a completion highlight");
-    check(log.terminalBg !== "rgba(0, 0, 0, 0)", "the activity terminal has no painted background");
-    await shot("14-log-pills");
+    check(log.hasErrRow && /\berr\b/.test(log.errClass) && log.hasIcon, "the error row needs the err class and a status icon: " + JSON.stringify(log));
+    check(/JetBrains Mono/.test(log.fontFamily) && /tabular-nums/.test(log.fontVariant), "time is not monospace and tabular: " + log.fontFamily + " / " + log.fontVariant);
+    check(log.bg !== "rgba(0, 0, 0, 0)", "the activity panel has no painted background");
+    await shot("14-activity-timeline");
+    await page.eval("document.querySelector('#tab-library [data-act-filter=\"problems\"]').click()");
+    check(await page.eval("document.querySelector('#tab-library .activity').dataset.filter === 'problems' && [...document.querySelectorAll('#library-log .logline.err')].every((r) => getComputedStyle(r).display !== 'none')"), "problems filter must keep error rows visible");
+    await page.eval("document.querySelector('#tab-library [data-act-filter=\"all\"]').click()");
+    await page.eval("document.querySelector('#tab-library [data-act-clear]').click()");
+    check(await page.eval("document.querySelectorAll('#library-log .logline[data-t]').length === 0 && !!document.querySelector('#library-log .logline-empty')"), "Clear must remove entries and restore the empty message");
   });
 
   const clickTab = async (t) => {
