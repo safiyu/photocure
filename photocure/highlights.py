@@ -19,6 +19,7 @@ from sqlmodel import col, select
 
 from .clustering.events import UNRELIABLE_TIME_SOURCES
 from .db.models import EventGroup, ImageRecord, SemanticScore
+from .narrative import balance_selection, coverage
 
 log = logging.getLogger("photocure.highlights")
 
@@ -96,9 +97,21 @@ def _joined(stmt):
     return stmt.join(SemanticScore, SemanticScore.image_id == ImageRecord.id)
 
 
+def _by_capture_time(taken: dict):
+    """Sort key putting photos in capture order, undated ones last."""
+    def key(row):
+        t = taken.get(row[0])
+        return (t is None, t.replace(tzinfo=None) if t is not None else datetime.min, row[0])
+    return key
+
+
 def best_of_events(session, w: HighlightWeights, per_event: int = 1,
-                   min_score: float | None = None) -> list[dict]:
-    """The top ``per_event`` photos of every event, events in time order."""
+                   min_score: float | None = None, scale_of=None) -> list[dict]:
+    """The top ``per_event`` photos of every event, events in time order.
+
+    With ``scale_of`` (photo ids to scale labels, or None) the selection is balanced across shot
+    scales and listed in capture order, so the event reads like a story.
+    """
     expr = highlight_expr(w)
     stmt = _joined(select(ImageRecord.id, ImageRecord.event_id, expr)).where(
         col(ImageRecord.event_id).is_not(None), *candidate_filters())
@@ -114,9 +127,21 @@ def best_of_events(session, w: HighlightWeights, per_event: int = 1,
         if ev is None:
             continue
         rows.sort(key=lambda r: (-r[1], r[0]))
+        picked, extra = rows[:per_event], {}
+        labels = scale_of([r[0] for r in rows]) if scale_of is not None else None
+        if labels:
+            scales = {i: labels.get(i, "medium") for i, _ in rows}
+            chosen = balance_selection([(i, sc, scales[i]) for i, sc in rows], per_event)
+            picked = [(i, sc) for i, sc, _ in chosen]
+            taken = dict(session.exec(select(ImageRecord.id, ImageRecord.taken_at).where(
+                col(ImageRecord.id).in_([i for i, _ in picked]))).all())
+
+            picked.sort(key=_by_capture_time(taken))
+            extra = {"scales": {i: scales[i] for i, _ in picked},
+                     "coverage": coverage([(i, sc, scales[i]) for i, sc in picked])}
         out.append({"event_id": event_id, "label": ev.label or f"Event{event_id}",
                     "start": ev.start, "end": ev.end, "total": len(rows),
-                    "count": min(per_event, len(rows)), "items": rows[:per_event]})
+                    "count": len(picked), "items": picked, **extra})
     out.sort(key=lambda e: (e["start"] is None, e["start"] or datetime.min, e["event_id"]))
     return out
 

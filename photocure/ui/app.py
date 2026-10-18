@@ -1142,23 +1142,44 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.get("/api/highlights/events")
     def highlights_by_event(per_event: int = Query(1, ge=1, le=12),
-                            min_score: float | None = Query(None, ge=0, le=2)):
+                            min_score: float | None = Query(None, ge=0, le=2),
+                            balanced: bool = Query(False)):
+        from .. import narrative
+        from .. import search as search_mod
         from ..highlights import best_of_events
         with get_session(dbp) as s:
-            events = best_of_events(s, hl_weights(), per_event, min_score)
+            scale_of = None
+            if balanced:
+                def scale_of(ids):
+                    with encoder_lock:
+                        encoder = getattr(app.state, "text_encoder", None)
+                        if encoder is None:
+                            encoder = app.state.text_encoder = search_mod.default_encoder(run_cfg())
+                    return narrative.scale_labels(s, ids, encoder)
+            events = best_of_events(s, hl_weights(), per_event, min_score, scale_of)
             items = {it["id"]: it for it in _load_items(
                 s, [i for e in events for i, _ in e["items"]], app.state.cfg)}
             out = []
             for e in events:
+                scales = e.get("scales")
                 row_items = []
                 for image_id, score in e["items"]:
                     if image_id in items:
-                        row_items.append({**items[image_id], "highlight": round(score, 3)})
-                out.append({"event_id": e["event_id"], "label": e["label"],
-                            "start": e["start"].isoformat() if e["start"] else None,
-                            "end": e["end"].isoformat() if e["end"] else None,
-                            "total": e["total"], "count": len(row_items), "items": row_items})
-        return {"events": out}
+                        row = {**items[image_id], "highlight": round(score, 3)}
+                        if scales is not None:
+                            row["scale"] = scales.get(image_id)
+                        row_items.append(row)
+                entry = {"event_id": e["event_id"], "label": e["label"],
+                         "start": e["start"].isoformat() if e["start"] else None,
+                         "end": e["end"].isoformat() if e["end"] else None,
+                         "total": e["total"], "count": len(row_items), "items": row_items}
+                if scales is not None:
+                    entry["coverage"] = e["coverage"]
+                out.append(entry)
+        used = any("coverage" in e for e in out)
+        note = ("" if used or not balanced else
+                "Event stories need the AI model and analyzed photos. Showing top photos instead.")
+        return {"events": out, "balanced": used, "note": note}
 
     @app.get("/api/highlights/years")
     def highlight_years():

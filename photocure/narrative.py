@@ -7,6 +7,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import numpy as np
+from sqlmodel import col, select
+
+from .db.models import SemanticScore
+from .db.repository import dequantize_embedding
+from .search import SearchUnavailable
 
 SCALES = ("wide", "closeup", "action", "ambient", "medium")
 
@@ -110,3 +115,44 @@ def coverage(items: Sequence[Item]) -> dict[str, int]:
     """How many chosen photos each scale has, listing only scales that appear."""
     counts = {s: sum(1 for it in items if it[2] == s) for s in SCALES}
     return {s: c for s, c in counts.items() if c}
+
+
+def scale_text_features(encoder) -> np.ndarray | None:
+    """One unit prompt vector per scale, or None when the text model is not available."""
+    rows = []
+    try:
+        for scale in SCALES:
+            mean = np.stack([encoder.encode(p) for p in SCALE_PROMPTS[scale]]).mean(axis=0)
+            rows.append(mean / max(float(np.linalg.norm(mean)), 1e-9))
+    except SearchUnavailable:
+        return None
+    return np.stack(rows)
+
+
+def scale_labels(session, image_ids, encoder, min_margin: float = 0.004) -> dict[int, str] | None:
+    """Scale of each photo from its stored embedding.
+
+    None when the text model is unavailable, an empty dict when no photo has a usable embedding.
+    """
+    ids = [int(i) for i in image_ids]
+    if not ids:
+        return {}
+    text = scale_text_features(encoder)
+    if text is None:
+        return None
+    keep: list[int] = []
+    vecs: list[list[float]] = []
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        stmt = select(SemanticScore.image_id, SemanticScore.embedding, SemanticScore.backend).where(
+            col(SemanticScore.image_id).in_(chunk))
+        for image_id, blob, backend in session.exec(stmt).all():
+            # Placeholder embeddings carry no meaning, so they never get a scale.
+            emb = None if backend == "stub" else dequantize_embedding(blob)
+            if emb and len(emb) == text.shape[1]:
+                keep.append(int(image_id))
+                vecs.append(emb)
+    if not vecs:
+        return {}
+    labels = classify_scales(np.asarray(vecs, dtype=np.float32), text, min_margin)
+    return dict(zip(keep, labels, strict=True))
