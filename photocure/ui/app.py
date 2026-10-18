@@ -593,7 +593,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.middleware("http")
     async def guard(request: Request, call_next):
         host = request.headers.get("host", "")
-        if host not in app.state.allowed_hosts:
+        host_no_port = host.split(":")[0] if host else ""
+        if (
+            "*" not in app.state.allowed_hosts
+            and host not in app.state.allowed_hosts
+            and host_no_port not in app.state.allowed_hosts
+        ):
             return JSONResponse({"detail": "invalid host header"}, status_code=400)
         path = request.url.path
         if path not in _OPEN and not path.startswith("/static/"):

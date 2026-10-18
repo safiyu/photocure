@@ -109,8 +109,13 @@ def build_allowed_hosts(host: str, port: int, extra: str = "") -> set[str]:
 
 def origin_allowed(origin: str, allowed_hosts: set[str]) -> bool:
     """True when the Origin/Referer authority is in the Host allowlist."""
+    if "*" in allowed_hosts:
+        return True
     try:
         netloc = urlparse(origin).netloc
     except ValueError:
         return False
-    return bool(netloc) and netloc in allowed_hosts
+    if not netloc:
+        return False
+    netloc_no_port = netloc.split(":")[0]
+    return netloc in allowed_hosts or netloc_no_port in allowed_hosts

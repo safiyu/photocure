@@ -63,6 +63,8 @@ def test_origin_matching_is_by_authority_not_prefix():
     assert origin_allowed("http://photos.lan:8080/x", hosts)
     assert not origin_allowed("http://127.0.0.1.evil.com", hosts)
     assert not origin_allowed("null", hosts)
+    wildcard_hosts = build_allowed_hosts("0.0.0.0", 8080, "*")
+    assert origin_allowed("http://any-domain.local:2123", wildcard_hosts)
 
 
 def test_restart_refused_while_ledger_writes_even_if_forced(app):
