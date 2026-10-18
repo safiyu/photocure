@@ -2074,12 +2074,23 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def rescore():
         """Re-classify every analyzed photo from its stored embedding, with no image decoding."""
         if backend_info().get("semantic_is_stub", True):
-            return {"updated": 0, "note": "Re-checking needs the AI model, which is not installed. "
-                                          "Run: photocure setup"}
-        from ..inference.semantic_engine import rescore_from_embeddings
-        with exclusive(), get_session(dbp) as s:
-            updated = rescore_from_embeddings(s, req_cfg())
-        return {"updated": int(updated), "note": ""}
+            return JSONResponse({"updated": 0, "note": "Re-checking needs the AI model, which is "
+                                                       "not installed. Run: photocure setup"})
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+
+        def work(job: dict) -> dict:
+            from ..inference.semantic_engine import rescore_from_embeddings
+            progress_mgr.start("Re-checking", "Re-checking photos with the latest categories", 0,
+                               "Reading stored embeddings...")
+            with get_session(dbp) as s:
+                updated = int(rescore_from_embeddings(s, run_cfg()))
+            progress_mgr.finish(f"Re-checked {updated} photos")
+            jlog(job, f"re-checked {updated} photos")
+            return {"ok": True, "updated": updated}
+
+        job = spawn("rescore", work, cancellable=False)
+        return JSONResponse({"ok": True, "job_id": job["id"]}, status_code=202)
 
     @app.post("/api/learn", dependencies=auth, status_code=202)
     def learn():

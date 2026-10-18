@@ -667,7 +667,7 @@
         const c = val("junkfilter");
         return c ? eff(it) === c : state.junk.has(eff(it));
       },
-      empty: { icon: "trash", title: "No junk to review", text: "Screenshots, documents and duplicates show up here after you analyze your photos." },
+      empty: { icon: "trash", title: "No junk to review", text: "Duplicates, graphics and accidental shots show up here after you analyze your photos." },
     });
     makeGrid("utility", {
       el: "#utilitygrid", more: "#utilitygrid-more", count: "#utilitycount",
@@ -3416,7 +3416,8 @@
       try {
         const r = await post("/api/rescore", {});
         if (r.note) { toast(r.note, "err"); return; }
-        toast(`Re-checked ${fmtN(r.updated)} photos`, "ok");
+        const res = await followJob(r.job_id, "Re-check");
+        toast(`Re-checked ${fmtN(res.updated)} photos`, "ok");
         await sortNow(true);
         grids.utility.reset();
       } catch (e) { toast(e.message, "err"); }

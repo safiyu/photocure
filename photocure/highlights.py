@@ -130,8 +130,8 @@ def best_of_events(session, w: HighlightWeights, per_event: int = 1,
         picked, extra = rows[:per_event], {}
         labels = scale_of([r[0] for r in rows]) if scale_of is not None else None
         if labels:
-            scales = {i: labels.get(i, "medium") for i, _ in rows}
-            chosen = balance_selection([(i, sc, scales[i]) for i, sc in rows], per_event)
+            scales = {i: labels.get(i) for i, _ in rows}  # None for photos the model could not tag
+            chosen = balance_selection([(i, sc, scales[i] or "medium") for i, sc in rows], per_event)
             picked = [(i, sc) for i, sc, _ in chosen]
             taken = dict(session.exec(select(ImageRecord.id, ImageRecord.taken_at).where(
                 col(ImageRecord.id).in_([i for i, _ in picked]))).all())

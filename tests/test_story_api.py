@@ -111,3 +111,16 @@ def test_missing_model_falls_back_with_a_note(env):
 def test_slots_beyond_the_pool_return_the_whole_event(env):
     r = env.client.get("/api/highlights/events", params={"per_event": 12, "balanced": "true"}).json()
     assert len(r["events"][0]["items"]) == 4
+
+
+def test_photos_without_a_usable_embedding_get_no_scale_tag(env):
+    with get_session(env.app.state.db) as s:
+        sem = s.exec(select(SemanticScore).where(SemanticScore.image_id == env.ids[2])).one()
+        sem.backend = "stub"
+    r = env.client.get("/api/highlights/events", params={"per_event": 3, "balanced": "true"}).json()
+    ev = r["events"][0]
+    assert r["balanced"] is True
+    by_id = {i["id"]: i["scale"] for i in ev["items"]}
+    assert by_id[env.ids[2]] is None, "a placeholder photo must not be labelled medium"
+    assert by_id[env.ids[0]] == "wide" and by_id[env.ids[1]] == "closeup"
+    assert ev["coverage"] == {"wide": 1, "closeup": 1}

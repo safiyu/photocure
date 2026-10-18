@@ -56,7 +56,13 @@ def test_js_wires_grid_counts_titles_and_rescore():
     assert '"utility"' in js.split("const CAT_ORDER", 1)[1].split("];", 1)[0]
     assert "Label or sign" in js
     handler = js.split('$("#btn-rescore").onclick', 1)[1].split("};", 1)[0]
-    assert '"/api/rescore"' in handler and "sortNow(" in handler and "grids.utility.reset()" in handler
+    assert '"/api/rescore"' in handler and "followJob(" in handler and "sortNow(" in handler and "grids.utility.reset()" in handler
+
+
+def test_junk_empty_state_no_longer_promises_screenshots_or_documents():
+    js = _read("app.js")
+    text = re.search(r'makeGrid\("junk".*?empty: \{[^}]*\}', js, re.S).group(0)
+    assert "creenshot" not in text and "ocument" not in text
 
 
 def test_chip_and_category_styles_exist():
