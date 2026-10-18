@@ -932,6 +932,20 @@ try {
     await page.eval("(() => { const v = document.querySelector('#hl-view'); v.value = 'all'; v.dispatchEvent(new Event('change')); return true; })()");
   });
 
+  await scenario("on a wide screen the frame is centered and both step cards match", async () => {
+    await page.viewport(1912, 960);
+    try {
+      await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); window.scrollTo(0, 0); true");
+      await settle();
+      const g = await page.eval(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); const c = r('.content'), m = r('.steps'), t = r('.topbar'), a = r('#step-scan'), b = r('#step-infer'); return { left: m.left - c.left, right: c.right - m.right, topL: t.left - m.left, topR: t.right - m.right, dw: Math.abs(a.width - b.width), dh: Math.abs(a.height - b.height) }; })()`);
+      check(Math.abs(g.left - g.right) <= 4, `content gaps differ: left ${Math.round(g.left)}px, right ${Math.round(g.right)}px`);
+      check(Math.abs(g.topL) <= 1 && Math.abs(g.topR) <= 1, `header is not aligned with the content: ${Math.round(g.topL)} / ${Math.round(g.topR)}`);
+      check(g.dw <= 1 && g.dh <= 1, `step cards differ in size by ${Math.round(g.dw)} x ${Math.round(g.dh)}`);
+    } finally {
+      await page.viewport(1400, 900);
+    }
+  });
+
   await scenario("the page raised no script errors", async () => {
     check(page.errors.length === 0, "script errors: " + page.errors.join(" | ").slice(0, 400));
   });

@@ -165,11 +165,11 @@ def test_step_cards_have_organic_elliptical_radii():
     assert "var(--r-lg)" not in radius.group(1)
 
 
-def test_active_step_is_larger_with_scooped_cta():
+def test_active_step_is_raised_with_scooped_cta():
     css = _css()
     active = re.search(r"\.step\.active\s*\{([^}]*)\}", css)
-    assert active and "scale(" in active.group(1) and "z-index" in active.group(1), (
-        "the active card must be raised and scaled"
+    assert active and "translateY(-2px)" in active.group(1) and "z-index" in active.group(1), (
+        "the active card must be raised"
     )
     cta = re.search(r"\.step\.active\s+\.actions\s+\.btn\.primary\s*\{([^}]*)\}", css)
     assert cta and "border-radius" in cta.group(1) and "gradient" in cta.group(1), (

@@ -423,7 +423,7 @@ button { cursor: pointer; }
 }
 .topbar {
   position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 14px 28px;
-  margin: 0 32px 24px; max-width: 1416px; padding: 22px 28px 18px;
+  margin: 0 auto 24px; width: calc(100% - 64px); max-width: 1616px; padding: 22px 28px 18px;
 }
 .topbar h1 { font-size: 31px; line-height: 1.15; font-weight: 800; letter-spacing: -0.015em; }
 .topbar .sub { color: var(--mut); margin-top: 2px; max-width: 70ch; }
@@ -441,7 +441,9 @@ main {
   display: flex;
   flex-direction: column;
   padding: 12px 32px 24px;
-  max-width: 1480px;
+  width: 100%;
+  max-width: 1680px;
+  margin-inline: auto;
 }
 .panel { display: none; }
 .panel.active { display: block; }
@@ -751,7 +753,7 @@ body.has-picks .pick { opacity: 1; }
 .step {
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.65);
+  border: 1px solid var(--line);
   border-radius: 18px 22px 20px 22px / 20px 18px 22px 20px;
   padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;
   box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.03);
@@ -924,7 +926,7 @@ body.has-picks .pick { opacity: 1; }
   background: linear-gradient(145deg, rgba(253, 242, 248, 0.94) 0%, rgba(255, 255, 255, 0.96) 46%, rgba(240, 249, 255, 0.94) 100%);
   border: 1.5px solid var(--primary); box-shadow: var(--glow), 0 0 35px color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 20px 24px 22px 24px / 22px 20px 24px 22px;
-  transform: translateY(-2px) scale(1.02); z-index: 3;
+  transform: translateY(-2px); z-index: 3;
 }
 .step.active .actions .btn.accent,
 .step.active .actions .btn.primary {
@@ -1311,7 +1313,7 @@ body.has-picks .pick { opacity: 1; }
   body.nav-open::after { content: ""; position: fixed; inset: 0; z-index: 65; background: var(--scrim); }
   .menu-btn { display: inline-grid; }
   main { padding-left: 18px; padding-right: 18px; }
-  .topbar { margin: 0 18px 12px; padding: 16px 18px 14px; }
+  .topbar { margin: 0 18px 12px; width: auto; max-width: none; padding: 16px 18px 14px; }
   .topbar h1 { font-size: 23px; }
   .split { grid-template-columns: 1fr; }
   .burstlist { position: static; max-height: 260px; }
@@ -1335,7 +1337,7 @@ body.has-picks .pick { opacity: 1; }
    auto-fills --thumb-min, which the virtual grid reads from computed CSS. */
 @media (max-width: 640px) {
   main { padding-left: 14px; padding-right: 14px; }
-  .topbar { margin: 0 14px 12px; padding: 12px 14px; gap: 10px; }
+  .topbar { margin: 0 14px 12px; width: auto; max-width: none; padding: 12px 14px; gap: 10px; }
   .topbar h1 { font-size: 20px; }
   .sect { padding: 16px 16px; }
   .step { padding: 16px; }
