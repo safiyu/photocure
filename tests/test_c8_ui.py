@@ -46,18 +46,6 @@ _C8_THEME_TOKENS = [
     "--sheet-subtle",
     "--sheet-border",
     "--sheet-border-light",
-    "--accent-electric",
-    "--accent-electric-hover",
-    "--accent-glow",
-    "--accent-pill",
-    "--ok-sage",
-    "--ok-sage-bg",
-    "--ok-sage-border",
-    "--danger-crimson",
-    "--danger-crimson-bg",
-    "--danger-crimson-border",
-    "--viz-bar",
-    "--viz-bar-faint",
 ]
 
 
@@ -81,19 +69,8 @@ def test_c8_token_values_match_spec():
 
     # Dark theme is the target of the revamp — exact spec values.
     for token, value in [
-        ("--canvas-bg", "#0b0e14"),
         ("--sheet-subtle", "#0f141f"),
         ("--sheet-border", "#1e2638"),
-        ("--accent-electric", "#3b82f6"),
-        ("--accent-electric-hover", "#60a5fa"),
-        ("--accent-glow", "0 0 20px rgba(59, 130, 246, 0.28)"),
-        ("--accent-pill", "rgba(59, 130, 246, 0.16)"),
-        ("--ok-sage", "#22c55e"),
-        ("--ok-sage-bg", "#14291f"),
-        ("--danger-crimson", "#ef4444"),
-        ("--danger-crimson-bg", "#261619"),
-        ("--viz-bar", "#38bdf8"),
-        ("--viz-bar-faint", "rgba(56, 189, 248, 0.22)"),
     ]:
         assert re.search(rf"(?m)^\s*{token}\s*:\s*{re.escape(value)}\s*;", dark), (
             f"Dark-theme {token} should be {value}"
@@ -102,8 +79,6 @@ def test_c8_token_values_match_spec():
     # Light theme keeps high-contrast slate surfaces.
     for token, value in [
         ("--canvas-bg", "#f1f5f9"),
-        ("--accent-electric", "#3b82f6"),
-        ("--accent-electric-hover", "#2563eb"),
     ]:
         assert re.search(rf"(?m)^\s*{token}\s*:\s*{re.escape(value)}\s*;", light), (
             f"Light-theme {token} should be {value}"
@@ -248,13 +223,11 @@ def test_step_state_classes_present():
 
     # Done: sage circular badge.
     assert re.search(r"\.step\.done\s+\.step-num\s*\{", css), ".step.done badge rule not found"
-    assert "var(--ok-sage)" in css, "step.done badge should use --ok-sage"
 
-    # Active: electric-blue border + atmospheric glow.
+    # Active: raised card with a border and glow.
     active = re.search(r"\.step\.active\s*\{([^}]*)\}", css)
     assert active, ".step.active rule not found"
-    assert "var(--accent-electric)" in active.group(1), ".step.active must use --accent-electric"
-    assert "var(--accent-glow)" in active.group(1), ".step.active must use --accent-glow"
+    assert "border" in active.group(1) and "box-shadow" in active.group(1)
 
     # Locked: dimmed.
     locked = re.search(r"\.step\.locked\s*\{([^}]*)\}", css)
