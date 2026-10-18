@@ -1722,3 +1722,16 @@ body.has-picks .pick { opacity: 1; }
 @media (max-width: 640px) {
   .scrubber { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Group matrix in the burst detail. */
+.gm-banner { margin: 0 0 14px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); font-weight: 600; color: var(--ink); }
+.gm-banner.ok { background: color-mix(in srgb, var(--ok) 12%, var(--sheet)); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.gm-banner.warn { background: var(--commit-soft); border-color: color-mix(in srgb, var(--commit) 50%, transparent); }
+.gm-dots { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.gm-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); }
+.gm-dot[data-s="open"] { background: var(--ok); }
+.gm-dot[data-s="possible"] { background: var(--commit); }
+.gm-dot[data-s="closed"] { background: var(--err); }
+.gm-dot[data-s="missing"] { background: transparent; border: 1.5px dashed var(--faint); }
+.gm-bar { height: 4px; margin-top: 6px; border-radius: 4px; background: var(--well); overflow: hidden; }
+.gm-bar > span { display: block; height: 100%; border-radius: 4px; background: var(--grad-brand); }

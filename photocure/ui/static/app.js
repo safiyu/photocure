@@ -2205,10 +2205,46 @@
     } catch (e) { toast(e.message, "err"); }
   }
 
+  // One sentence for what the group matrix found in a burst; null when it is not a group shot.
+  function groupSummary(group, nameOf) {
+    if (!group || group.status === "not_group") return null;
+    const best = nameOf(group.best_id);
+    if (group.status === "perfect") {
+      return { tone: "ok", text: `Everyone's eyes open in ${best}. This is the frame to keep.` };
+    }
+    if (group.status === "composite") {
+      return { tone: "warn", text: `No single frame is perfect. Keep ${best} and ${nameOf(group.partner_id)}: between them everyone looks good, so you can combine them into one photo.` };
+    }
+    return { tone: "warn", text: `No frame has everyone looking good. ${best} is the closest.` };
+  }
+
+  const GM_WORDS = { open: "eyes open", possible: "eyes may be closing", closed: "eyes closed",
+    unknown: "eyes not measured", missing: "not seen in this frame" };
+
   async function showBurst(id) {
     $$(".burstrow", $("#burstlist")).forEach((r) => r.classList.toggle("on", num(r.dataset.burst) === id));
     const data = await api("/api/burst/" + num(id));
-    $("#burstdetail").innerHTML = `<h3>${esc(data.burst)}</h3>
+    const group = data.group;
+    const gmById = {};
+    ((group && group.frames) || []).forEach((f) => { gmById[f.id] = f; });
+    const nameById = Object.fromEntries(data.members.map((m) => [m.id, m.filename]));
+    const summary = groupSummary(group, (i) => nameById[i] || "this frame");
+    const banner = summary ? `<div class="gm-banner ${summary.tone}" role="status">${esc(summary.text)}</div>` : "";
+    const gmBadge = (m) => {
+      if (!summary) return "";
+      if (group.status === "perfect" && m.id === group.best_id) return '<span class="badge best">All eyes open</span>';
+      if (group.status === "composite" && (m.id === group.best_id || m.id === group.partner_id)) return '<span class="badge best">Composite pair</span>';
+      if (group.status === "best_effort" && m.id === group.best_id) return '<span class="badge warn">Closest</span>';
+      return "";
+    };
+    const gmDetail = (m) => {
+      const f = gmById[m.id];
+      if (!f) return "";
+      const dots = f.subjects.map((s, i) => `<i class="gm-dot" data-s="${esc(s.state)}" title="Person ${i + 1}: ${esc(GM_WORDS[s.state] || GM_WORDS.unknown)}"></i>`).join("");
+      return `<div class="gm-dots" role="img" aria-label="Faces in this frame">${dots}</div>
+        <div class="gm-bar" title="Weakest face in this frame"><span style="width:${Math.round(num(f.min_quality) * 100)}%"></span></div>`;
+    };
+    $("#burstdetail").innerHTML = `<h3>${esc(data.burst)}</h3>${banner}
       <div class="btn-row" id="blinkbar"></div>
       <div class="burstgrid">` +
       data.members.map((m) => {
@@ -2219,12 +2255,13 @@
         return `<figure class="card${m.is_best_shot ? " best" : ""}" data-id="${num(m.id)}" tabindex="0">
           <div class="thumb">
             <img loading="lazy" src="${thumbUrl(m.id)}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
-            <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}</div>
+            <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}${gmBadge(m)}</div>
           </div>
           <figcaption class="caption">
             <div class="fn">${esc(m.filename)}</div>
             <div class="meta">${num(m.width)}×${num(m.height)}${m.taken_at ? ", " + esc(String(m.taken_at).slice(11, 19)) : ""}</div>
             <div class="meta">${esc(bits.join(", "))}</div>
+            ${gmDetail(m)}
             ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}">Inspect faces</button>` : ""}
           </figcaption>
         </figure>`;

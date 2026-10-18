@@ -887,6 +887,20 @@ try {
     check(tall === short, "toolbar moved when the scrollbar went away:\n" + tall + "\n" + short);
   });
 
+  await scenario("burst detail shows the group matrix that the API reports", async () => {
+    const list = await api("/api/bursts");
+    check(list.items.length > 0, "the seeded library needs a burst");
+    const g = (await api("/api/burst/" + list.items[0].id)).group;
+    await page.eval("document.querySelector('.tab[data-tab=\"bursts\"]').click(); true");
+    await page.waitFor("!!document.querySelector('#burstdetail .burstgrid .card')", 15000, "burst detail renders");
+    if (g.status === "not_group") {
+      check(await page.eval("!document.querySelector('#burstdetail .gm-banner')"), "a single-subject burst must show no banner");
+    } else {
+      check(await page.eval("document.querySelector('#burstdetail .gm-banner').textContent.length > 20"), "the banner needs a sentence");
+      check((await page.eval("document.querySelectorAll('#burstdetail .gm-bar').length")) === g.frames.length, "every frame needs a score bar");
+    }
+  });
+
   await scenario("the page raised no script errors", async () => {
     check(page.errors.length === 0, "script errors: " + page.errors.join(" | ").slice(0, 400));
   });
