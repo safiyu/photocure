@@ -57,6 +57,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from .. import __version__
 from ..auth import COOKIE_NAME, AuthManager, build_allowed_hosts, origin_allowed
 from ..config import CuratorConfig, default_db_path
 from ..db import models as M
@@ -161,20 +162,22 @@ class ProgressManager:
     def __init__(self):
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
+        self._run = 0
         self.state = {
             "active": False, "task": "", "step": "", "done": 0, "total": 0,
             "percent": 0, "message": "", "detail": "", "error": None,
-            "stopping": False, "stopped": False,
+            "stopping": False, "stopped": False, "run": 0,
         }
 
     def start(self, task: str, step: str = "", total: int = 0, message: str = ""):
         self._stop_event.clear()
         with self._lock:
+            self._run += 1
             self.state = {
                 "active": True, "task": task, "step": step or task, "done": 0,
                 "total": total, "percent": 0, "message": message,
                 "detail": f"0 / {total}" if total > 0 else "", "error": None,
-                "stopping": False, "stopped": False,
+                "stopping": False, "stopped": False, "run": self._run,
             }
 
     def update(self, done: int, total: int, message: str = "", detail: str = ""):
@@ -227,7 +230,7 @@ class ProgressManager:
             self.state = {
                 "active": False, "task": "", "step": "", "done": 0, "total": 0,
                 "percent": 0, "message": "", "detail": "", "error": None,
-                "stopping": False, "stopped": False,
+                "stopping": False, "stopped": False, "run": self._run,
             }
 
     def get(self) -> dict:
@@ -496,7 +499,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     cfg = CuratorConfig.load(dbp)
     db_fp = hashlib.sha1(str(dbp.resolve()).encode()).hexdigest()[:8]
 
-    app = FastAPI(title="Photocure Review", version="0.1.0")
+    app = FastAPI(title="Photocure Review", version=__version__)
     app.state.db = dbp
     app.state.cfg = cfg
     auth_mgr = AuthManager(cfg.cache_dir)
@@ -733,7 +736,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.get("/api/about")
     def get_about():
-        from photocure import __version__
         info = backend_info()
         device = info.get("device", "unknown")
         models = []

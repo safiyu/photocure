@@ -218,8 +218,8 @@ def test_step_state_classes_present():
 
     # Grid is the spec's responsive 3-column track.
     assert re.search(
-        r"\.steps\s*\{[^}]*repeat\(3,\s*minmax\(0,\s*1fr\)\)", css
-    ), ".steps must use repeat(3, minmax(0, 1fr))"
+        r"\.steps\s*\{[^}]*repeat\(2,\s*minmax\(0,\s*1fr\)\)", css
+    ), ".steps must use repeat(2, minmax(0, 1fr))"
 
     # Done: sage circular badge.
     assert re.search(r"\.step\.done\s+\.step-num\s*\{", css), ".step.done badge rule not found"

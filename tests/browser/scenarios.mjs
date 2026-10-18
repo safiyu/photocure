@@ -572,16 +572,15 @@ try {
       }));
       return {
         steps,
-        states: { scan: document.getElementById('state-scan').textContent, infer: document.getElementById('state-infer').textContent,
-                  cluster: document.getElementById('state-cluster').textContent },
+        states: { scan: document.getElementById('state-scan').textContent, infer: document.getElementById('state-infer').textContent },
         cols: getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length
       };
     })()`);
-    // Seeded library: 5,000 indexed + 1 burst group, all inferred -> Analyze and Group are done and
+    // Seeded library: 5,000 indexed + 1 burst group, all analyzed -> Analyze is done and
     // Scan is the active step again, ready for the next batch.
     const byId = Object.fromEntries(info.steps.map((s) => [s.id, s]));
     check(byId["step-scan"].active && !byId["step-scan"].done && !byId["step-scan"].locked, "step-scan should be the active next step");
-    for (const id of ["step-infer", "step-cluster"]) {
+    for (const id of ["step-infer"]) {
       check(byId[id].done, id + " is not in the done state");
       check(!byId[id].active && !byId[id].locked, id + " carries a conflicting state class");
       check(byId[id].badgeBg !== "rgba(0, 0, 0, 0)", id + " badge has no painted background");
@@ -589,10 +588,9 @@ try {
     }
     check(/indexed/.test(info.states.scan), "step 1 state text has no index count: " + info.states.scan);
     check(info.states.infer === "Done", "step 1 done but step 2 is not marked done: " + info.states.infer);
-    check(/group/.test(info.states.cluster), "step 3 state text has no group count: " + info.states.cluster);
-    check(info.cols === 3, "wide layout should show 3 step columns, got " + info.cols);
+    check(info.cols === 2, "wide layout should show 2 step columns, got " + info.cols);
 
-    // Tablet: at <= 960px the 3-column grid stacks to a single column.
+    // Tablet: at <= 960px the 2-column grid stacks to a single column.
     await page.viewport(900, 800);
     await page.waitFor(`getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length === 1`, 8000, "steps stack to one column");
     await settle();
@@ -600,7 +598,7 @@ try {
     check(narrow === 1, "tablet layout should show 1 step column, got " + narrow);
     await shot("13-steps-tablet");
     await page.viewport(1400, 900);
-    await page.waitFor(`getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length === 3`, 8000, "steps restore to 3 columns");
+    await page.waitFor(`getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length === 2`, 8000, "steps restore to 2 columns");
     await settle();
   });
 
@@ -767,34 +765,41 @@ try {
     await page.waitFor("document.querySelector('#help').hidden", 3000, "help closes again");
   });
 
-  await scenario("import flow: the next step is the long button and Sort Photos lights up when relevant", async () => {
+  await scenario("import flow: the next step is the long button", async () => {
     const total = (await api("/api/overview")).total;
-    const stub = (patch) => page.eval(`(() => { if (!window.__rf) window.__rf = window.fetch.bind(window); const p = ${JSON.stringify(patch)}; window.fetch = (u, i) => /\\/api\\/overview/.test(String(u)) ? window.__rf(u, i).then((r) => r.json()).then((o) => { o.stats = Object.assign({}, o.stats, p.stats || {}); o.by_category = Object.assign({}, o.by_category, p.by_category || {}); return new Response(JSON.stringify(o), { status: 200, headers: { "Content-Type": "application/json" } }); }) : window.__rf(u, i); return true; })()`);
+    const install = () => page.eval(`(() => { if (!window.__rf) window.__rf = window.fetch.bind(window); window.__patch = {}; window.__pg = null; window.fetch = (u, i) => { const url = String(u); if (/\\/api\\/progress/.test(url) && window.__pg) return Promise.resolve(new Response(JSON.stringify(window.__pg), { status: 200, headers: { "Content-Type": "application/json" } })); if (/\\/api\\/overview/.test(url)) return window.__rf(u, i).then((r) => r.json()).then((o) => { o.stats = Object.assign({}, o.stats, window.__patch.stats || {}); return new Response(JSON.stringify(o), { status: 200, headers: { "Content-Type": "application/json" } }); }); return window.__rf(u, i); }; return true; })()`);
+    const idle = { active: false, task: "", step: "", done: 0, total: 0, percent: 0, message: "", detail: "", error: null, stopping: false, stopped: false, run: 98 };
+    const busy = { ...idle, active: true, task: "Scan", step: "Scan", done: 1, total: 10, percent: 10, message: "working", run: 99 };
     const stored = (v) => page.eval(`localStorage.setItem('pcur-grouped-total', ${JSON.stringify(String(v))}); true`);
-    const refresh = () => page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); document.querySelector('#btn-sort-dock').click(); true");
+    // The app refreshes its stats when the progress poll sees a task finish, so replay exactly that.
+    const refresh = async (patch) => {
+      await page.eval(`window.__patch = ${JSON.stringify(patch)}; window.__pg = ${JSON.stringify(busy)}; true`);
+      await page.waitFor("!document.querySelector('#progress-card').hidden && document.querySelector('#progress-card').classList.contains('active')", 15000, "the poll sees a running task");
+      await page.eval(`window.__pg = ${JSON.stringify(idle)}; true`);
+    };
     const tall = (id) => page.eval(`getComputedStyle(document.querySelector('#${id}')).height === '48px'`);
     const hint = () => page.eval("document.querySelector('#dock-hint').textContent");
+    const dump = () => page.eval("JSON.stringify({ infer: document.querySelector('#step-infer').className, scan: document.querySelector('#step-scan').className, stateInfer: document.querySelector('#state-infer').textContent, cardHidden: document.querySelector('#progress-card').hidden, pgActive: window.__pg && window.__pg.active, patch: window.__patch, grouped: localStorage.getItem('pcur-grouped-total') })");
+    const until = (expr, ms, label) => page.waitFor(expr, ms, label).catch(async (e) => { throw new Error(e.message + " | state " + (await dump())); });
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); true");
     try {
-      await stored(total); await stub({}); await refresh();
-      await page.waitFor("document.querySelector('#step-scan').classList.contains('active')", 8000, "scan is next");
-      check(await tall("btn-scan") && !(await tall("btn-infer")) && !(await tall("btn-cluster")), "only Scan should be the long button");
+      await install();
+      await stored(total); await refresh({});
+      await until("document.querySelector('#step-scan').classList.contains('active')", 15000, "scan is next");
+      check(await tall("btn-scan") && !(await tall("btn-infer")), "only Scan should be the long button");
       check(/Scan/.test(await hint()), "hint should invite the next scan: " + (await hint()));
 
-      await stub({ stats: { pending_inference: 3 } }); await refresh();
-      await page.waitFor("document.querySelector('#step-infer').classList.contains('active')", 8000, "analyze is next");
+      await refresh({ stats: { pending_inference: 3 } });
+      await until("document.querySelector('#step-infer').classList.contains('active')", 15000, "analyze is next");
       check(await tall("btn-infer") && !(await tall("btn-scan")), "Analyze should be the long button");
-      check(/Analyze/.test(await hint()), "hint should say Analyze: " + (await hint()));
+      check(/Analyze/.test(await hint()) && /group/i.test(await hint()) && /sort/i.test(await hint()), "hint should say Analyze, group and sort: " + (await hint()));
 
-      await stub({}); await stored(total - 1); await refresh();
-      await page.waitFor("document.querySelector('#step-cluster').classList.contains('active')", 8000, "group is next");
-      check(await tall("btn-cluster") && !(await tall("btn-infer")), "Group should be the long button, separate from Analyze");
-      check(/Group/.test(await hint()), "hint should say Group: " + (await hint()));
-
-      await stored(total); await stub({ by_category: { unrouted: 5 } }); await refresh();
-      await page.waitFor("document.querySelector('#btn-sort-dock').classList.contains('needs-action')", 8000, "Sort Photos is highlighted");
-      check(/Sort Photos/.test(await hint()), "hint should say Sort Photos: " + (await hint()));
+      await stored(total - 1); await refresh({});
+      await page.waitFor("document.querySelector('#step-infer').classList.contains('active') && document.querySelector('#state-infer').textContent === 'Needs grouping'", 15000, "analyze stays next until the new photos are grouped");
+      check(await tall("btn-infer"), "Analyze should stay the long button until grouping is done");
     } finally {
-      await page.eval("if (window.__rf) window.fetch = window.__rf; localStorage.removeItem('pcur-grouped-total'); true");
+      await page.eval("if (window.__rf) window.fetch = window.__rf; window.__pg = null; localStorage.removeItem('pcur-grouped-total'); true");
+      await sleep(3500);
     }
   });
 
@@ -830,7 +835,7 @@ try {
     await settle();
     const r = await page.eval(`(() => {
       const steps = [...document.querySelectorAll('.steps > .step')];
-      return steps.slice(0, 2).map((s, i) => {
+      return steps.slice(0, 1).map((s, i) => {
         const a = s.getBoundingClientRect(), b = steps[i + 1].getBoundingClientRect(), f = s.querySelector('.step-flow').getBoundingClientRect();
         return { gap: (a.right + b.left) / 2, flow: (f.left + f.right) / 2, anim: getComputedStyle(s.querySelector('.chev')).animationName };
       });
@@ -839,6 +844,49 @@ try {
       check(Math.abs(x.gap - x.flow) <= 3, `chevrons are ${Math.round(x.flow - x.gap)}px off the gap center`);
       check(x.anim === "chev-flow", "chevrons are not animating: " + x.anim);
     }
+  });
+
+  await scenario("a dismissed progress card stays dismissed until a new task starts", async () => {
+    const stub = (run, active) => page.eval(`(() => { if (!window.__rf2) window.__rf2 = window.fetch.bind(window); window.fetch = (u, i) => /\\/api\\/progress/.test(String(u)) ? Promise.resolve(new Response(JSON.stringify({ active: ${active}, task: "Scan", step: "Scan", done: ${active ? 3 : 10}, total: 10, percent: ${active ? 30 : 100}, message: "Scan complete", detail: "", error: null, stopping: false, stopped: false, run: ${run} }), { status: 200, headers: { "Content-Type": "application/json" } })) : window.__rf2(u, i); return true; })()`);
+    try {
+      await stub(7, false);
+      await page.waitFor("!document.querySelector('#progress-card').hidden && document.querySelector('#progress-title').textContent === 'Scan finished'", 12000, "the stubbed finished task shows");
+      await page.eval("document.querySelector('#btn-dismiss-progress').click(); true");
+      await sleep(7500);
+      check(await page.eval("document.querySelector('#progress-card').hidden"), "the dismissed card came back");
+      await stub(8, true);
+      await page.waitFor("!document.querySelector('#progress-card').hidden", 12000, "a new task shows the card again");
+    } finally {
+      await page.eval("if (window.__rf2) window.fetch = window.__rf2; true");
+      await sleep(3500);
+    }
+  });
+
+  await scenario("category dropdown is alphabetical and the grid fades in after a filter change", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); true");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
+    const labels = await page.eval("[...document.querySelectorAll('#catfilter option')].slice(1).map((o) => o.textContent)");
+    check(labels.length > 3, "too few categories to judge the order");
+    check(JSON.stringify(labels) === JSON.stringify([...labels].sort((a, b) => a.localeCompare(b))), "categories are not alphabetical: " + labels.join(", "));
+    check((await page.eval("document.querySelector('#catfilter option').textContent")) === "All categories", "All categories must stay first");
+    await page.eval("document.querySelector('#catfilter').dispatchEvent(new Event('change')); true");
+    await page.waitFor("[...document.querySelectorAll('#grid .vg-window .card')].some((c) => getComputedStyle(c).animationName === 'card-in')", 4000, "cards fade in after the filter changed");
+  });
+
+  await scenario("toolbar and sliders stay put whether or not the page scrolls", async () => {
+    await page.viewport(1400, 1900);
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); window.scrollTo(0, 0); true");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
+    const geo = () => page.eval(`JSON.stringify(['#density', '#scrub-from', '#scrub-to', '#rowcount', '#q'].map((s) => { const r = document.querySelector(s).getBoundingClientRect(); return [s, Math.round(r.left), Math.round(r.top), Math.round(r.width)]; }))`);
+    const tall = await geo();
+    await page.eval("(() => { const q = document.querySelector('#q'); q.value = 'zzz-no-such-photo'; q.dispatchEvent(new Event('input', { bubbles: true })); return true; })()");
+    await page.waitFor("document.querySelector('#rowcount').textContent === '0 photos'", 10000, "no results");
+    await page.waitFor("document.documentElement.scrollHeight <= innerHeight + 2", 8000, "the page no longer scrolls");
+    const short = await geo();
+    await page.eval("(() => { const q = document.querySelector('#q'); q.value = ''; q.dispatchEvent(new Event('input', { bubbles: true })); return true; })()");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 10000, "cards are back");
+    await page.viewport(1400, 900);
+    check(tall === short, "toolbar moved when the scrollbar went away:\n" + tall + "\n" + short);
   });
 
   await scenario("the page raised no script errors", async () => {

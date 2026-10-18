@@ -78,11 +78,11 @@ def test_active_step_cta_keeps_dome_for_primary_and_accent():
 
 def test_markup_roles():
     expected = {
-        "btn-scan": "accent", "btn-infer": "primary", "btn-cluster": "primary",
+        "btn-scan": "accent", "btn-infer": "primary",
         "btn-ingest-all": "commit", "btn-import-reset": "danger", "btn-apply": "commit",
         "btn-rebuild": "secondary", "btn-diff": "secondary", "btn-undo": "danger",
         "btn-dup-all": "commit", "btn-save-settings": "primary", "btn-events": "primary",
-        "btn-sort-dock": "secondary", "btn-kw-remove": "danger", "btn-reset-library": "danger",
+        "btn-kw-remove": "danger", "btn-reset-library": "danger",
     }
     for button_id, role in expected.items():
         assert role in _classes(button_id), f"#{button_id} should be .{role}, has {_classes(button_id)}"

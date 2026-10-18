@@ -16,7 +16,7 @@ def _index() -> str:
     return INDEX.read_text(encoding="utf-8")
 
 
-def test_step_flow_markup_inside_step1_and_step2():
+def test_step_flow_markup_only_inside_the_first_step():
     html = _index()
     scan_block = re.search(
         r'<li class="step" id="step-scan">(.*?)</li>', html, re.DOTALL
@@ -30,13 +30,8 @@ def test_step_flow_markup_inside_step1_and_step2():
         r'<li class="step" id="step-infer">(.*?)</li>', html, re.DOTALL
     )
     assert infer_block, "step-infer <li> not found"
-    assert 'class="step-flow"' in infer_block.group(1), "step-infer must contain .step-flow"
-
-    cluster_block = re.search(
-        r'<li class="step" id="step-cluster">(.*?)</li>', html, re.DOTALL
-    )
-    assert cluster_block and 'class="step-flow"' not in cluster_block.group(1), (
-        "step-cluster (last) must NOT contain a trailing .step-flow"
+    assert 'class="step-flow"' not in infer_block.group(1), (
+        "step-infer (last) must NOT contain a trailing .step-flow"
     )
 
 

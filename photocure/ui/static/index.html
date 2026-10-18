@@ -14,7 +14,7 @@
   </script>
   <link rel="icon" type="image/png" href="/static/favicon.png">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/style.css?v=2.2.0">
+  <link rel="stylesheet" href="/static/style.css?v=1.0.0">
 </head>
 <body>
   <!-- icon sprite -->
@@ -103,7 +103,7 @@
           </div>
           <button class="icon-btn help-btn" id="btn-help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
         </div>
-        <div class="sidebar-footer"><span class="app-credit">v <button id="sidebar-version" class="sidebar-version-badge" type="button" data-goto="settings" data-anchor="sect-about" title="Click to view About Photocure">0.1.0</button> by Safiyu</span></div>
+        <div class="sidebar-footer"><span class="app-credit">v <button id="sidebar-version" class="sidebar-version-badge" type="button" data-goto="settings" data-anchor="sect-about" title="Click to view About Photocure">1.0.0</button> by Safiyu</span></div>
       </div>
     </aside>
 
@@ -114,25 +114,13 @@
           <h1 id="page-title">Import</h1>
           <div class="sub" id="page-sub"></div>
         </div>
-        <div id="hero-gauge" class="gauge" hidden role="progressbar" aria-label="Overall progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-          <svg class="gauge-svg" viewBox="0 0 120 70" aria-hidden="true">
-            <defs>
-              <linearGradient id="gauge-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" style="stop-color:var(--blue-400)"/>
-                <stop offset="100%" style="stop-color:var(--pink-500)"/>
-              </linearGradient>
-            </defs>
-            <path class="gauge-track" d="M10 62 A50 50 0 0 1 110 62" pathLength="100"/>
-            <path id="gauge-arc" class="gauge-arc" d="M10 62 A50 50 0 0 1 110 62" pathLength="100"/>
-          </svg>
-          <div class="gauge-text"><span id="gauge-phase" class="gauge-phase">Working</span><b id="gauge-pct">0%</b><span class="gauge-sub">Overall</span></div>
-        </div>
         <div id="progress-card" class="progress-card" hidden>
           <div class="progress-header">
             <div class="progress-task">
               <span class="spinner" id="progress-spinner"></span>
               <span id="progress-status-icon" hidden></span>
               <span id="progress-title">Working</span>
+              <span class="progress-phase" id="progress-phase" hidden></span>
             </div>
             <div class="progress-controls">
               <div class="spectrum-bars" aria-hidden="true">
@@ -144,7 +132,7 @@
               <button id="btn-dismiss-progress" class="dismiss-btn" title="Dismiss" aria-label="Dismiss" style="display:none"><svg class="ic sm" aria-hidden="true"><use href="#i-x"/></svg></button>
             </div>
           </div>
-          <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+          <div class="progress-track" role="progressbar" aria-label="Task progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-fill" class="progress-fill"></div></div>
           <div class="progress-sub">
             <span class="progress-msg" id="progress-msg">Starting</span>
             <span id="progress-counts"></span>
@@ -199,7 +187,7 @@
                 <span class="state" id="state-infer"></span>
                 <button class="step-more" id="step-infer-more" type="button" title="Inference settings" aria-label="Inference settings" data-goto="settings"><svg class="ic sm" aria-hidden="true"><use href="#i-menu"/></svg></button>
               </div>
-              <p>Finds faces, checks sharpness and exposure, and labels what each photo shows.</p>
+              <p>Finds faces, checks sharpness and exposure, labels what each photo shows, then groups burst shots and sorts everything into categories.</p>
               <div class="field">
                 <label for="infer-device">Run on</label>
                 <div class="device-chip">
@@ -217,32 +205,6 @@
               <div class="actions">
                 <button id="btn-infer" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Analyze Now</button>
               </div>
-              <div class="step-flow" aria-hidden="true">
-                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
-                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
-                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
-              </div>
-            </li>
-            <li class="step" id="step-cluster">
-              <div class="step-head">
-                <span class="step-num"><span class="n">3</span><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></span>
-                <h3>Group bursts</h3>
-                <span class="state" id="state-cluster"></span>
-              </div>
-              <p>Finds shots taken seconds apart and keeps the best one from each group.</p>
-              <svg class="burst-art" viewBox="0 0 96 72" aria-hidden="true">
-                <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
-                  <rect x="33" y="44" width="34" height="22" rx="3"/>
-                  <rect x="26" y="27" width="34" height="22" rx="3"/>
-                  <rect x="19" y="10" width="34" height="22" rx="3"/>
-                </g>
-                <g fill="none" stroke="currentColor" stroke-width="1.2" opacity=".65">
-                  <rect x="26" y="15" width="10" height="8" rx="1.5"/>
-                </g>
-              </svg>
-              <div class="actions">
-                <button id="btn-cluster" data-busy class="btn primary" disabled><svg class="ic sm" aria-hidden="true"><use href="#i-swap"/></svg>Group<svg class="ic sm lock" aria-hidden="true"><use href="#i-lock"/></svg></button>
-              </div>
             </li>
           </ol>
 
@@ -250,10 +212,10 @@
             <div class="dock-summary">
               <span class="dock-total" id="dock-total">0</span>
               <span class="dock-label" id="dock-label">photos in your library</span>
-              <button class="btn sm secondary dock-sort" id="btn-sort-dock" type="button" data-sortnow data-busy title="Files each analyzed photo under its category. Nothing is moved on disk until you apply the plan.">Sort Photos</button>
+
             </div>
             <div class="dock-actions">
-              <button id="btn-ingest-all" data-busy class="btn commit" title="Run All Three Steps" aria-label="Run All Three Steps"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Run All</button>
+              <button id="btn-ingest-all" data-busy class="btn commit" title="Run Scan and Analyze" aria-label="Run Scan and Analyze"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Run All</button>
               <button id="btn-import-reset" data-busy class="btn danger" title="Reset Library" aria-label="Reset Library"><svg class="ic sm" aria-hidden="true"><use href="#i-undo"/></svg>Reset</button>
             </div>
             <p class="dock-hint" id="dock-hint" role="status"></p>
@@ -765,6 +727,6 @@
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script type="module" src="/static/virtual_grid.mjs"></script>
-  <script src="/static/app.js?v=2.2.0"></script>
+  <script src="/static/app.js?v=1.0.0"></script>
 </body>
 </html>

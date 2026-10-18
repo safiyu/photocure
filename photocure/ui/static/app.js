@@ -18,6 +18,7 @@
     overview: null, eventId: null,
     backend: null, thresholds: null, manualCount: 0,
     settings: null, draft: { device: "auto", device_index: 0 }, busyBtn: null,
+    dismissedRun: null, lastRun: null,
   };
 
   const TITLES = {
@@ -506,6 +507,13 @@
     return d.firstElementChild || d;
   }
 
+  // Cards fade in only while a freshly replaced grid fills, so single edits never replay it.
+  function flashGrid(host) {
+    host.classList.add("anim-in");
+    clearTimeout(host._flash);
+    host._flash = setTimeout(() => host.classList.remove("anim-in"), 1500);
+  }
+
   function makeGrid(key, cfg) {
     if (!window.PCUR_GRID) throw new Error("virtual_grid.mjs did not load");
     const host = $(cfg.el);
@@ -538,7 +546,10 @@
       }
     };
     Object.defineProperty(g, "total", { get: () => g.vg.total });
-    g.reset = () => g.vg.reset();
+    g.reset = () => {
+      flashGrid(host);
+      return g.vg.reset();
+    };
     g.update = () => { if (g.vg) g.vg.update(); };
     g.loadMore = async () => {};
     g.cards = () => $$(".card", host);
@@ -2384,13 +2395,15 @@
     const done = !p.active && !p.error && !p.stopped && p.percent === 100;
     const bad = !p.active && !!p.error;
     const stopped = !p.active && !!p.stopped;
-    const visible = p.active || done || bad || stopped;
+    state.lastRun = p.run != null ? p.run : null;
+    if (p.active) state.dismissedRun = null;
+    const dismissed = !p.active && p.run != null && p.run === state.dismissedRun;
+    const visible = (p.active || done || bad || stopped) && !dismissed;
     show(card, visible);
     // C8: the equalizer spectrum (M5 CSS) animates only while #progress-card
     // is .active, so gate the eq-pulse keyframes on the live running state.
     card.classList.toggle("active", p.active);
     document.body.classList.toggle("task-running", !!p.active);
-    show($("#hero-gauge"), visible);
     if (!visible) return;
     const pct = p.active ? Math.max(num(p.percent), 4) : 100;
     const cls = p.active ? "active" : (bad || stopped ? "error" : "done");
@@ -2413,15 +2426,11 @@
     // C8: live tabular ratio (e.g. "135 / 3,194"); empty when there's no total,
     // which the :empty CSS rule uses to hide the element.
     $("#progress-ratio").textContent = p.detail || (p.total > 0 ? `${fmtN(p.done)} / ${fmtN(p.total)}` : "");
-    // Gauge: the arc is 100 units long (pathLength), so the dash length is the percent.
-    const gaugePct = p.active ? Math.max(num(p.percent), 2) : (done ? 100 : Math.max(num(p.percent), 0));
     const phase = (String(p.message || "").match(/Phase\s+\d+\s*\/\s*\d+/i) || [""])[0];
-    const gauge = $("#hero-gauge");
-    gauge.setAttribute("aria-valuenow", String(Math.round(gaugePct)));
-    $("#gauge-arc").style.strokeDasharray = `${gaugePct} 100`;
-    $("#gauge-arc").setAttribute("class", "gauge-arc " + cls);
-    $("#gauge-phase").textContent = bad ? "Error" : (stopped ? "Stopped" : (phase || p.task || "Working"));
-    $("#gauge-pct").textContent = bad || stopped ? "-" : `${num(p.percent)}%`;
+    const phaseEl = $("#progress-phase");
+    if (phaseEl) { phaseEl.textContent = phase; phaseEl.hidden = !phase || !p.active; }
+    const track = $("#progress-card .progress-track");
+    if (track) track.setAttribute("aria-valuenow", String(Math.round(p.active ? num(p.percent) : 100)));
 
     const isBusy = p.active || p.busy;
     [$("#btn-stop-progress")].forEach((btn) => {
@@ -2443,8 +2452,7 @@
   function applyBusy(busy) {
     state.busy = busy;
     $$("[data-busy]").forEach((b) => {
-      b.disabled = busy || (b.id === "btn-cluster" && !state.inferred)
-        || (b.id === "btn-sort-dock" && !(state.overview && state.overview.total));
+      b.disabled = busy;
       b.classList.toggle("busy", busy);
       b.classList.toggle("loading", busy && b === state.busyBtn);
     });
@@ -2768,7 +2776,6 @@
     if (dockTotal) {
       dockTotal.textContent = fmtN(total);
       $("#dock-label").textContent = total === 1 ? "photo in your library" : "photos in your library";
-      $("#btn-sort-dock").disabled = !total;
     }
     $$(".comp-host").forEach((host) => {
       const head = `<div class="comp-head"><span class="comp-total">${fmtN(total)}</span>
@@ -2788,27 +2795,19 @@
     });
   }
 
-  // Which import step is next: Scan, then Analyze, then Group, then Scan again for the next batch.
+  // Which import step is next: Scan, then Analyze (which also groups and sorts), then Scan again.
   function flowStates(total, pending, bursts, stored) {
     const inferred = total > 0 && pending === 0;
     const stale = stored === null ? bursts === 0 : String(total) !== stored;
-    const next = !total ? "scan" : pending > 0 ? "infer" : stale ? "cluster" : "scan";
+    const next = !total ? "scan" : pending > 0 || stale ? "infer" : "scan";
     const cls = (id, rest) => (next === id ? "active" : rest);
-    return {
-      next, inferred,
-      scan: cls("scan", "done"),
-      infer: cls("infer", inferred ? "done" : "locked"),
-      cluster: cls("cluster", inferred ? "done" : "locked"),
-    };
+    return { next, inferred, scan: cls("scan", "done"), infer: cls("infer", inferred ? "done" : "locked") };
   }
 
   // One plain sentence for what to do next, shown in the dock.
-  function nextHint(flow, sortNeeded, total) {
+  function nextHint(flow, total) {
     if (!total) return "Start here: choose a folder, then press Scan.";
-    if (flow.next === "infer") return "Next: press Analyze Now so Photocure can read the new photos.";
-    if (sortNeeded && flow.next === "cluster") return "Next: press Sort Photos to file them into categories, then Group bursts.";
-    if (sortNeeded) return "Next: press Sort Photos to file your photos into categories.";
-    if (flow.next === "cluster") return "Next: press Group to find burst shots.";
+    if (flow.next === "infer") return "Next: press Analyze Now. It reads your photos, groups burst shots and sorts them into categories.";
     return "All caught up. Choose a folder and press Scan to add more photos.";
   }
 
@@ -2858,15 +2857,10 @@
       $("#state-" + id).textContent = text;
     };
     step("scan", flow.scan, total > 0 ? `${fmtN(total)} indexed` : "Not started");
-    step("infer", flow.infer, pending > 0 ? `${fmtN(pending)} waiting` : total > 0 ? "Done" : "Needs step 1");
-    step("cluster", flow.cluster,
-      flow.cluster === "active" ? "Ready" : flow.cluster === "locked" ? "Needs step 2"
-        : bursts > 0 ? `${fmtN(bursts)} groups` : "No groups");
-    const sortNeeded = flow.inferred && num((ov.by_category || {}).unrouted) > 0;
-    const sortBtn = $("#btn-sort-dock");
-    if (sortBtn) sortBtn.classList.toggle("needs-action", sortNeeded);
+    step("infer", flow.infer, pending > 0 ? `${fmtN(pending)} waiting`
+      : flow.next === "infer" ? "Needs grouping" : total > 0 ? "Done" : "Needs step 1");
     const hint = $("#dock-hint");
-    if (hint) hint.textContent = nextHint(flow, sortNeeded, total);
+    if (hint) hint.textContent = nextHint(flow, total);
   }
 
   async function loadStats() {
@@ -2884,7 +2878,8 @@
 
   // ------------------------------------------------------------------- tabs
   function fillCatFilters() {
-    const opts = state.cats.map((c) => `<option value="${esc(c)}">${esc(catLabel(c))}</option>`).join("");
+    const sorted = state.cats.slice().sort((a, b) => catLabel(a).localeCompare(catLabel(b)));
+    const opts = sorted.map((c) => `<option value="${esc(c)}">${esc(catLabel(c))}</option>`).join("");
     $("#catfilter").innerHTML = '<option value="">All categories</option>' + opts;
     $("#onlycat").innerHTML = '<option value="">Every category</option>' + opts;
     $("#bulk-cat").innerHTML = '<option value="" disabled selected>Move to category</option>' + opts;
@@ -3017,7 +3012,7 @@
         pathInput.value = "";
         if (window.__syncScanPathDisplay) window.__syncScanPathDisplay();
       }
-      ["#state-scan", "#state-infer", "#state-cluster"].forEach((sel) => {
+      ["#state-scan", "#state-infer"].forEach((sel) => {
         const el = $(sel);
         if (el) el.textContent = "";
       });
@@ -3056,20 +3051,25 @@
 
   // Placing photos in categories happens when a plan is built, so do it after analysis.
   async function sortNow(silent) {
+    let ok = true;
     try {
       await post("/api/plan/rebuild", planBody());
       if (!silent) toast("Photos sorted into categories", "ok");
     } catch (e) {
+      ok = false;
       if (!silent) toast(e.message, "err");
     }
     await loadStats();
     resetVisibleGrids();
+    return ok;
   }
 
   async function afterTask(sort) {
-    if (sort) await sortNow(true);
+    let ok = true;
+    if (sort) ok = await sortNow(true);
     else { await loadStats(); resetVisibleGrids(); }
     refreshBackend();
+    return ok;
   }
 
   // ------------------------------------------------------- lifecycle
@@ -3295,7 +3295,7 @@
     $("#similar-close").onclick = () => { closeOverlay($("#similar-panel")); };
     window.addEventListener("resize", positionNavIndicator);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(positionNavIndicator);
-    $("#btn-dismiss-progress").onclick = () => { $("#progress-card").hidden = true; $("#hero-gauge").hidden = true; };
+    $("#btn-dismiss-progress").onclick = () => { state.dismissedRun = state.lastRun; $("#progress-card").hidden = true; };
 
     $("#btn-learn").onclick = learnNow;
     renderBanner();
@@ -3377,20 +3377,20 @@
     };
     $("#btn-infer").onclick = async () => {
       const device = $("#infer-device").value;
-      const r = await runTask(`Analyzing photos (${device})`, () => post("/api/infer", { device }));
+      const r = await runTask(`Analyzing photos (${device})`, async () => {
+        const inferred = await post("/api/infer", { device });
+        if (inferred && inferred.stopped) return inferred;
+        const grouped = await post("/api/cluster", {});
+        if (grouped && grouped.stopped) return grouped;
+        return { inferred, grouped };
+      });
       if (r) {
-        libLog(`Analysis finished: ${fmtN(r.processed)} photos, ${fmtN(r.faces_total)} faces in ${r.duration_s}s`, "ok");
-        toast(`Analyzed ${fmtN(r.processed)} photos`, "ok");
-        await afterTask(true);
-      }
-    };
-    $("#btn-cluster").onclick = async () => {
-      const r = await runTask("Grouping bursts", () => post("/api/cluster", {}));
-      if (r) {
-        libLog(`Grouping finished: ${fmtN(r.burst_groups)} burst groups`, "ok");
-        toast(`Found ${fmtN(r.burst_groups)} burst groups`, "ok");
+        libLog(`Analysis finished: ${fmtN(r.inferred.processed)} photos, ${fmtN(r.inferred.faces_total)} faces in ${r.inferred.duration_s}s`, "ok");
+        libLog(`Grouping finished: ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
+        toast(`Analyzed ${fmtN(r.inferred.processed)} photos, found ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
         markGrouped();
-        await afterTask(true);
+        const sorted = await afterTask(true);
+        libLog(sorted ? "Photos sorted into categories" : "Could not sort photos into categories", sorted ? "ok" : "warn");
       }
     };
     $("#btn-ingest-all").onclick = async () => {

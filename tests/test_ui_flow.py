@@ -25,26 +25,26 @@ def _flow(total, pending, bursts, stored):
 
 
 def _states(r):
-    return (r["scan"], r["infer"], r["cluster"])
+    return (r["scan"], r["infer"])
 
 
 def test_empty_library_starts_on_scan():
-    assert _states(_flow(0, 0, 0, None)) == ("active", "locked", "locked")
+    assert _states(_flow(0, 0, 0, None)) == ("active", "locked")
 
 
 def test_after_scan_new_photos_make_analyze_the_long_button():
     r = _flow(600, 40, 3, "560")
-    assert r["next"] == "infer" and _states(r) == ("done", "active", "locked")
+    assert r["next"] == "infer" and _states(r) == ("done", "active")
 
 
-def test_after_analyze_group_is_the_long_button_and_is_its_own_step():
+def test_unfinished_grouping_keeps_analyze_active_because_analyze_also_groups():
     r = _flow(600, 0, 3, "560")
-    assert r["next"] == "cluster" and _states(r) == ("done", "done", "active")
+    assert r["next"] == "infer" and _states(r) == ("done", "active")
 
 
-def test_after_group_the_cycle_returns_to_scan():
+def test_after_analyze_the_cycle_returns_to_scan():
     r = _flow(600, 0, 3, "600")
-    assert r["next"] == "scan" and _states(r) == ("active", "done", "done")
+    assert r["next"] == "scan" and _states(r) == ("active", "done")
 
 
 def test_second_import_round_starts_on_scan_again():
@@ -53,65 +53,51 @@ def test_second_import_round_starts_on_scan_again():
 
 def test_legacy_library_without_a_stored_total():
     assert _flow(600, 0, 5, None)["next"] == "scan"
-    assert _flow(600, 0, 0, None)["next"] == "cluster"
+    assert _flow(600, 0, 0, None)["next"] == "infer"
 
 
-def test_group_handlers_remember_the_grouped_total():
+def test_there_is_no_separate_group_step():
+    assert "cluster" not in _flow(600, 0, 3, "600")
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert 'id="step-cluster"' not in html and 'id="btn-cluster"' not in html
+
+
+def test_analyze_infers_then_groups_and_remembers_the_grouped_total():
     js = _js()
-    assert "pcur-grouped-total" in js and "function markGrouped(" in js
-    for handler in ('$("#btn-cluster").onclick', '$("#btn-ingest-all").onclick'):
-        body = js.split(handler, 1)[1].split("};", 1)[0]
-        assert "markGrouped()" in body, handler
+    assert "function markGrouped(" in js and "pcur-grouped-total" in js
+    body = js.split('$("#btn-infer").onclick', 1)[1].split("\n    };", 1)[0]
+    assert body.index('"/api/infer"') < body.index('"/api/cluster"'), "infer first, then group"
+    assert "markGrouped()" in body
+    ingest = js.split('$("#btn-ingest-all").onclick', 1)[1].split("};", 1)[0]
+    assert "markGrouped()" in ingest
 
 
-def test_analyze_does_not_start_grouping():
-    body = _js().split('$("#btn-infer").onclick', 1)[1].split("};", 1)[0]
-    assert "/api/cluster" not in body and "btn-cluster" not in body
-
-
-def _hint(flow, sort_needed, total):
+def _hint(flow, total):
     src = re.search(r"function nextHint\([^)]*\)\s*\{.*?\n  \}", _js(), re.S)
     assert src, "nextHint not found in app.js"
-    call = f"nextHint({json.dumps(flow)}, {json.dumps(sort_needed)}, {total})"
+    call = f"nextHint({json.dumps(flow)}, {total})"
     return subprocess.run(["node", "-e", f"{src.group(0)}\nconsole.log({call})"],
                           capture_output=True, text=True, check=True).stdout.strip()
 
 
 def test_hint_tells_a_new_user_to_scan():
-    assert "Scan" in _hint({"next": "scan"}, False, 0)
+    assert "Scan" in _hint({"next": "scan"}, 0)
 
 
-def test_hint_after_scan_says_analyze():
-    assert "Analyze" in _hint({"next": "infer"}, False, 600)
-
-
-def test_hint_names_sort_photos_when_photos_wait_to_be_sorted():
-    assert "Sort Photos" in _hint({"next": "scan"}, True, 600)
-    both = _hint({"next": "cluster"}, True, 600)
-    assert "Sort Photos" in both and "Group" in both
-
-
-def test_hint_after_analyze_says_group():
-    h = _hint({"next": "cluster"}, False, 600)
-    assert "Group" in h and "Sort Photos" not in h
+def test_hint_after_scan_says_analyze_and_that_it_groups_and_sorts():
+    h = _hint({"next": "infer"}, 600).lower()
+    assert "analyze" in h and "group" in h and "sort" in h
 
 
 def test_hint_when_everything_is_done_invites_the_next_batch():
-    assert "Scan" in _hint({"next": "scan"}, False, 600)
+    assert "Scan" in _hint({"next": "scan"}, 600)
 
 
-def test_sort_photos_is_highlighted_when_relevant():
-    js, html = _js(), (STATIC / "index.html").read_text(encoding="utf-8")
-    assert 'id="dock-hint"' in html.split('class="dock"', 1)[1].split("</section>", 1)[0]
-    body = js.split("function renderCounts", 1)[1].split("\n  }\n", 1)[0]
-    assert 'classList.toggle("needs-action", sortNeeded)' in body
-    assert 'by_category' in body and "unrouted" in body
-    css = (STATIC / "style.css").read_text(encoding="utf-8")
-    assert re.search(r"\.btn\.needs-action\s*\{", css) and re.search(r"\.btn\.needs-action:hover\s*\{", css)
 
 
-def test_sort_photos_button_explains_itself():
-    html = (STATIC / "index.html").read_text(encoding="utf-8")
-    tag = re.search(r'<button[^>]*id="btn-sort-dock"[^>]*>', html).group(0)
-    title = re.search(r'title="([^"]*)"', tag)
-    assert title and "category" in title.group(1) and "Nothing is moved" in title.group(1)
+def test_analyze_also_sorts_so_the_dock_has_no_sort_button():
+    html, js = (STATIC / "index.html").read_text(encoding="utf-8"), _js()
+    assert 'id="btn-sort-dock"' not in html and "needs-action" not in js
+    body = js.split('$("#btn-infer").onclick', 1)[1].split("\n    };", 1)[0]
+    assert "afterTask(true)" in body, "Analyze must end by sorting into categories"
+    assert "sorted" in body.lower()

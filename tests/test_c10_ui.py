@@ -1,4 +1,4 @@
-"""C10: Import layout rework (hero gauge, blob cards, dock, sidebar) static assertions."""
+"""C10: Import layout rework (hero, blob cards, dock, sidebar) static assertions."""
 import re
 from pathlib import Path
 
@@ -28,8 +28,8 @@ def _step(html: str, step_id: str) -> str:
 
 def test_step_flow_has_three_chevrons():
     html = _html()
-    for step_id in ("step-scan", "step-infer"):
-        assert _step(html, step_id).count('class="chev"') == 3, f"{step_id} needs 3 chevrons"
+    assert _step(html, "step-scan").count('class="chev"') == 3, "step-scan needs 3 chevrons"
+    assert 'class="chev"' not in _step(html, "step-infer"), "the last step has no trailing chevrons"
     rule = re.search(r"\.step-flow\s+\.chev:nth-child\(3\)\s*\{([^}]*)\}", _css())
     assert rule, ".step-flow .chev:nth-child(3) rule missing"
     assert ".7s" in rule.group(1), "third chevron must be delayed .7s to extend the stagger"
@@ -90,10 +90,9 @@ def test_dock_markup_holds_summary_and_actions():
     dock = re.search(r'<div class="dock"[^>]*>(.*)', tab, re.DOTALL)
     assert dock, ".dock not found in the Import tab"
     body = dock.group(1)
-    for needle in ('id="dock-total"', 'id="btn-sort-dock"', "data-sortnow",
-                   'id="btn-ingest-all"', 'id="btn-import-reset"'):
+    for needle in ('id="dock-total"', 'id="btn-ingest-all"', 'id="btn-import-reset"'):
         assert needle in body, f"{needle} must live inside the dock"
-    assert "Run All Three Steps" in body and "Reset Library" in body and "Sort Photos" in body
+    assert "Run Scan and Analyze" in body and "Reset Library" in body
     assert 'class="runall"' not in tab, "the old .runall row must be gone"
     assert 'id="library-status"' not in tab, "the bottom status line moved into the header subtitle"
     assert "Nothing is moved until you apply a plan" not in tab, "no status caption below the dock"
@@ -107,15 +106,12 @@ def test_dock_css_is_a_pill_bar():
     assert ".runall" not in css, "dead .runall rules must be removed"
 
 
-def test_dock_total_follows_overview_and_sort_disables_when_empty():
+def test_dock_total_follows_overview():
     js = _js()
     render = re.search(r"function renderComp\(ov\)\s*\{(.*?)\n  \}", js, re.DOTALL)
     assert render, "renderComp not found"
     body = render.group(1)
     assert "dock-total" in body, "renderComp must write the dock total"
-    assert re.search(r"btn-sort-dock[^;]*;?[^;]*disabled\s*=\s*!total", body, re.DOTALL), (
-        "Sort Photos must be disabled when the library is empty"
-    )
 
 
 def test_reset_restores_button_markup_not_plain_text():
@@ -126,7 +122,7 @@ def test_reset_restores_button_markup_not_plain_text():
     assert "innerHTML = saved" in js
 
 
-# ------------------------------------------------------------------ hero header and gauge
+# ------------------------------------------------------------------ hero header
 
 def _hero(html: str) -> str:
     m = re.search(r'<header class="topbar hero">(.*?)</header>', html, re.DOTALL)
@@ -142,15 +138,6 @@ def test_progress_card_lives_in_the_hero_and_keeps_error_text():
     assert _html().count('id="progress-card"') == 1, "progress card must not be duplicated"
 
 
-def test_hero_gauge_is_an_accessible_progressbar():
-    hero = _hero(_html())
-    tag = re.search(r'<div[^>]*id="hero-gauge"[^>]*>', hero)
-    assert tag, "#hero-gauge not found in the hero"
-    for needle in ('role="progressbar"', "aria-valuemin", "aria-valuemax", "aria-valuenow", "aria-label", "hidden"):
-        assert needle in tag.group(0), f"gauge needs {needle}"
-    assert 'id="gauge-arc"' in hero and 'pathLength="100"' in hero
-
-
 def test_old_topbar_pill_is_gone_everywhere():
     for name, text in (("html", _html()), ("js", _js())):
         for stale in ("topbar-progress", "btn-stop-topbar", "topbar-fill", "topbar-spinner", "topbar-status-icon"):
@@ -158,19 +145,10 @@ def test_old_topbar_pill_is_gone_everywhere():
     assert "topbar-track" not in _css() and "topbar-fill" not in _css()
 
 
-def test_render_progress_drives_the_gauge_and_hides_it_when_idle():
-    js = _js()
-    assert 'show($("#hero-gauge"), visible)' in js, "gauge must hide when no task is visible"
-    assert "gauge-arc" in js and "aria-valuenow" in js
-    assert re.search(r"Phase\\s\+\\d\+", js), "phase label must be parsed from the progress message"
-
-
-def test_gauge_css_and_hero_is_not_sticky():
+def test_hero_is_not_sticky_and_reduced_motion_covers_transitions():
     css = _css()
-    arc = re.search(r"(?m)^\.gauge-arc\s*\{([^}]*)\}", css)
-    assert arc and "stroke-dasharray" in arc.group(1) and "transition" in arc.group(1)
     assert re.search(r"prefers-reduced-motion:\s*reduce\)\s*\{[^@]*transition-duration:\s*\.001ms", css), (
-        "the blanket reduced-motion rule must cover the gauge transition"
+        "the blanket reduced-motion rule must cover transitions"
     )
     topbar = re.search(r"\.topbar\s*\{([^}]*)\}", css)
     assert topbar and "position: sticky" not in topbar.group(1), "the hero card scrolls with the page"
@@ -218,14 +196,6 @@ def test_dark_theme_has_gradient_background_and_glass_cards():
 
 # ------------------------------------------------------------------ legibility fixes found in the browser
 
-def test_gauge_track_is_visible_against_dark_cards():
-    rule = re.search(r"(?m)^\.gauge-track\s*\{([^}]*)\}", _css())
-    assert rule, "dedicated .gauge-track rule not found"
-    assert "stroke" in rule.group(1) and "var(--well)" not in rule.group(1), (
-        "--well is nearly the card colour in dark mode, so the empty arc vanished"
-    )
-
-
 def test_version_pill_is_readable_in_dark_theme():
     rule = re.search(r':root\[data-theme="dark"\]\s+\.version-pill\s*\{([^}]*)\}', _css())
     assert rule and re.search(r"color:\s*#fff", rule.group(1)), (
@@ -245,16 +215,4 @@ def test_chevrons_stay_above_the_raised_active_card():
 
 # ------------------------------------------------------------------ review fixes
 
-def test_sort_photos_locks_while_busy_but_stays_off_for_empty_library():
-    tag = re.search(r'<button[^>]*id="btn-sort-dock"[^>]*>', _html())
-    assert tag and "data-busy" in tag.group(0), "Sort Photos must lock with the other actions during a run"
-    apply_busy = re.search(r"function applyBusy\(busy\)\s*\{(.*?)\n  \}", _js(), re.DOTALL)
-    assert apply_busy and "btn-sort-dock" in apply_busy.group(1), (
-        "applyBusy would re-enable Sort Photos on an empty library unless it accounts for the total"
-    )
 
-
-def test_dismissing_progress_hides_the_gauge_too():
-    handler = re.search(r'\$\("#btn-dismiss-progress"\)\.onclick\s*=\s*\(\)\s*=>\s*\{([^}]*)\}', _js())
-    assert handler, "dismiss handler not found"
-    assert "hero-gauge" in handler.group(1), "dismiss must not leave a lone gauge behind"

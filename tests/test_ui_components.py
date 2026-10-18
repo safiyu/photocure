@@ -85,10 +85,9 @@ def test_star_squares_and_digit_captions():
     assert "var(--commit" in _body(".lb-rate .star.on")
 
 
-def test_progress_fill_and_gauge_use_brand_gradient():
+def test_progress_fill_uses_brand_gradient():
     assert "var(--grad-brand)" in _body(".progress-fill {")
     assert "#38bdf8" not in _html() and "#ec4899" not in _html()
-    assert "var(--blue-400)" in _html() and "var(--pink-500)" in _html()
 
 
 def test_modal_cards_are_18px():

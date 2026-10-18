@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Duplicates page: every photo says Keep or Duplicate, one sentence says what Confirm does."""
 import re
 from pathlib import Path
