@@ -626,7 +626,7 @@ kbd {
 .lb-rate .star .star-n { font-size: 10px; line-height: 1; color: var(--faint); }
 .lb-rate .star:hover { border-color: var(--commit); transform: translateY(-1px); }
 .lb-rate .star.on { background: var(--commit-soft); border-color: var(--commit); color: var(--warn); }
-.lb-rate .star:focus-visible { outline: 2px solid var(--focus); border-radius: 4px; }
+.lb-rate .star:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .lb-rate .btn { margin-left: 6px; }
 .lb-rate .btn[aria-pressed="true"] { background: var(--primary-soft); border-color: var(--primary); }
 .card { position: relative; margin: 0; min-width: 0; outline: none; }

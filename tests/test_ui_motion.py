@@ -99,3 +99,19 @@ def test_tab_switch_and_progress_hooks():
 def test_blanket_reduced_motion_rule_kept():
     css = (STATIC / "style.css").read_text(encoding="utf-8")
     assert re.search(r"prefers-reduced-motion:\s*reduce\)\s*\{[^@]*transition-duration:\s*\.001ms", css)
+
+
+def test_stale_tab_fade_timer_cannot_drop_a_newer_fade():
+    show = _fn(_js(), "showTab")
+    assert "_enterSeq" in show
+    assert show.count("_enterSeq") >= 3, "the token must be bumped and compared in the timer"
+
+
+def test_no_old_amber_or_pill_leftovers_in_the_log_styles():
+    css = (STATIC / "style.css").read_text(encoding="utf-8").lower()
+    assert "#b45309" not in css and "time-pill" not in css
+
+
+def test_star_focus_ring_keeps_the_star_radius():
+    rule = re.search(r"\.lb-rate \.star:focus-visible\s*\{([^}]*)\}", _css()).group(1)
+    assert "border-radius" not in rule and "outline: 2px solid var(--focus)" in rule

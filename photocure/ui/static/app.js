@@ -2949,7 +2949,8 @@
     if (changed && entering && !reducedMotion()) {
       void entering.offsetWidth;
       entering.classList.add("enter");
-      afterAnim(entering, 260).then(() => entering.classList.remove("enter"));
+      const seq = entering._enterSeq = (entering._enterSeq || 0) + 1;
+      afterAnim(entering, 260).then(() => { if (entering._enterSeq === seq) entering.classList.remove("enter"); });
     }
     positionNavIndicator();
     const [title, sub] = TITLES[name] || [name, ""];
