@@ -806,6 +806,15 @@ try {
     for (const [id, v] of Object.entries(r)) check(v.visible && v.style === "solid" && v.width === "2px", `#${id} has no visible focus ring: ` + JSON.stringify(v));
   });
 
+  await scenario("clicking the version opens Settings scrolled to the About section", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); window.scrollTo(0, 0); true");
+    await settle();
+    await page.eval("document.querySelector('#sidebar-version').click(); true");
+    await page.waitFor("document.querySelector('.tab.active').dataset.tab === 'settings'", 5000, "settings opens");
+    await page.waitFor("(() => { const r = document.querySelector('#sect-about').getBoundingClientRect(); return r.top < innerHeight - 100 && r.bottom > 0 && window.scrollY > 0; })()", 5000, "About scrolled into view");
+    check(await page.eval("document.querySelector('#about-card .about-name').textContent === 'Photocure' && /^v/.test(document.querySelector('#about-card .about-ver').textContent)"), "About card is not rendered");
+  });
+
   await scenario("the page raised no script errors", async () => {
     check(page.errors.length === 0, "script errors: " + page.errors.join(" | ").slice(0, 400));
   });

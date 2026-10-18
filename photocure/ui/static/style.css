@@ -1751,3 +1751,26 @@ body.task-running .step-flow .chev:nth-child(3),
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 55%, transparent); }
   100% { box-shadow: 0 0 0 12px transparent; }
 }
+
+/* About card. */
+#sect-about { scroll-margin-top: 16px; outline: none; }
+.about { display: flex; gap: 20px; align-items: flex-start; }
+.about-logo { width: 64px; height: 64px; flex: none; }
+.about-main { min-width: 0; flex: 1; }
+.about-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.about-name { font: 400 28px/1.1 var(--font-brand); }
+.about-ver {
+  font: 600 12px/1 var(--font-mono); padding: 4px 9px; border-radius: 999px;
+  background: var(--primary-soft); color: var(--link); border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+}
+.about-tag { margin: 6px 0 14px; color: var(--mut); max-width: 60ch; }
+.about-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 0 0 14px; }
+.about-facts > div { background: var(--well); border-radius: 12px; padding: 10px 12px; }
+.about-facts dt { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.about-facts dd { margin: 3px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+.about-models { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.about-chip { font: 500 12px/1 var(--font-mono); padding: 5px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--pink-700); }
+:root[data-theme="dark"] .about-chip { color: var(--accent); }
+.about-links { display: flex; gap: 8px; flex-wrap: wrap; }
+.about-links a { text-decoration: none; }
+@media (max-width: 640px) { .about { flex-direction: column; } }

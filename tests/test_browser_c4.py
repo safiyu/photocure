@@ -102,6 +102,6 @@ def test_the_expected_scenarios_all_ran(outcome):
         "persistent reset-filters", "version badge button", "touch swipe navigation",
         "date presets", "roving focus", "picker and help modals", "no script errors",
         "rapid tab switching", "reduced motion closes", "reopening a dialog that is closing",
-        "import flow: the next step", "keyboard focus shows a visible ring",
+        "import flow: the next step", "keyboard focus shows a visible ring", "clicking the version opens Settings",
     ):
         assert any(needle in n for n in names), f"no scenario mentions {needle!r}: {sorted(names)}"

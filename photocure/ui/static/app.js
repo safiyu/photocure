@@ -1484,7 +1484,7 @@
         } else if (t.dataset.more) {
           const g = grids[t.dataset.more];
           if (g) await g.loadMore();
-        } else if (t.dataset.goto) { ev.preventDefault(); showTab(t.dataset.goto); }
+        } else if (t.dataset.goto) { ev.preventDefault(); gotoTarget(t); }
         else if (t.hasAttribute("data-clearfilters")) {
           resetAllFilters();
         } else if (t.hasAttribute("data-copytext")) {
@@ -1505,7 +1505,7 @@
         const goto = ev.target.closest && ev.target.closest("[data-goto]");
         if (goto && goto.dataset.goto) {
           ev.preventDefault();
-          showTab(goto.dataset.goto);
+          gotoTarget(goto);
           return;
         }
       }
@@ -3150,6 +3150,17 @@
     });
   }
 
+  // Open a tab and, when the link names an anchor, scroll that section into view.
+  function gotoTarget(el) {
+    showTab(el.dataset.goto);
+    const anchor = el.dataset.anchor && $("#" + el.dataset.anchor);
+    if (!anchor) return;
+    requestAnimationFrame(() => {
+      anchor.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "start" });
+      anchor.focus({ preventScroll: true });
+    });
+  }
+
   async function loadAboutInfo() {
     try {
       const about = await api("/api/about");
@@ -3160,19 +3171,26 @@
 
       const aboutCard = $("#about-card");
       if (aboutCard) {
-        const modelsList = (about.models || []).length > 0
-          ? `<div style="margin-top:12px;"><strong>Active models:</strong><ul style="margin:6px 0;padding-left:20px;">${about.models.map(m => `<li>${esc(m.name)}</li>`).join("")}</ul></div>`
-          : "";
+        const chips = (about.models || []).map((m) => `<span class="about-chip">${esc(m.name)}</span>`).join("");
         aboutCard.innerHTML = `
-          <div style="font-size:13px;line-height:1.6;color:var(--mut);">
-            <p style="margin:0 0 8px;">Version: <strong>${esc(about.version || "0.0.0")}</strong></p>
-            <p style="margin:0 0 8px;">By <strong>${esc(about.author || "Unknown")}</strong> • ${esc(about.license || "MIT")}</p>
-            <p style="margin:0 0 8px;">Acceleration: <strong>${esc(about.device || "CPU")}</strong></p>
-            <p style="margin:0 0 8px;">Python: ${esc(about.python || "unknown")}</p>
-            ${modelsList}
-            <p style="margin:10px 0 0;"><a href="/licenses" target="_blank" class="link">View full licenses</a></p>
-          </div>
-        `;
+          <div class="about">
+            <img class="about-logo" src="/static/logo.png" alt="" width="64" height="64">
+            <div class="about-main">
+              <div class="about-title"><span class="about-name">Photocure</span><span class="about-ver">v${esc(about.version || "0.0.0")}</span></div>
+              <p class="about-tag">Offline photo curation. Your photos never leave this computer.</p>
+              <dl class="about-facts">
+                <div><dt>Acceleration</dt><dd>${esc(about.device || "CPU")}</dd></div>
+                <div><dt>Python</dt><dd>${esc(about.python || "unknown")}</dd></div>
+                <div><dt>License</dt><dd>${esc(about.license || "MIT License")}</dd></div>
+                <div><dt>Author</dt><dd>${esc(about.author || "Unknown")}</dd></div>
+              </dl>
+              ${chips ? `<div class="about-models" aria-label="Active models">${chips}</div>` : ""}
+              <div class="about-links">
+                <a class="btn sm secondary" href="/licenses" target="_blank" rel="noopener">Licenses</a>
+                <a class="btn sm ghost" href="https://github.com/safiyu/photocure" target="_blank" rel="noopener">GitHub</a>
+              </div>
+            </div>
+          </div>`;
       }
     } catch (e) {
       /* ignore */
