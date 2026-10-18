@@ -120,6 +120,9 @@ PHOTOS_DIR=/path/to/photos OUTPUT_DIR=/path/to/organized docker compose -f docke
 
 For AMD use `docker-compose.rocm.yml` in place of `docker-compose.gpu.yml`, and for Intel use `docker-compose.intel.yml`.
 
+#### Portainer / Home Server Stack
+If you are deploying as a stack in **Portainer** or on a remote server, use the sample [docker-compose.stack.yml](docker-compose.stack.yml) file. It uses the pre-built `safiyu/photocure:latest` image and includes pre-configured environment variables (`PCUR_AUTH_TOKEN`, `PCUR_ALLOWED_HOSTS=*`, user IDs, and volumes).
+
 On a Mac, Docker cannot use the Mac graphics chip. For full speed on a Mac, use Option 2.
 
 ## Using Photocure day to day
