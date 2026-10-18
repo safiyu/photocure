@@ -577,9 +577,11 @@ try {
         cols: getComputedStyle(document.querySelector('.steps')).gridTemplateColumns.trim().split(/\\s+/).length
       };
     })()`);
-    // Seeded library: 5,000 indexed + 1 burst group, all inferred -> every step is done.
+    // Seeded library: 5,000 indexed + 1 burst group, all inferred -> Analyze and Group are done and
+    // Scan is the active step again, ready for the next batch.
     const byId = Object.fromEntries(info.steps.map((s) => [s.id, s]));
-    for (const id of ["step-scan", "step-infer", "step-cluster"]) {
+    check(byId["step-scan"].active && !byId["step-scan"].done && !byId["step-scan"].locked, "step-scan should be the active next step");
+    for (const id of ["step-infer", "step-cluster"]) {
       check(byId[id].done, id + " is not in the done state");
       check(!byId[id].active && !byId[id].locked, id + " carries a conflicting state class");
       check(byId[id].badgeBg !== "rgba(0, 0, 0, 0)", id + " badge has no painted background");
@@ -763,6 +765,37 @@ try {
     check(r.hidden === false && r.closing === false, "reopened dialog ended hidden or stuck closing: " + JSON.stringify(r));
     await page.eval("document.querySelector('#help-close').click()");
     await page.waitFor("document.querySelector('#help').hidden", 3000, "help closes again");
+  });
+
+  await scenario("import flow: the next step is the long button and Sort Photos lights up when relevant", async () => {
+    const total = (await api("/api/overview")).total;
+    const stub = (patch) => page.eval(`(() => { if (!window.__rf) window.__rf = window.fetch.bind(window); const p = ${JSON.stringify(patch)}; window.fetch = (u, i) => /\\/api\\/overview/.test(String(u)) ? window.__rf(u, i).then((r) => r.json()).then((o) => { o.stats = Object.assign({}, o.stats, p.stats || {}); o.by_category = Object.assign({}, o.by_category, p.by_category || {}); return new Response(JSON.stringify(o), { status: 200, headers: { "Content-Type": "application/json" } }); }) : window.__rf(u, i); return true; })()`);
+    const stored = (v) => page.eval(`localStorage.setItem('pcur-grouped-total', ${JSON.stringify(String(v))}); true`);
+    const refresh = () => page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); document.querySelector('#btn-sort-dock').click(); true");
+    const tall = (id) => page.eval(`getComputedStyle(document.querySelector('#${id}')).height === '48px'`);
+    const hint = () => page.eval("document.querySelector('#dock-hint').textContent");
+    try {
+      await stored(total); await stub({}); await refresh();
+      await page.waitFor("document.querySelector('#step-scan').classList.contains('active')", 8000, "scan is next");
+      check(await tall("btn-scan") && !(await tall("btn-infer")) && !(await tall("btn-cluster")), "only Scan should be the long button");
+      check(/Scan/.test(await hint()), "hint should invite the next scan: " + (await hint()));
+
+      await stub({ stats: { pending_inference: 3 } }); await refresh();
+      await page.waitFor("document.querySelector('#step-infer').classList.contains('active')", 8000, "analyze is next");
+      check(await tall("btn-infer") && !(await tall("btn-scan")), "Analyze should be the long button");
+      check(/Analyze/.test(await hint()), "hint should say Analyze: " + (await hint()));
+
+      await stub({}); await stored(total - 1); await refresh();
+      await page.waitFor("document.querySelector('#step-cluster').classList.contains('active')", 8000, "group is next");
+      check(await tall("btn-cluster") && !(await tall("btn-infer")), "Group should be the long button, separate from Analyze");
+      check(/Group/.test(await hint()), "hint should say Group: " + (await hint()));
+
+      await stored(total); await stub({ by_category: { unrouted: 5 } }); await refresh();
+      await page.waitFor("document.querySelector('#btn-sort-dock').classList.contains('needs-action')", 8000, "Sort Photos is highlighted");
+      check(/Sort Photos/.test(await hint()), "hint should say Sort Photos: " + (await hint()));
+    } finally {
+      await page.eval("if (window.__rf) window.fetch = window.__rf; localStorage.removeItem('pcur-grouped-total'); true");
+    }
   });
 
   await scenario("the page raised no script errors", async () => {

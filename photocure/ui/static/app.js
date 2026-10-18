@@ -2783,6 +2783,35 @@
     });
   }
 
+  // Which import step is next: Scan, then Analyze, then Group, then Scan again for the next batch.
+  function flowStates(total, pending, bursts, stored) {
+    const inferred = total > 0 && pending === 0;
+    const stale = stored === null ? bursts === 0 : String(total) !== stored;
+    const next = !total ? "scan" : pending > 0 ? "infer" : stale ? "cluster" : "scan";
+    const cls = (id, rest) => (next === id ? "active" : rest);
+    return {
+      next, inferred,
+      scan: cls("scan", "done"),
+      infer: cls("infer", inferred ? "done" : "locked"),
+      cluster: cls("cluster", inferred ? "done" : "locked"),
+    };
+  }
+
+  // One plain sentence for what to do next, shown in the dock.
+  function nextHint(flow, sortNeeded, total) {
+    if (!total) return "Start here: choose a folder, then press Scan.";
+    if (flow.next === "infer") return "Next: press Analyze Now so Photocure can read the new photos.";
+    if (sortNeeded && flow.next === "cluster") return "Next: press Sort Photos to file them into categories, then Group bursts.";
+    if (sortNeeded) return "Next: press Sort Photos to file your photos into categories.";
+    if (flow.next === "cluster") return "Next: press Group to find burst shots.";
+    return "All caught up. Choose a folder and press Scan to add more photos.";
+  }
+
+  function markGrouped() {
+    if (!state.overview) return;
+    try { localStorage.setItem("pcur-grouped-total", String(state.overview.total)); } catch (e) { /* storage unavailable */ }
+  }
+
   function renderCounts(ov) {
     const s = ov.stats || {};
     const set = (k, v, alert) => {
@@ -2808,8 +2837,13 @@
     set("actions", s.planned_actions);
 
     const total = ov.total, pending = num(s.pending_inference), bursts = num(s.burst_groups);
-    const inferred = total > 0 && pending === 0;
-    state.inferred = inferred;
+    let stored = null;
+    try {
+      stored = localStorage.getItem("pcur-grouped-total");
+      if (!total) localStorage.removeItem("pcur-grouped-total");
+    } catch (e) { /* storage unavailable */ }
+    const flow = flowStates(total, pending, bursts, stored);
+    state.inferred = flow.inferred;
     const step = (id, cls, text) => {
       const li = $("#step-" + id);
       if (!li) return;
@@ -2818,14 +2852,16 @@
       li.classList.toggle("locked", cls === "locked");
       $("#state-" + id).textContent = text;
     };
-    // Step 1 — done once indexed, otherwise the actionable focus (never locked).
-    step("scan", total > 0 ? "done" : "active", total > 0 ? `${fmtN(total)} indexed` : "Not started");
-    // Step 2 — done once inferred, the active focus while photos await analysis, locked with no library.
-    step("infer", inferred ? "done" : total > 0 ? "active" : "locked",
-      pending > 0 ? `${fmtN(pending)} waiting` : total > 0 ? "Done" : "Needs step 1");
-    // Step 3 — done once grouped, active when analysis is ready, locked until step 2 completes.
-    step("cluster", bursts > 0 ? "done" : inferred ? "active" : "locked",
-      bursts > 0 ? `${fmtN(bursts)} groups` : inferred ? "Not run yet" : "Needs step 2");
+    step("scan", flow.scan, total > 0 ? `${fmtN(total)} indexed` : "Not started");
+    step("infer", flow.infer, pending > 0 ? `${fmtN(pending)} waiting` : total > 0 ? "Done" : "Needs step 1");
+    step("cluster", flow.cluster,
+      flow.cluster === "active" ? "Ready" : flow.cluster === "locked" ? "Needs step 2"
+        : bursts > 0 ? `${fmtN(bursts)} groups` : "No groups");
+    const sortNeeded = flow.inferred && num((ov.by_category || {}).unrouted) > 0;
+    const sortBtn = $("#btn-sort-dock");
+    if (sortBtn) sortBtn.classList.toggle("needs-action", sortNeeded);
+    const hint = $("#dock-hint");
+    if (hint) hint.textContent = nextHint(flow, sortNeeded, total);
   }
 
   async function loadStats() {
@@ -3330,6 +3366,7 @@
       if (r) {
         libLog(`Grouping finished: ${fmtN(r.burst_groups)} burst groups`, "ok");
         toast(`Found ${fmtN(r.burst_groups)} burst groups`, "ok");
+        markGrouped();
         await afterTask(true);
       }
     };
@@ -3340,6 +3377,7 @@
       if (r) {
         libLog(`Import finished: ${fmtN(r.scan.new)} new, ${fmtN(r.infer.processed)} analyzed, ${fmtN(r.cluster.burst_groups)} burst groups`, "ok");
         toast("Import finished", "ok");
+        markGrouped();
         await afterTask(true);
       }
     };
