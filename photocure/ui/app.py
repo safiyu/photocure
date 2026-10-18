@@ -149,6 +149,14 @@ class RenameReq(BaseModel):
     name: str
 
 
+def infer_progress_detail(done: int, total: int) -> str:
+    """Photos handled in the current phase; the pipeline counts two steps per photo."""
+    photos = total // 2
+    if photos <= 0:
+        return ""
+    return f"{done if done <= photos else done - photos} / {photos} photos"
+
+
 class ProgressManager:
     def __init__(self):
         self._lock = threading.Lock()
@@ -1661,7 +1669,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         def on_prog(done, total, curr):
             fn = Path(curr).name if not curr.startswith("Phase") else curr
-            progress_mgr.update(done, total, fn, detail=f"{done} / {total}" if total > 0 else "")
+            progress_mgr.update(done, total, fn, detail=infer_progress_detail(done, total))
 
         try:
             pipeline = InferencePipeline(c, backend=detect_for(c))

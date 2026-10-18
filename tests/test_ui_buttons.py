@@ -97,3 +97,25 @@ def test_busy_marks_the_started_button_as_loading():
     apply_busy = re.search(r"function applyBusy\(busy\)\s*\{(.*?)\n  \}", js, re.S)
     assert apply_busy and "loading" in apply_busy.group(1) and "busyBtn" in apply_busy.group(1)
     assert "state.busyBtn" in js.split("function applyBusy")[0] or "busyBtn:" in js, "state.busyBtn must exist"
+
+
+def test_focus_ring_is_an_outline_that_variant_shadows_cannot_override():
+    body = _rule(".btn:focus-visible")
+    assert "outline: 2px solid var(--focus)" in body and "outline-offset" in body
+    assert "outline: none" not in body
+
+
+def test_pressed_state_comes_after_every_variant_hover_so_it_wins():
+    css = _css()
+    press = css.index(".btn:active:not(:disabled)")
+    for hover in (".btn.primary:hover", ".btn.secondary:hover", ".btn.danger:hover", ".btn.ghost:hover"):
+        assert css.index(hover) < press, f"{hover} would override the pressed state"
+    body = re.search(r"\.btn:active:not\(:disabled\)[^{]*\{([^}]*)\}", css).group(1)
+    assert "scale(.97)" in body and "box-shadow: none" in body
+
+
+def test_closing_overlays_do_not_catch_clicks():
+    css = _css()
+    for selector, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+        if re.search(r"\.(modal|lb|similar|bulk|confirm-modal)\.closing\s*$", selector.strip().split(",")[-1]) and "animation" in body:
+            assert "pointer-events: none" in body, selector.strip()

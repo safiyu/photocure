@@ -2407,7 +2407,7 @@
     $("#progress-counts").textContent = p.detail || (p.total > 0 ? `${fmtN(p.done)} of ${fmtN(p.total)}` : "");
     // C8: live tabular ratio (e.g. "135 / 3,194"); empty when there's no total,
     // which the :empty CSS rule uses to hide the element.
-    $("#progress-ratio").textContent = p.total > 0 ? `${fmtN(p.done)} / ${fmtN(p.total)}` : "";
+    $("#progress-ratio").textContent = p.detail || (p.total > 0 ? `${fmtN(p.done)} / ${fmtN(p.total)}` : "");
     // Gauge: the arc is 100 units long (pathLength), so the dash length is the percent.
     const gaugePct = p.active ? Math.max(num(p.percent), 2) : (done ? 100 : Math.max(num(p.percent), 0));
     const phase = (String(p.message || "").match(/Phase\s+\d+\s*\/\s*\d+/i) || [""])[0];

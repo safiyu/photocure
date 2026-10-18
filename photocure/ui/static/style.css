@@ -480,8 +480,7 @@ main {
   transition: background .15s ease, border-color .15s ease, box-shadow .15s ease, transform .12s ease, opacity .15s ease;
 }
 .btn:hover { background: var(--well); border-color: var(--faint); transform: translateY(-1px); }
-.btn:active { transform: scale(.97); box-shadow: none; }
-.btn:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 35%, transparent); }
+.btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .btn.sm { height: 32px; padding: 0 14px; font-size: 13px; }
 .btn.lg { height: 46px; padding: 0 24px; font-size: 15px; }
 .btn.primary { --btn-fill: var(--primary); --btn-hover: var(--primary-hover); background: var(--primary); color: var(--primary-ink); }
@@ -508,6 +507,8 @@ main {
 :root[data-theme="dark"] .btn.danger { --danger-ink: color-mix(in srgb, var(--err) 60%, #fff); background: color-mix(in srgb, var(--err) 16%, transparent); }
 :root[data-theme="dark"] .btn.danger:hover { background: var(--err); color: #ffffff; }
 .btn:disabled, .btn.busy { opacity: .5; cursor: not-allowed; pointer-events: none; transform: none; }
+.btn:active:not(:disabled),
+.step.active .actions .btn:active:not(:disabled) { transform: scale(.97); box-shadow: none; }
 .btn.loading { cursor: progress; }
 .btn.loading:disabled { opacity: .9; }
 .btn.loading::before {
@@ -1724,13 +1725,13 @@ body.task-running .step-flow .chev:nth-child(3),
 .modal:not([hidden]), .confirm-modal:not([hidden]), .lb:not([hidden]), .similar:not([hidden]) { animation: ov-fade-in .22s ease-out; }
 .modal:not([hidden]) .modal-card, .confirm-modal:not([hidden]) .confirm-content { animation: ov-in .22s cubic-bezier(.2, .8, .2, 1); }
 .lb:not([hidden]) .lb-info { animation: slide-in .22s cubic-bezier(.2, .8, .2, 1); }
-.modal.closing, .confirm-modal.closing, .lb.closing, .similar.closing { animation: ov-fade-out .2s ease-in forwards; }
+.modal.closing, .confirm-modal.closing, .lb.closing, .similar.closing { animation: ov-fade-out .2s ease-in forwards; pointer-events: none; }
 .modal.closing .modal-card, .confirm-modal.closing .confirm-content { animation: ov-out .2s ease-in forwards; }
 #lb-img.swap-in { animation: ov-fade-in .18s ease-out; }
 @keyframes bulk-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translateX(-50%); } }
 @keyframes bulk-out { from { opacity: 1; transform: translateX(-50%); } to { opacity: 0; transform: translate(-50%, 10px); } }
 .bulk:not([hidden]) { animation: bulk-in .2s cubic-bezier(.2, .8, .2, 1); }
-.bulk.closing { animation: bulk-out .18s ease-in forwards; }
+.bulk.closing { animation: bulk-out .18s ease-in forwards; pointer-events: none; }
 @keyframes toast-out { to { opacity: 0; transform: translateX(12px); } }
 .toast.out { animation: toast-out .2s ease-in forwards; }
 @keyframes tick { from { background: color-mix(in srgb, var(--accent) 45%, transparent); } }

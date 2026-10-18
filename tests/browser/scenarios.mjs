@@ -798,6 +798,14 @@ try {
     }
   });
 
+  await scenario("keyboard focus shows a visible ring on brand buttons", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); true");
+    await settle();
+    await press("Tab");
+    const r = await page.eval(`(() => { const out = {}; for (const id of ['btn-scan', 'btn-infer', 'btn-ingest-all']) { const b = document.getElementById(id); b.focus(); const cs = getComputedStyle(b); out[id] = { visible: b.matches(':focus-visible'), style: cs.outlineStyle, width: cs.outlineWidth }; } document.activeElement.blur(); return out; })()`);
+    for (const [id, v] of Object.entries(r)) check(v.visible && v.style === "solid" && v.width === "2px", `#${id} has no visible focus ring: ` + JSON.stringify(v));
+  });
+
   await scenario("the page raised no script errors", async () => {
     check(page.errors.length === 0, "script errors: " + page.errors.join(" | ").slice(0, 400));
   });
