@@ -95,7 +95,9 @@ def test_dock_markup_holds_summary_and_actions():
         assert needle in body, f"{needle} must live inside the dock"
     assert "Run All Three Steps" in body and "Reset Library" in body and "Sort Photos" in body
     assert 'class="runall"' not in tab, "the old .runall row must be gone"
-    assert 'id="library-status"' in tab, "status caption must be kept for the JS that writes to it"
+    assert 'id="library-status"' not in tab, "the bottom status line moved into the header subtitle"
+    assert "Nothing is moved until you apply a plan" not in tab, "no status caption below the dock"
+    assert "Nothing is moved until you apply a plan." in _js(), "the sentence now lives in the header subtitle (TITLES)"
 
 
 def test_dock_css_is_a_pill_bar():

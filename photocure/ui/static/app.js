@@ -21,7 +21,7 @@
   };
 
   const TITLES = {
-    library: ["Import", "Choose a folder and let Photocure sort what it finds."],
+    library: ["Import", "Choose a folder and let Photocure sort what it finds. Nothing is moved until you apply a plan."],
     categories: ["Library", "Every photo, grouped by the category it was sorted into."],
     search: ["Search", "Describe a photo in your own words and Photocure finds it."],
     duplicates: ["Duplicates", "Identical and look-alike photos. Choose the one to keep in each group."],
@@ -29,7 +29,7 @@
     highlights: ["Highlights", "Your most appealing photos first."],
     events: ["Events", "Photos grouped by when and where they were taken."],
     junk: ["Junk review", "Screenshots, documents, duplicates and accidents. Move anything that does not belong."],
-    uncertain: ["Needs a look", "The analysis was not sure about these. Choose a category for each."],
+    uncertain: ["Finalize", "The analysis was not sure about these. Choose a category for each."],
     settings: ["Settings", "Choose what runs the analysis and how many workers it uses."],
     actions: ["Apply and undo", "Review the plan, then organize your files. Every change can be undone."],
   };
@@ -328,6 +328,7 @@
     el.appendChild(pill);
     el.appendChild(body);
     box.prepend(el);
+    box.scrollTop = 0;
     while (box.children.length > 200) box.lastChild.remove();
   }
   const logLine = (m, c) => logTo("#action-log", m, c);
@@ -441,7 +442,7 @@
   function emptyNode(e) {
     const d = document.createElement("div");
     d.innerHTML = emptyHTML(e);  // emptyHTML escapes its text
-    return d;
+    return d.firstElementChild || d;
   }
 
   function makeGrid(key, cfg) {
@@ -568,7 +569,7 @@
       el: "#uncertaingrid", more: "#uncertaingrid-more", count: "#uncertaincount",
       params: () => "category=uncertain",
       matches: (it) => eff(it) === "uncertain",
-      empty: { icon: "check", title: "Nothing needs a look", text: "Every photo was sorted with confidence." },
+      empty: { icon: "check", title: "Nothing to finalize", text: "Every photo was sorted with confidence." },
     });
     makeGrid("highlights", {
       el: "#highlightgrid", more: "#highlightgrid-more", count: "#highlightcount",
@@ -1803,7 +1804,14 @@
     $("#btn-browse-scan").onclick = () => openPicker({
       title: "Choose your photo folder", mode: "photos", initial: $("#scan-path").value.trim(),
       okLabel: "Use this folder",
-      onPick: (p) => { const i = $("#scan-path"); i.value = p; i.classList.remove("input-error"); },
+      onPick: (p) => {
+        const i = $("#scan-path");
+        i.value = p;
+        i.classList.remove("input-error");
+        const bar = $(".folder-pick-bar");
+        if (bar) bar.classList.remove("input-error");
+        if (window.__syncScanPathDisplay) window.__syncScanPathDisplay();
+      },
     });
     $("#btn-browse-out").onclick = () => openPicker({
       title: "Choose the destination folder", mode: "output", initial: $("#orgroot").value.trim(),
@@ -2426,7 +2434,7 @@
     } else if (b && b.semantic_is_stub) {
       html = `<div class="banner warn" role="alert">${icon("alert")}<div class="b-body">
         <h3>Photos cannot be recognised yet</h3>
-        <p>No AI model is installed, so a placeholder is sorting your photos. It cannot tell a screenshot from a landscape, which is why most photos land in Needs a look. Install the model, restart the app, then analyze again.</p>
+        <p>No AI model is installed, so a placeholder is sorting your photos. It cannot tell a screenshot from a landscape, which is why most photos land in Finalize. Install the model, restart the app, then analyze again.</p>
         <div class="b-row"><div class="codebox"><code>${esc(hintCommand(b.hint))}</code>
           <button class="btn sm" type="button" data-copy>Copy</button></div>
           <a class="link" href="#settings" data-goto="settings">Device and worker settings</a></div></div></div>`;
@@ -2672,7 +2680,7 @@
       const res = await followJob(r.job_id, "Learn");
       const moved = num(res && res.moved_out_of_uncertain);
       toast(moved
-        ? `${fmtN(moved)} photo${moved === 1 ? "" : "s"} moved out of Needs a look`
+        ? `${fmtN(moved)} photo${moved === 1 ? "" : "s"} moved out of Finalize`
         : "No photos changed. Choose a few more examples and try again.", moved ? "ok" : "err");
       logLine(`Learned from ${fmtN(res && res.examples)} examples, updated ${fmtN(res && res.updated)} photos`, "ok");
     } catch (e) { toast(e.message, "err"); logLine(e.message, "err"); }
@@ -2876,7 +2884,10 @@
       toast("Library cleared successfully", "ok");
       libLog("Library cleared: all indexed images and metadata removed.", "warn");
       const pathInput = $("#scan-path");
-      if (pathInput) pathInput.value = "";
+      if (pathInput) {
+        pathInput.value = "";
+        if (window.__syncScanPathDisplay) window.__syncScanPathDisplay();
+      }
       ["#state-scan", "#state-infer", "#state-cluster"].forEach((sel) => {
         const el = $(sel);
         if (el) el.textContent = "";
@@ -2901,6 +2912,11 @@
     const path = input ? input.value.trim() : "";
     if (!path) {
       if (input) { input.classList.add("input-error"); }
+      const bar = $(".folder-pick-bar");
+      if (bar) {
+        bar.classList.add("input-error");
+        setTimeout(() => bar.classList.remove("input-error"), 2000);
+      }
       libLog("Choose a photo folder first", "err");
       toast("Choose a photo folder first", "err");
       $("#btn-browse-scan").focus();
@@ -3035,7 +3051,7 @@
         `;
       }
     } catch (e) {
-      console.warn("Could not load about info:", e);
+      /* ignore */
     }
   }
 
@@ -3140,10 +3156,65 @@
     $("#bulk-cat").onchange = (e) => { if (e.target.value) bulkReassign(e.target.value); e.target.selectedIndex = 0; };
 
     const scanInput = $("#scan-path");
-    scanInput.addEventListener("input", () => scanInput.classList.remove("input-error"));
-    scanInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); $("#btn-scan").click(); }
-    });
+    const scanDisplay = $("#scan-path-display");
+    function syncScanPathDisplay() {
+      if (!scanInput || !scanDisplay) return;
+      const val = scanInput.value.trim();
+      if (val) {
+        scanDisplay.textContent = val;
+        scanDisplay.classList.add("has-path");
+        scanDisplay.title = val;
+      } else {
+        scanDisplay.textContent = scanDisplay.dataset.empty || "No folder selected";
+        scanDisplay.classList.remove("has-path");
+        scanDisplay.title = "";
+      }
+    }
+    window.__syncScanPathDisplay = syncScanPathDisplay;
+    const valDesc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    if (valDesc && scanInput) {
+      Object.defineProperty(scanInput, "value", {
+        get() { return valDesc.get.call(this); },
+        set(v) {
+          valDesc.set.call(this, v);
+          syncScanPathDisplay();
+        }
+      });
+    }
+    if (scanInput) {
+      scanInput.addEventListener("input", () => {
+        scanInput.classList.remove("input-error");
+        const bar = $(".folder-pick-bar");
+        if (bar) bar.classList.remove("input-error");
+        syncScanPathDisplay();
+      });
+      scanInput.addEventListener("change", syncScanPathDisplay);
+      scanInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); $("#btn-scan").click(); }
+      });
+    }
+    const folderPickBar = $(".folder-pick-bar");
+    if (folderPickBar) {
+      folderPickBar.addEventListener("click", (e) => {
+        if (!e.target.closest("#btn-browse-scan")) {
+          $("#btn-browse-scan").click();
+        }
+      });
+      folderPickBar.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          $("#btn-browse-scan").click();
+        }
+      });
+    }
+    const scanLabel = $('label[for="scan-path"]');
+    if (scanLabel) {
+      scanLabel.addEventListener("click", (e) => {
+        e.preventDefault();
+        $("#btn-browse-scan").click();
+      });
+    }
+    syncScanPathDisplay();
 
     $("#btn-scan").onclick = async () => {
       const path = needPath();

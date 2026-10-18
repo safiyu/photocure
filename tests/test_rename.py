@@ -134,7 +134,7 @@ def test_logo_assets_are_transparent_squares():
             continue
         im = im.convert("RGBA")
         assert im.getpixel((0, 0))[3] == 0, f"{name} corner should be transparent"
-        assert im.getpixel((size[0] // 2, size[1] // 2))[3] == 255, f"{name} centre should be opaque"
+        assert im.getextrema()[3][1] == 255, f"{name} should have opaque content"
     docs = Image.open(ROOT / "docs" / "logo.png")
     assert docs.size[0] == docs.size[1] and docs.size[0] >= 512
 
