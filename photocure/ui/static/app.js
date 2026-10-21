@@ -2306,34 +2306,130 @@
   }
 
   // Tight face crops with the eye state, built from DOM nodes only.
-  async function showFaces(imageId, host) {
-    const data = await api(`/api/images/${num(imageId)}/faces`);
-    host.replaceChildren();
-    if (!data.items.length) {
-      const p = document.createElement("p");
-      p.className = "help";
-      p.textContent = "No faces were found in this photo.";
-      host.appendChild(p);
-      return;
-    }
-    const wording = { open: "Eyes open", possible: "Eyes may be closing", closed: "Eyes closed", unknown: "Eyes not measured" };
-    data.items.forEach((f) => {
-      const chip = document.createElement("figure");
-      chip.className = "facechip" + (f.is_blink ? " blink" : "");
-      if (f.url) {
-        const img = document.createElement("img");
-        img.loading = "lazy";
-        img.alt = "Face crop";
-        img.src = f.url;
-        chip.appendChild(img);
+  async function showFaces(imageId, host, filename) {
+    const head = document.createElement("div");
+    head.className = "face-popover-head";
+
+    const title = document.createElement("div");
+    title.className = "face-popover-title";
+    title.textContent = filename ? `Faces in ${filename}` : "Face inspection";
+    head.appendChild(title);
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "face-popover-close";
+    close.setAttribute("aria-label", "Close");
+    close.textContent = "✕";
+    close.onclick = hideFacePanel;
+    head.appendChild(close);
+
+    host.replaceChildren(head);
+
+    const loading = document.createElement("p");
+    loading.className = "help";
+    loading.textContent = "Loading face crops...";
+    host.appendChild(loading);
+
+    try {
+      const data = await api(`/api/images/${num(imageId)}/faces`);
+      loading.remove();
+      if (!data.items || !data.items.length) {
+        const p = document.createElement("p");
+        p.className = "help";
+        p.textContent = "No faces were found in this photo.";
+        host.appendChild(p);
+        return;
       }
-      const cap = document.createElement("figcaption");
-      const score = f.eye_closed_score != null ? " (" + num(f.eye_closed_score).toFixed(2) + ")" : "";
-      cap.textContent = (wording[f.eye_status] || wording.unknown) + score;
-      chip.appendChild(cap);
-      host.appendChild(chip);
-    });
+      title.textContent = `${filename ? filename : "Faces"} (${data.items.length})`;
+      const grid = document.createElement("div");
+      grid.className = "face-popover-grid";
+
+      const wording = { open: "Eyes open", possible: "Eyes may be closing", closed: "Eyes closed", unknown: "Eyes not measured" };
+      data.items.forEach((f, idx) => {
+        const chip = document.createElement("figure");
+        chip.className = "facechip" + (f.is_blink ? " blink" : "");
+        if (f.url) {
+          const img = document.createElement("img");
+          img.loading = "lazy";
+          img.alt = `Person ${idx + 1}`;
+          img.src = f.url;
+          chip.appendChild(img);
+        }
+        const cap = document.createElement("figcaption");
+        const person = document.createElement("div");
+        person.className = "facechip-person";
+        person.textContent = `Person ${idx + 1}`;
+        cap.appendChild(person);
+
+        const score = f.eye_closed_score != null ? " (" + num(f.eye_closed_score).toFixed(2) + ")" : "";
+        const stateKey = f.eye_status || "unknown";
+        const tag = document.createElement("span");
+        tag.className = `eye-tag ${stateKey}`;
+        tag.textContent = (wording[stateKey] || wording.unknown) + score;
+        cap.appendChild(tag);
+
+        chip.appendChild(cap);
+        grid.appendChild(chip);
+      });
+      host.appendChild(grid);
+    } catch (e) {
+      loading.textContent = "Failed to load faces: " + (e.message || e);
+    }
   }
+
+  let activeFaceId = null;
+
+  function hideFacePanel() {
+    const panel = $("#facepanel");
+    if (panel) {
+      panel.hidden = true;
+      panel.replaceChildren();
+    }
+    $$("[data-faces]", $("#burstdetail")).forEach((b) => {
+      b.classList.remove("on");
+      const c = b.dataset.count;
+      b.textContent = c ? `Faces (${c})` : "Faces";
+    });
+    activeFaceId = null;
+  }
+
+  function positionFacePopover(pop, anchorEl) {
+    pop.style.visibility = "hidden";
+    pop.hidden = false;
+    const rect = anchorEl.getBoundingClientRect();
+    const popRect = pop.getBoundingClientRect();
+    const pad = 12;
+
+    let top = rect.bottom + 8;
+    if (top + popRect.height > window.innerHeight - pad && rect.top - popRect.height - 8 > pad) {
+      top = rect.top - popRect.height - 8;
+    }
+    let left = rect.left;
+    if (left + popRect.width > window.innerWidth - pad) {
+      left = Math.max(pad, window.innerWidth - popRect.width - pad);
+    }
+    if (left < pad) left = pad;
+
+    pop.style.top = `${Math.round(top)}px`;
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.visibility = "visible";
+  }
+
+  document.addEventListener("pointerdown", (e) => {
+    const panel = $("#facepanel");
+    if (panel && !panel.hidden) {
+      if (!panel.contains(e.target) && !e.target.closest("[data-faces]")) {
+        hideFacePanel();
+      }
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      const panel = $("#facepanel");
+      if (panel && !panel.hidden) hideFacePanel();
+    }
+  });
 
   async function rejectBlinks(burstId, count) {
     const yes = await showConfirmDialog({
@@ -2373,6 +2469,7 @@
     unknown: "eyes not measured", missing: "not seen in this frame" };
 
   async function showBurst(id) {
+    hideFacePanel();
     $$(".burstrow", $("#burstlist")).forEach((r) => r.classList.toggle("on", num(r.dataset.burst) === id));
     const data = await api("/api/burst/" + num(id));
     const group = data.group;
@@ -2395,31 +2492,40 @@
       return `<div class="gm-dots" role="img" aria-label="Faces in this frame">${dots}</div>
         <div class="gm-bar" title="Weakest face in this frame"><span style="width:${Math.round(num(f.min_quality) * 100)}%"></span></div>`;
     };
-    $("#burstdetail").innerHTML = `<h3>${esc(data.burst)}</h3>${banner}
-      <div class="btn-row" id="blinkbar"></div>
-      <div class="burstgrid">` +
+    $("#burstdetail").innerHTML = `
+      <div class="burst-header anim-fade">
+        <div class="burst-meta-row">
+          <div class="burst-title-wrap">
+            <h3 class="burst-title">${esc(data.burst)}</h3>
+            <span class="burst-count-badge">${fmtN(data.members.length)} frames</span>
+          </div>
+        </div>
+        ${banner}
+        <div class="btn-row burst-toolbar" id="blinkbar"></div>
+      </div>
+      <div id="facepanel" class="face-popover" hidden role="dialog" aria-label="Face inspection"></div>
+      <div class="burstgrid anim-in">` +
       data.members.map((m) => {
         const bits = [];
         if (m.sharpness_norm != null) bits.push("sharpness " + num(m.sharpness_norm).toFixed(2));
         if (m.face_confidence != null) bits.push("face " + num(m.face_confidence).toFixed(2));
         if (m.eye_closed != null) bits.push("eyes closed " + num(m.eye_closed).toFixed(2));
         return `<figure class="card${m.is_best_shot ? " best" : ""}${m.delete_approved ? " marked" : ""}" data-id="${num(m.id)}" tabindex="0">
-          <div class="facepanel facepanel-inline" data-face-host="${num(m.id)}" hidden></div>
           <div class="thumb">
             <img loading="lazy" src="${thumbUrl(m.id)}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
-            <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}${m.delete_approved ? '<span class="badge warn">Marked for delete</span>' : ""}${gmBadge(m)}</div>
+            <div class="flags">${m.is_best_shot ? '<span class="badge best">★ Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}${m.delete_approved ? '<span class="badge danger">Marked for delete</span>' : ""}${gmBadge(m)}</div>
           </div>
           <figcaption class="caption">
-            <div class="fn">${esc(m.filename)}</div>
+            <div class="fn" title="${esc(m.filename)}">${esc(m.filename)}</div>
             <div class="meta">${num(m.width)}×${num(m.height)}${m.taken_at ? ", " + esc(String(m.taken_at).slice(11, 19)) : ""}</div>
             <div class="meta">${esc(bits.join(", "))}</div>
             ${gmDetail(m)}
             <div class="btn-row card-actions">
               ${m.is_best_shot
-                ? `<button class="mini is-best" disabled title="This is the best shot">Best shot</button>`
+                ? `<button class="mini is-best" disabled title="This is the best shot">★ Best shot</button>`
                 : `<button class="mini" data-makebest="${num(m.id)}" title="Set as best shot">Set best</button>`}
-              <button class="mini danger${m.delete_approved ? " on" : ""}${m.is_best_shot ? " warn-best" : ""}" data-markdelete="${num(m.id)}" data-is-best="${m.is_best_shot ? "1" : "0"}" aria-pressed="${m.delete_approved ? "true" : "false"}" title="${m.is_best_shot ? "Marking the best shot for delete" : "Mark this frame for delete"}">${m.delete_approved ? "Delete marked" : "Mark delete"}</button>
-              ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}" title="Inspect face crops">Faces</button>` : ""}
+              <button class="mini danger${m.delete_approved ? " on" : ""}${m.is_best_shot ? " warn-best" : ""}" data-markdelete="${num(m.id)}" data-is-best="${m.is_best_shot ? "1" : "0"}" aria-pressed="${m.delete_approved ? "true" : "false"}" title="${m.is_best_shot ? "Marking the best shot for delete" : "Mark this frame for delete"}">${m.delete_approved ? "Marked (undo)" : "Mark delete"}</button>
+              ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}" data-count="${num(m.face_count)}" title="Inspect face crops">Faces (${num(m.face_count)})</button>` : ""}
             </div>
           </figcaption>
         </figure>`;
@@ -2445,19 +2551,27 @@
     if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
     if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
     $$("[data-faces]", $("#burstdetail")).forEach((b) => {
-      b.onclick = () => {
-        const id = num(b.dataset.faces);
-        const panel = $(`[data-face-host="${id}"]`, $("#burstdetail"));
+      b.onclick = async () => {
+        const imgId = num(b.dataset.faces);
+        const card = b.closest(".card");
+        const filename = card ? (card.querySelector(".fn")?.textContent || "") : "";
+        const panel = $("#facepanel");
         if (!panel) return;
-        if (!panel.hidden && panel.childElementCount) {
-          panel.hidden = true;
-          panel.replaceChildren();
-          b.textContent = "Faces";
+
+        if (activeFaceId === imgId && !panel.hidden) {
+          hideFacePanel();
           return;
         }
-        panel.hidden = false;
-        b.textContent = "Hide";
-        showFaces(id, panel).catch((e) => toast(e.message, "err"));
+
+        activeFaceId = imgId;
+        $$("[data-faces]", $("#burstdetail")).forEach((btn) => {
+          const isThis = btn === b;
+          btn.classList.toggle("on", isThis);
+          btn.textContent = isThis ? "Hide faces" : (btn.dataset.count ? `Faces (${btn.dataset.count})` : "Faces");
+        });
+
+        await showFaces(imgId, panel, filename);
+        positionFacePopover(panel, b);
       };
     });
     $$("[data-makebest]", $("#burstdetail")).forEach((b) => {
