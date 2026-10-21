@@ -2977,7 +2977,7 @@
         if (m.eye_closed != null) bits.push("eyes closed " + num(m.eye_closed).toFixed(2));
         return `<figure class="card${m.is_best_shot ? " best" : ""}${m.delete_approved ? " marked" : ""}" data-id="${num(m.id)}" tabindex="0">
           <div class="thumb" ${m.face_count ? `data-thumb-faces="${num(m.id)}" style="cursor:pointer;" title="Inspect faces"` : ""}>
-            <img loading="lazy" src="${thumbUrl(m.id)}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
+            <img loading="lazy" src="${thumbUrl(m.id, "medium")}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
             <div class="flags">${m.is_best_shot ? '<span class="badge best">★ Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}${m.delete_approved ? '<span class="badge danger">Marked for delete</span>' : ""}${gmBadge(m)}</div>
           </div>
           <figcaption class="caption">

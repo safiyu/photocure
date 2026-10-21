@@ -196,7 +196,7 @@ def test_render_tier_for_raw_encodes_webp_within_bounds(monkeypatch, tmp_path):
     fake_rawpy(monkeypatch, FakeRaw(SimpleNamespace(format=1, data=_jpeg(asym(1200, 800)))))
     data = thumbs.render_tier(tmp_path / "x.cr2", ".CR2", 1, "micro")
     with Image.open(io.BytesIO(data)) as im:
-        assert im.format == "WEBP" and max(im.size) == 220
+        assert im.format == "WEBP" and max(im.size) == 440
 
 
 # ------------------------------------------------------------- WebP pyramid
@@ -224,7 +224,7 @@ def api(tmp_path, monkeypatch):
                            heic=ids["IMG_20240501_100002.heic"])
 
 
-@pytest.mark.parametrize("tier,bound", [("micro", 220), ("medium", 800), ("preview", 1600)])
+@pytest.mark.parametrize("tier,bound", [("micro", 440), ("medium", 800), ("preview", 1600)])
 def test_each_tier_is_webp_within_its_bound(api, tier, bound):
     r = api.client.get(f"/thumbnail/{api.big}", params={"tier": tier})
     assert r.status_code == 200 and r.headers["content-type"] == "image/webp"
@@ -242,7 +242,7 @@ def test_small_photos_are_never_upscaled(api):
 
 def test_tier_defaults_to_micro_and_unknown_tiers_are_refused(api):
     with Image.open(io.BytesIO(api.client.get(f"/thumbnail/{api.big}").content)) as im:
-        assert max(im.size) == 220
+        assert max(im.size) == 440
     assert api.client.get(f"/thumbnail/{api.big}?tier=huge").status_code == 422
 
 

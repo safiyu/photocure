@@ -24,7 +24,7 @@ except ImportError:  # RAW then goes through the generic loader
 log = logging.getLogger("photocure.thumbs")
 
 # tier -> (longest side in px, WebP quality)
-TIERS = {"micro": (220, 80), "medium": (800, 82), "preview": (1600, 85)}
+TIERS = {"micro": (440, 85), "medium": (800, 84), "preview": (1600, 86)}
 
 
 def _fit(bgr: np.ndarray, side: int) -> np.ndarray:

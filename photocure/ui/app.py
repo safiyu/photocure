@@ -1423,7 +1423,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             from ..quality.image_loader import load_image
             full = load_image(path, max_side=None, orientation=orientation)
             crop = shrink_to(crop_face(full.bgr, box, app.state.cfg.face.crop_margin), 512)
-            ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 92])
             if not ok:
                 raise RuntimeError("could not encode the crop")
         except Exception as e:
