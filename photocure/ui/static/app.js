@@ -2346,13 +2346,7 @@
   }
 
   function setSpeed(speed) {
-    document.documentElement.style.setProperty('--speed', speed);
-    const s1 = $("#bio-speed-1");
-    const sSlow = $("#bio-speed-slow");
-    if (s1 && sSlow) {
-      s1.classList.toggle("on", speed === 1);
-      sSlow.classList.toggle("on", speed !== 1);
-    }
+    document.documentElement.style.setProperty('--speed', speed || 0.5);
     if (activeOverlayImageId) renderBiometricOverlay();
   }
 
@@ -2374,6 +2368,7 @@
     activeOverlayImageId = imageId;
     hoveredFaceId = null;
     selectedFaceId = null;
+    document.documentElement.style.setProperty('--speed', 0.5);
 
     const overlay = $("#facepanel");
     if (!overlay) return;
@@ -2382,7 +2377,7 @@
     overlay.innerHTML = `
       <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
       <div style="position:relative;z-index:30;padding:24px;text-align:center;color:#94a3b8;font-family:var(--font-mono, monospace);">
-        Loading biometric 1-to-1 face projection...
+        Loading faces...
       </div>
     `;
 
@@ -2444,7 +2439,7 @@
       overlay.innerHTML = `
         <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
         <div style="position:relative;z-index:30;padding:40px;text-align:center;color:#ef4444;font-family:var(--font-mono, monospace);">
-          Failed to load face projection: ${esc(e.message || e)}
+          Failed to load faces: ${esc(e.message || e)}
           <br><br>
           <button type="button" class="bio-close-btn" style="margin:0 auto;" onclick="closeBiometricProjection()">Close</button>
         </div>
@@ -2630,10 +2625,6 @@
       <!-- TOP HUD -->
       <header class="bio-hud-top">
         <div class="bio-hud-left">
-          <div class="bio-live-indicator">
-            <span class="bio-ping-dot"></span>
-            <span>1-TO-1 FACE PROJECTION</span>
-          </div>
           <div>
             <h2 class="bio-photo-title">${esc(curMember.filename)}</h2>
             <p class="bio-photo-sub">${num(curMember.width)}×${num(curMember.height)} • ${count} detected faces</p>
@@ -2656,7 +2647,7 @@
           </button>
         </div>
 
-        <!-- Frame Actions (Best Shot & Mark Delete) & Zoom & Speed & Close -->
+        <!-- Frame Actions (Best Shot & Mark Delete) & Zoom & Close -->
         <div class="bio-hud-right">
           <!-- Frame Actions -->
           <div class="bio-actions-bar">
@@ -2678,12 +2669,6 @@
             <button type="button" class="bio-zoom-btn${faceZoomMultiplier === 0.86 ? ' on' : ''}" onclick="setFaceZoom(0.86)">1.5x</button>
             <button type="button" class="bio-zoom-btn${faceZoomMultiplier === 1.08 ? ' on' : ''}" onclick="setFaceZoom(1.08)">2.5x</button>
             <button type="button" class="bio-zoom-btn${faceZoomMultiplier === 1.28 ? ' on' : ''}" onclick="setFaceZoom(1.28)">3.5x</button>
-          </div>
-
-          <div class="bio-speed-bar">
-            <span class="bio-ctrl-label">Speed:</span>
-            <button type="button" class="bio-speed-btn on" id="bio-speed-1" onclick="setSpeed(1)">1x</button>
-            <button type="button" class="bio-speed-btn" id="bio-speed-slow" onclick="setSpeed(0.45)">0.5x</button>
           </div>
 
           <button type="button" class="bio-close-btn" onclick="closeBiometricProjection()" title="Close (ESC)">
@@ -2981,7 +2966,7 @@
         ${banner}
         <div class="btn-row burst-toolbar" id="blinkbar"></div>
       </div>
-      <div id="facepanel" class="bio-overlay bg-cyber-grid" hidden role="dialog" aria-label="Biometric face projection"></div>
+      <div id="facepanel" class="bio-overlay bg-cyber-grid" hidden role="dialog" aria-label="Face inspection panel"></div>
       <div class="burstgrid anim-in">` +
       data.members.map((m) => {
         const bits = [];
@@ -2989,7 +2974,7 @@
         if (m.face_confidence != null) bits.push("face " + num(m.face_confidence).toFixed(2));
         if (m.eye_closed != null) bits.push("eyes closed " + num(m.eye_closed).toFixed(2));
         return `<figure class="card${m.is_best_shot ? " best" : ""}${m.delete_approved ? " marked" : ""}" data-id="${num(m.id)}" tabindex="0">
-          <div class="thumb" ${m.face_count ? `data-thumb-faces="${num(m.id)}" style="cursor:pointer;" title="Click to view 1-to-1 face projection"` : ""}>
+          <div class="thumb" ${m.face_count ? `data-thumb-faces="${num(m.id)}" style="cursor:pointer;" title="Inspect faces"` : ""}>
             <img loading="lazy" src="${thumbUrl(m.id)}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
             <div class="flags">${m.is_best_shot ? '<span class="badge best">★ Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}${m.delete_approved ? '<span class="badge danger">Marked for delete</span>' : ""}${gmBadge(m)}</div>
           </div>
@@ -3003,7 +2988,7 @@
                 ? `<button class="mini is-best" disabled title="This is the best shot">★ Best shot</button>`
                 : `<button class="mini" data-makebest="${num(m.id)}" title="Set as best shot">Set best</button>`}
               <button class="mini danger${m.delete_approved ? " on" : ""}${m.is_best_shot ? " warn-best" : ""}" data-markdelete="${num(m.id)}" data-is-best="${m.is_best_shot ? "1" : "0"}" aria-pressed="${m.delete_approved ? "true" : "false"}" title="${m.is_best_shot ? "Marking the best shot for delete" : "Mark this frame for delete"}">${m.delete_approved ? "Marked (undo)" : "Mark delete"}</button>
-              ${m.face_count ? `<button class="mini btn-faces-glow" data-faces="${num(m.id)}" data-count="${num(m.face_count)}" title="View 1-to-1 face projection">Faces (${num(m.face_count)})</button>` : ""}
+              ${m.face_count ? `<button class="mini btn-faces-glow" data-faces="${num(m.id)}" data-count="${num(m.face_count)}" title="Inspect faces">Faces (${num(m.face_count)})</button>` : ""}
             </div>
           </figcaption>
         </figure>`;
