@@ -566,7 +566,7 @@
         title: it.delete_approved ? "Marked for delete (click to unmark)" : "Mark for delete",
         "aria-label": it.delete_approved ? "Clear delete mark" : "Mark for delete",
         tabindex: -1,
-      }, el("span", { html: icon("trash", "sm") }), el("span", { text: it.delete_approved ? "Marked" : "Delete" })),
+      }, el("span", { class: "btn-ic", html: icon("trash", "sm") }), el("span", { class: "btn-lbl", text: it.delete_approved ? "Marked" : "Delete" })),
       el("button", {
         type: "button",
         class: "btn btn-lock" + (it.locked ? " is-locked" : ""),
@@ -574,7 +574,7 @@
         title: (it.locked ? "Unlock" : "Lock / Keep") + " (l)",
         "aria-label": it.locked ? "Unlock" : "Lock / Keep",
         tabindex: -1,
-      }, el("span", { html: icon("lock", "sm") }), el("span", { text: it.locked ? "Locked" : "Keep" })),
+      }, el("span", { class: "btn-ic", html: icon("lock", "sm") }), el("span", { class: "btn-lbl", text: it.locked ? "Locked" : "Keep" })),
       el("button", {
         type: "button",
         class: "btn btn-pick" + (picked ? " is-picked" : ""),
@@ -583,7 +583,7 @@
         title: picked ? "Deselect" : "Select",
         "aria-label": "Select " + (it.filename || ""),
         tabindex: -1,
-      }, el("span", { html: icon("check", "sm") }), el("span", { text: picked ? "Selected" : "Select" })),
+      }, el("span", { class: "btn-ic", html: icon("check", "sm") }), el("span", { class: "btn-lbl", text: picked ? "Selected" : "Select" })),
       el("button", {
         type: "button",
         class: "btn btn-similar",
@@ -591,7 +591,7 @@
         title: "Find similar photos",
         "aria-label": "Find similar photos",
         tabindex: -1,
-      }, el("span", { html: icon("copy", "sm") }))
+      }, el("span", { class: "btn-ic", html: icon("copy", "sm") }), el("span", { class: "btn-lbl", text: "Similar" }))
     );
 
     return el("figure", { class: cls, "data-id": id, tabindex: -1, role: "gridcell" }, thumb, cap, actions);
@@ -742,7 +742,7 @@
     makeGrid("junk", {
       el: "#junkgrid", more: "#junkgrid-more", count: "#junkcount",
       renderCard: junkCardNode,
-      captionH: 155,
+      captionH: 145,
       params() {
         const c = val("junkfilter");
         return c ? "category=" + encodeURIComponent(c) : "group=junk";

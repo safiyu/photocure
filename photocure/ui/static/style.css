@@ -562,13 +562,25 @@ input:hover, select:hover { border-color: var(--faint); }
   display: flex; align-items: center; gap: 8px; padding: 0 12px; width: 220px; flex: 0 1 220px; min-width: 130px; position: relative;
   transition: border-color .15s ease, box-shadow .15s ease; flex-shrink: 0;
 }
+.toolbar .search:hover {
+  border-color: var(--faint);
+}
 .toolbar .search:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent);
 }
 .toolbar .search .ic { position: static; width: 16px; height: 16px; color: var(--mut); flex: none; pointer-events: none; }
 .toolbar .search input {
-  border: 0; outline: 0; flex: 1; font-size: 13px; font-weight: 500; background: none; min-width: 0; color: var(--ink); padding: 0; height: 100%;
+  border: 0 !important; outline: none !important; box-shadow: none !important;
+  flex: 1; font-size: 13px; font-weight: 500; background: transparent !important;
+  min-width: 0; color: var(--ink); padding: 0; height: 100%; border-radius: 0;
+}
+.toolbar .search input:focus,
+.toolbar .search input:focus-visible {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
 }
 .toolbar select {
   height: 38px; border-radius: 12px; border: 1px solid var(--line); background: var(--sheet);
@@ -830,9 +842,10 @@ body.has-picks .tools, body.has-picks .hover-actions {
 
 /* ----------------------------------------------------------------- junk cards */
 #junkgrid {
-  --vg-caption-h: 155px;
+  --vg-caption-h: 145px;
 }
 #junkgrid .card {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
 }
@@ -863,27 +876,34 @@ body.has-picks .tools, body.has-picks .hover-actions {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 5px;
   border: 1.5px solid var(--line);
   background: var(--sheet);
   color: var(--ink);
   cursor: pointer;
   transition: all .18s ease;
-  padding: 0 6px;
+  padding: 0 4px;
   flex: 1 1 0;
   min-width: 0;
   white-space: nowrap;
   box-sizing: border-box;
 }
-#junkgrid .card .actions .btn svg {
-  width: 14px;
-  height: 14px;
+#junkgrid .card .actions .btn svg,
+#junkgrid .card .actions .btn .btn-ic svg {
+  width: 15px;
+  height: 15px;
   flex-shrink: 0;
 }
-#junkgrid .card .actions .btn span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+#junkgrid .card .actions .btn-lbl {
+  display: none;
+}
+@container (min-width: 280px) {
+  #junkgrid .card .actions .btn-lbl {
+    display: inline;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 #junkgrid .card .actions .btn:hover {
   background: var(--well);
@@ -938,11 +958,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
   color: #fff;
 }
 
-/* Similar button (compact icon button) */
-#junkgrid .card .actions .btn-similar {
-  flex: 0 0 34px;
-  padding: 0;
-}
+/* Similar button */
 #junkgrid .card .actions .btn-similar:hover {
   border-color: var(--primary);
   background: var(--well);
