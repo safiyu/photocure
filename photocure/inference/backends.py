@@ -586,6 +586,11 @@ def empty_cuda_cache(bs: BackendState) -> None:
     try:
         if bs.device == "cuda":
             bs.torch.cuda.empty_cache()
+            # Drops shared-memory handles that empty_cache alone keeps around.
+            try:
+                bs.torch.cuda.ipc_collect()
+            except Exception:
+                pass
         elif bs.device == "xpu":
             bs.torch.xpu.empty_cache()
         elif bs.device == "mps":

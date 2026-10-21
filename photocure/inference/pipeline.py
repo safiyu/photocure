@@ -311,6 +311,9 @@ class InferencePipeline:
             finally:
                 if progress is not None:
                     progress.stop()
+                # Final sweep so VRAM is reclaimed even if a phase raised early.
+                gc.collect()
+                empty_cuda_cache(self.bs)
 
         result.duration_s = time.monotonic() - t0
         return result
