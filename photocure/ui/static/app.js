@@ -2313,9 +2313,10 @@
 
   let activeOverlayBurstId = null;
   let activeOverlayImageId = null;
+  let activeOverlayBurstData = null;
   let activeOverlayMembers = [];
   let activeOverlayFaces = [];
-  let overlayLayout = 'radial';      // 'radial' | 'split' | 'cinema'
+  let overlayLayout = 'radial';      // 'radial' | 'split' | 'cinema' | 'matrix'
   let faceZoomMultiplier = 1.08;     // 0.86 (1.5x) | 1.08 (2.5x) | 1.28 (3.5x)
   let hoveredFaceId = null;
   let selectedFaceId = null;
@@ -2329,6 +2330,7 @@
     }
     activeOverlayBurstId = null;
     activeOverlayImageId = null;
+    activeOverlayBurstData = null;
     activeOverlayMembers = [];
     activeOverlayFaces = [];
     hoveredFaceId = null;
@@ -2363,9 +2365,12 @@
     updateBiometricSpotlight();
   }
 
-  async function openBiometricProjection(burstId, imageId) {
+  async function openBiometricProjection(burstId, imageId, initialLayout) {
     activeOverlayBurstId = burstId;
     activeOverlayImageId = imageId;
+    if (initialLayout) {
+      overlayLayout = initialLayout;
+    }
     hoveredFaceId = null;
     selectedFaceId = null;
     document.documentElement.style.setProperty('--speed', 0.5);
@@ -2387,6 +2392,7 @@
         api(`/api/images/${num(imageId)}/faces`)
       ]);
 
+      activeOverlayBurstData = burstData;
       activeOverlayMembers = burstData.members || [];
       const curMember = activeOverlayMembers.find((m) => m.id === imageId) || activeOverlayMembers[0];
       if (!curMember) throw new Error("Frame not found");
@@ -2445,6 +2451,136 @@
         </div>
       `;
     }
+  }
+
+  function renderFaceMatrixView() {
+    const matrix = (activeOverlayBurstData && activeOverlayBurstData.face_matrix) || { subjects: [], rows: [] };
+    const subjects = matrix.subjects || [];
+    const rows = matrix.rows || [];
+    const wording = { open: "Eyes open", possible: "Eyes may be closing", closed: "Eyes closed", unknown: "Eyes not measured" };
+
+    if (!rows.length || !subjects.length) {
+      return `
+        <div class="bio-stage-matrix">
+          <div class="bio-matrix-empty-state">
+            <div style="font-size:18px; font-weight:700; color:#fff; margin-bottom:8px;">No faces detected in this burst</div>
+            <p style="color:#94a3b8; font-size:13px; max-width:440px; margin:0 auto 16px auto;">The matrix comparison aligns tracked faces across all burst frames. No face data is available for this burst.</p>
+            <button type="button" class="bio-action-btn best" style="display:inline-block;" onclick="setOverlayLayout('radial')">Return to Radial View</button>
+          </div>
+        </div>
+      `;
+    }
+
+    const avatarSize = Math.max(68, Math.min(130, Math.round(84 * faceZoomMultiplier)));
+
+    return `
+      <div class="bio-stage-matrix">
+        <div class="bio-matrix-scroll-pane">
+          <table class="bio-matrix-table">
+            <thead>
+              <tr class="bio-matrix-head-row">
+                <th class="bio-matrix-th bio-matrix-th-frame">
+                  <span>Frame & Actions</span>
+                </th>
+                ${subjects.map((subj, sIdx) => {
+                  const color = FACE_PALETTE[sIdx % FACE_PALETTE.length];
+                  const posText = subj.avg_x < 0.35 ? 'Left subject' : (subj.avg_x > 0.65 ? 'Right subject' : 'Center subject');
+                  return `
+                    <th class="bio-matrix-th bio-matrix-th-person" style="border-top: 3px solid ${color};">
+                      <div class="bio-matrix-person-hd">
+                        <span class="face-dot" style="background:${color};"></span>
+                        <span class="bio-matrix-person-name">${esc(subj.name)}</span>
+                      </div>
+                      <div class="bio-matrix-person-pos">${posText}</div>
+                    </th>
+                  `;
+                }).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((row, rIdx) => {
+                const isBest = row.is_best_shot;
+                const isDel = row.delete_approved;
+                return `
+                  <tr class="bio-matrix-tr${isBest ? ' is-best' : ''}${isDel ? ' is-deleted' : ''}">
+                    <td class="bio-matrix-td bio-matrix-td-frame">
+                      <div class="bio-matrix-frame-card">
+                        <div class="bio-matrix-thumb-box" onclick="openBiometricProjection(${activeOverlayBurstId}, ${row.id}, 'radial')" title="View frame in single-photo inspection">
+                          <img src="${thumbUrl(row.id, "preview")}" alt="${esc(row.filename)}" loading="lazy">
+                          ${isBest ? '<span class="bio-matrix-badge-best">★ Best</span>' : ''}
+                          ${row.has_blinks ? '<span class="bio-matrix-badge-blink">Blink</span>' : ''}
+                          ${isDel ? '<span class="bio-matrix-badge-del">Marked</span>' : ''}
+                        </div>
+                        <div class="bio-matrix-frame-info">
+                          <div class="bio-matrix-frame-title" title="${esc(row.filename)}">
+                            <span class="bio-matrix-frame-idx">Frame 0${rIdx + 1}</span>
+                            <span class="bio-matrix-frame-fn">${esc(row.filename)}</span>
+                          </div>
+                          <div class="bio-matrix-frame-actions">
+                            ${isBest
+                              ? `<button type="button" class="bio-action-btn best-active mini" disabled title="This is the best shot">★ Best shot</button>`
+                              : `<button type="button" class="bio-action-btn best mini" onclick="makeOverlayBestShot(${row.id})" title="Set this frame as best shot">★ Set best</button>`}
+                            <button 
+                              type="button" 
+                              class="bio-action-btn delete mini${isDel ? ' on' : ''}" 
+                              onclick="toggleOverlayMarkDelete(${row.id}, ${isBest ? 'true' : 'false'}, ${isDel ? 'true' : 'false'})" 
+                              title="${isBest ? 'Marking best shot for delete' : 'Mark this frame for delete'}"
+                            >
+                              ${isDel ? 'Marked (undo)' : 'Mark delete'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                    ${subjects.map((subj, sIdx) => {
+                      const f = (row.faces && row.faces[sIdx]) || null;
+                      const color = FACE_PALETTE[sIdx % FACE_PALETTE.length];
+                      if (!f) {
+                        return `
+                          <td class="bio-matrix-td bio-matrix-td-person">
+                            <div class="bio-matrix-empty-cell" title="${esc(subj.name)} not detected in this frame">
+                              <div class="bio-matrix-empty-circle" style="width:${avatarSize}px; height:${avatarSize}px;">
+                                <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.3 3.6-6 8-6s8 2.7 8 6"/></svg>
+                              </div>
+                              <span class="bio-matrix-empty-text">Not detected</span>
+                            </div>
+                          </td>
+                        `;
+                      }
+                      const stateKey = f.eye_status || "unknown";
+                      const isBlink = f.is_blink || stateKey === "closed";
+                      const statusLabel = isBlink ? "BLINK" : (stateKey === "open" ? "OPEN" : (stateKey === "possible" ? "POSSIBLE" : "DETECTED"));
+                      const statusBg = isBlink ? "var(--err, #dc2626)" : (stateKey === "open" ? "var(--ok, #059669)" : (stateKey === "possible" ? "var(--commit, #f6a315)" : "var(--mut, #475569)"));
+                      const eyeScoreText = f.eye_closed_score != null ? ` (${num(f.eye_closed_score).toFixed(2)})` : "";
+                      const eyeText = (wording[stateKey] || wording.unknown) + eyeScoreText;
+
+                      return `
+                        <td class="bio-matrix-td bio-matrix-td-person">
+                          <figure class="facechip bio-matrix-chip${isBlink ? ' blink' : ''}" style="width:${avatarSize + 32}px;">
+                            <div class="bio-matrix-avatar-wrap" style="width:${avatarSize}px; height:${avatarSize}px;">
+                              <div class="bio-matrix-face-avatar" style="border-color:${isBlink ? 'var(--err, #dc2626)' : color}; box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 12px ${isBlink ? 'rgba(220,38,38,0.45)' : color + '40'};">
+                                <img src="${f.url}" alt="${esc(subj.name)}" loading="lazy">
+                              </div>
+                              <div class="bio-matrix-chip-badge" style="background:${statusBg}; color:#fff;">
+                                ${statusLabel}
+                              </div>
+                            </div>
+                            <figcaption class="bio-matrix-caption">
+                              <span class="bio-matrix-eye-text">${esc(eyeText)}</span>
+                              ${f.sharpness ? `<span class="bio-matrix-sharpness">Sharpness ${num(f.sharpness).toFixed(1)}</span>` : ''}
+                            </figcaption>
+                          </figure>
+                        </td>
+                      `;
+                    }).join('')}
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
   }
 
   function renderBiometricOverlay() {
@@ -2618,6 +2754,9 @@
     overlay.dataset.nodeDiameter = String(safeNodeDiameter);
     window._currentFaceNodes = faceNodesPositions;
 
+    const matrixRows = (activeOverlayBurstData && activeOverlayBurstData.face_matrix && activeOverlayBurstData.face_matrix.rows) || [];
+    const matrixSubjects = (activeOverlayBurstData && activeOverlayBurstData.face_matrix && activeOverlayBurstData.face_matrix.subjects) || [];
+
     overlay.innerHTML = `
       <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
       <svg id="overlay-svg-canvas" class="bio-svg-canvas"></svg>
@@ -2625,10 +2764,17 @@
       <!-- TOP HUD -->
       <header class="bio-hud-top">
         <div class="bio-hud-left">
-          <div>
-            <h2 class="bio-photo-title">${esc(curMember.filename)}</h2>
-            <p class="bio-photo-sub">${num(curMember.width)}×${num(curMember.height)} • ${count} detected faces</p>
-          </div>
+          ${overlayLayout === 'matrix' ? `
+            <div>
+              <h2 class="bio-photo-title">All Faces Matrix</h2>
+              <p class="bio-photo-sub">${fmtN(matrixRows.length || activeOverlayMembers.length)} frames • ${fmtN(matrixSubjects.length)} tracked subjects</p>
+            </div>
+          ` : `
+            <div>
+              <h2 class="bio-photo-title">${esc(curMember.filename)}</h2>
+              <p class="bio-photo-sub">${num(curMember.width)}×${num(curMember.height)} • ${count} detected faces</p>
+            </div>
+          `}
         </div>
 
         <!-- Layout Selector -->
@@ -2645,10 +2791,15 @@
             <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="11" rx="2"/><rect x="3" y="16" width="5" height="5" rx="1"/><rect x="10" y="16" width="5" height="5" rx="1"/><rect x="17" y="16" width="5" height="5" rx="1"/></svg>
             <span>Cinema</span>
           </button>
+          <button type="button" class="bio-layout-btn${overlayLayout === 'matrix' ? ' on' : ''}" onclick="setOverlayLayout('matrix')">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/></svg>
+            <span>Matrix</span>
+          </button>
         </div>
 
         <!-- Frame Actions (Best Shot & Mark Delete) & Zoom & Close -->
         <div class="bio-hud-right">
+          ${overlayLayout !== 'matrix' ? `
           <!-- Frame Actions -->
           <div class="bio-actions-bar">
             ${curMember.is_best_shot
@@ -2663,6 +2814,11 @@
               ${curMember.delete_approved ? 'Marked (undo)' : 'Mark delete'}
             </button>
           </div>
+          ` : `
+          <div class="bio-actions-bar">
+            <span style="font-size:12px; color:var(--blue-200, #bfdbfe); opacity:0.85; font-weight:500;">Same subject per column</span>
+          </div>
+          `}
 
           <div class="bio-zoom-bar">
             <span class="bio-ctrl-label">Zoom:</span>
@@ -2680,6 +2836,7 @@
 
       <!-- CENTER STAGE -->
       <div id="overlay-stage" class="bio-stage">
+        ${overlayLayout === 'matrix' ? renderFaceMatrixView() : `
         <!-- SOURCE PHOTO BOX -->
         <div 
           style="left:${sourceBox.x}px; top:${sourceBox.y}px; width:${sourceBox.w}px; height:${sourceBox.h}px;"
@@ -2765,10 +2922,11 @@
             </figure>
           `;
         }).join('')}
+        `}
       </div>
 
       <!-- BOTTOM HUD -->
-      <footer class="bio-hud-bottom">
+      <footer class="bio-hud-bottom"${overlayLayout === 'matrix' ? ' style="display:none;"' : ''}>
         <div class="bio-frame-switcher-wrap">
           <span class="bio-frame-label">Frames:</span>
           <div id="overlay-card-switcher" class="bio-frame-switcher">
@@ -2794,7 +2952,7 @@
 
   function updateBiometricSpotlight() {
     const overlay = $("#facepanel");
-    if (!overlay || !window._currentFaceNodes) return;
+    if (!overlay || overlayLayout === 'matrix' || !window._currentFaceNodes) return;
 
     // Clear SVG tether lines per user request ("remove the line from the photo to the circular zoom face.. no need of it")
     const svgEl = $("#overlay-svg-canvas");
@@ -3007,6 +3165,9 @@
     if (group && group.status === "composite") {
       addBtn("Create fixed photo", () => makeComposite(id, "fixed"));
       addBtn("Export layered PSD", () => makeComposite(id, "layered"));
+    }
+    if (data.face_matrix && data.face_matrix.subjects && data.face_matrix.subjects.length > 0) {
+      addBtn("Compare all faces (Matrix)", () => openBiometricProjection(id, data.members[0].id, "matrix"));
     }
     const others = data.members.filter((m) => !m.is_best_shot);
     const unmarked = others.filter((m) => !m.delete_approved).map((m) => m.id);

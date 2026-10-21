@@ -59,7 +59,7 @@ from sqlmodel import select
 
 from .. import __version__
 from ..auth import COOKIE_NAME, AuthManager, build_allowed_hosts, origin_allowed
-from ..clustering.group_shots import group_matrix_payload
+from ..clustering.group_shots import burst_face_matrix, group_matrix_payload
 from ..config import CuratorConfig, default_db_path
 from ..db import models as M
 from ..engine.locks import LEDGER_WRITING as _LEDGER_WRITING
@@ -1716,7 +1716,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             return {"burst": bg.name, "members": items, "can_reject_blinks": can_reject,
                     "reject_count": len(movable) if can_reject else 0,
                     "rejected_blinks": sum(1 for m in members if m.manual_bucket == "junk_blinks"),
-                    "group": group_matrix_payload(members)}
+                    "group": group_matrix_payload(members),
+                    "face_matrix": burst_face_matrix(members)}
 
     @app.get("/api/events")
     def events():

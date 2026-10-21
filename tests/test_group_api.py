@@ -76,3 +76,30 @@ def test_burst_without_faces_is_not_a_group(env):
 
 def test_unknown_burst_is_still_a_404(env):
     assert env.client.get("/api/burst/99999").status_code == 404
+
+
+def test_burst_returns_face_matrix_with_consistent_subject_columns(env):
+    frames = [
+        [(0.1, "open"), (0.5, "closed")],
+        [(0.1, "closed"), (0.5, "open")],
+        [(0.1, "open"), (0.5, "open")],
+    ]
+    bid, ids = seed_burst(env, frames)
+    data = env.client.get(f"/api/burst/{bid}").json()
+    assert "face_matrix" in data
+    fm = data["face_matrix"]
+    assert len(fm["subjects"]) == 2
+    assert fm["subjects"][0]["name"] == "Person 1"
+    assert fm["subjects"][1]["name"] == "Person 2"
+    assert len(fm["rows"]) == 3
+    for idx, row in enumerate(fm["rows"]):
+        assert row["id"] == ids[idx]
+        assert "is_best_shot" in row
+        assert "delete_approved" in row
+        assert len(row["faces"]) == 2
+        p1 = row["faces"][0]
+        p2 = row["faces"][1]
+        assert p1["subject_idx"] == 0
+        assert p2["subject_idx"] == 1
+        assert p1["url"].startswith("/api/faces/")
+        assert p2["url"].startswith("/api/faces/")

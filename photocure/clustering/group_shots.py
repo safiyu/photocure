@@ -23,6 +23,8 @@ class FaceObs:
     eye_closed: float | None = None
     sharpness: float | None = None
     person_id: int | None = None
+    face_id: int | None = None
+    is_blink: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -166,7 +168,8 @@ def group_matrix_payload(members) -> dict:
             has_box = all(v is not None for v in box)
             faces.append(FaceObs(box=tuple(float(v) for v in box) if has_box else None,
                                  eye_status=f.eye_status, eye_closed=f.eye_closed_score,
-                                 sharpness=f.face_sharpness, person_id=f.person_id))
+                                 sharpness=f.face_sharpness, person_id=f.person_id,
+                                 face_id=f.id))
         frames.append(faces)
     tiebreak = [float(r.quality.sharpness_norm) if r.quality is not None else 0.0 for r in ordered]
     m = score_group(frames, tiebreak=tiebreak)
@@ -177,4 +180,95 @@ def group_matrix_payload(members) -> dict:
         "frames": [{"id": ordered[f.index].id, "min_quality": round(f.min_quality, 3),
                     "subjects": [{"state": x.state, "q": round(x.quality, 3)} for x in f.subjects]}
                    for f in m.frames],
+    }
+
+
+def burst_face_matrix(members) -> dict:
+    """Matrix comparing all tracked faces across all burst frames in capture order."""
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+    def when(r):
+        t = r.taken_at
+        if t is not None and t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return t or epoch
+
+    ordered = sorted(members, key=lambda r: (when(r), r.id or 0))
+    n = len(ordered)
+    if n == 0:
+        return {"subjects": [], "rows": []}
+
+    frames: list[list[FaceObs]] = []
+    for r in ordered:
+        faces = []
+        for f in r.faces or []:
+            box = (f.x1, f.y1, f.x2, f.y2)
+            has_box = all(v is not None for v in box)
+            faces.append(FaceObs(box=tuple(float(v) for v in box) if has_box else None,
+                                 eye_status=f.eye_status, eye_closed=f.eye_closed_score,
+                                 sharpness=f.face_sharpness, person_id=f.person_id,
+                                 face_id=f.id,
+                                 is_blink=bool(getattr(f, "is_blink", False)) or (f.eye_status == "closed")))
+        frames.append(faces)
+
+    raw_subjects = _subjects(frames)
+    if not raw_subjects:
+        return {"subjects": [], "rows": []}
+
+    def subject_mean_x(subj: dict[int, FaceObs]) -> float:
+        centers = []
+        for obs in subj.values():
+            if obs.box is not None:
+                centers.append((obs.box[0] + obs.box[2]) / 2.0)
+        return sum(centers) / len(centers) if centers else 0.5
+
+    # Sort subjects horizontally (left to right across the camera frame)
+    sorted_subjects = sorted(raw_subjects, key=subject_mean_x)
+
+    subjects_meta = [
+        {
+            "id": idx,
+            "name": f"Person {idx + 1}",
+            "avg_x": round(subject_mean_x(s), 3),
+        }
+        for idx, s in enumerate(sorted_subjects)
+    ]
+
+    rows = []
+    for t, r in enumerate(ordered):
+        qm = r.quality
+        row_faces = []
+        for subj_idx, s in enumerate(sorted_subjects):
+            obs = s.get(t)
+            if obs is not None and obs.face_id is not None:
+                is_blink = bool(obs.is_blink) or (obs.eye_status == "closed")
+                row_faces.append({
+                    "subject_idx": subj_idx,
+                    "face_id": obs.face_id,
+                    "eye_status": obs.eye_status or "unknown",
+                    "is_blink": is_blink,
+                    "eye_closed_score": round(obs.eye_closed, 3) if obs.eye_closed is not None else None,
+                    "sharpness": round(obs.sharpness, 1) if obs.sharpness is not None else None,
+                    "box": list(obs.box) if obs.box else None,
+                    "url": f"/api/faces/{obs.face_id}.jpg"
+                })
+            else:
+                row_faces.append(None)
+
+        rows.append({
+            "id": r.id,
+            "filename": r.filename,
+            "is_best_shot": bool(r.is_best_shot),
+            "delete_approved": bool(r.delete_approved),
+            "has_blinks": bool(r.has_blinks),
+            "taken_at": r.taken_at.isoformat() if r.taken_at else None,
+            "width": r.width,
+            "height": r.height,
+            "sharpness_norm": round(qm.sharpness_norm, 3) if qm and qm.sharpness_norm is not None else None,
+            "faces": row_faces,
+        })
+
+    return {
+        "subjects": subjects_meta,
+        "rows": rows,
     }
