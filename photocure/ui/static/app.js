@@ -1726,7 +1726,10 @@
       lb.i = Math.max(0, g.vg.indexOfId(id));
       g.vg.setCursor(id);
     } else {  // a plain list of cards (burst view, similar photos)
-      lb.ids = $$(".card", card.parentElement).map((c) => num(c.dataset.id));
+      // If card is inside a card-wrap (burst grid), collect all burst frames via the grid parent
+      const wrap = card.closest(".card-wrap");
+      const listRoot = wrap ? (wrap.closest(".burstgrid") || wrap.parentElement) : card.parentElement;
+      lb.ids = $$(".card", listRoot).map((c) => num(c.dataset.id));
       lb.i = Math.max(0, lb.ids.indexOf(id));
     }
     lbShow(card);
@@ -3165,7 +3168,7 @@
 
         return `<article class="card-wrap${m.is_best_shot ? " is-best" : ""}${m.delete_approved ? " is-marked" : ""}" data-file="${esc(m.filename)}" data-id="${num(m.id)}">
           <figure class="card" data-id="${num(m.id)}">
-            <div class="photo thumb" ${m.face_count ? `data-thumb-faces="${num(m.id)}" style="cursor:pointer;" title="Inspect faces"` : ""}>
+            <div class="photo thumb" style="cursor:pointer;" title="View photo">
               <img loading="lazy" src="${thumbUrl(m.id, "medium")}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
             </div>
             <div class="caption">
@@ -3218,12 +3221,6 @@
     $$("[data-faces]", $("#burstdetail")).forEach((b) => {
       b.onclick = async () => {
         const imgId = num(b.dataset.faces);
-        await openBiometricProjection(id, imgId);
-      };
-    });
-    $$("[data-thumb-faces]", $("#burstdetail")).forEach((t) => {
-      t.onclick = async () => {
-        const imgId = num(t.dataset.thumbFaces);
         await openBiometricProjection(id, imgId);
       };
     });

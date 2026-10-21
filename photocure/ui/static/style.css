@@ -902,7 +902,6 @@ body.has-picks .tools, body.has-picks .hover-actions {
 #tab-library:has(#step-scan.done) #pipe-label-scan { color: var(--ok); }
 #tab-library:has(#step-infer.done) #pipe-label-infer { color: var(--ok); }
 #tab-library:has(#step-scan.done) #pipe-link-1 i { width: 100%; }
-#tab-library:has(#step-infer.done) #pipe-link-2 i { width: 100%; }
 
 /* pipe-cols variant: same two-column grid but no step-flow chevron needed */
 .steps.pipe-cols { list-style: none; margin: 0 0 24px; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
