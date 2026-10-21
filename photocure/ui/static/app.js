@@ -496,49 +496,6 @@
       .filter(Boolean).join(" ");
     const img = el("img", { loading: "lazy", decoding: "async", src: thumbUrl(id), alt: it.filename || "" });
     img.onerror = () => { img.style.opacity = ".15"; };
-    const lockTitle = (it.locked ? "Unlock" : "Lock") + " (l)";
-    const thumb = el("div", { class: "thumb photo" }, img,
-      el("div", { class: "tools hover-actions" },
-        el("button", { class: "check pick", "data-pick": id, "aria-label": "Select " + (it.filename || ""),
-          "aria-pressed": String(picked), tabindex: -1, html: icon("check") }),
-        el("button", { "data-approve-delete": id, class: "del", "aria-pressed": String(!!it.delete_approved),
-          title: it.delete_approved ? "Marked for delete. Click to undo" : "Mark for delete: leave out of the result",
-          "aria-label": it.delete_approved ? "Clear delete mark" : "Mark for delete", tabindex: -1, html: icon("trash", "sm") }),
-        el("button", { "data-lock": id, title: lockTitle, "aria-label": it.locked ? "Unlock" : "Lock", tabindex: -1, html: icon("lock", "sm") }),
-        el("button", { "data-similar": id, title: "Find similar photos", "aria-label": "Find similar photos", tabindex: -1, html: icon("copy", "sm") })));
-    const showReason = it.uncertain_reason && !it.manual_bucket;
-    const flags = flagList(it).slice(0, 3);
-    const badgesEl = flags.length ? el("div", { class: "flags tags" },
-      flags.map((f) => el("span", { class: "badge tag " + f.cls, text: f.text }))) : null;
-    const cap = el("figcaption", { class: "caption info" },
-      el("div", { class: "fn name", title: it.relative_path || it.filename, text: it.filename }),
-      showReason ? el("div", { class: "reason", title: it.uncertain_reason.text, text: shortReason(it) }) : null,
-      el("div", { class: "meta", text: meta.join(", ") }),
-      el("div", { class: "catline", style: catStyle(rawCat) },
-        el("button", { class: "catpick cat", type: "button", "data-catpick": id, title: "Change category",
-          "aria-haspopup": "listbox", "aria-label": `Category ${catLabel(rawCat)}, change`, tabindex: -1 },
-        el("i", { class: "dot" }), el("span", { class: "t", text: catLabel(rawCat) })),
-        badgesEl,
-        it.manual_bucket ? [el("span", { class: "tag", text: "edited" }),
-          el("button", { class: "x", "data-clear": id, title: "Back to the AI choice",
-            "aria-label": "Back to the AI choice", tabindex: -1, html: icon("x", "sm") })] : null));
-    return el("figure", { class: cls, "data-id": id, tabindex: -1, role: "gridcell" }, thumb, cap);
-  }
-
-  function junkCardNode(it) {
-    const id = num(it.id);
-    const rawCat = eff(it);
-    const meta = [];
-    if (it.width && it.height) meta.push(num(it.width) + "\u00d7" + num(it.height));
-    if (it.taken_at) meta.push(String(it.taken_at).slice(0, 10));
-    if (it.score != null) meta.push("match " + num(it.score).toFixed(2));
-    const picked = state.picks.has(id);
-    const isBest = !!(it.is_best_shot || it.burst_role === "best" || (it.tags && it.tags.includes("Best shot")));
-    const cls = ["card", it.locked ? "locked" : "", picked ? "picked" : "", num(it.rating) === -1 ? "rejected" : "",
-      it.delete_approved ? "marked" : "", isBest ? "best" : ""]
-      .filter(Boolean).join(" ");
-    const img = el("img", { loading: "lazy", decoding: "async", src: thumbUrl(id), alt: it.filename || "" });
-    img.onerror = () => { img.style.opacity = ".15"; };
     const thumb = el("div", { class: "thumb photo", title: "View photo" }, img);
     const showReason = it.uncertain_reason && !it.manual_bucket;
     const flags = flagList(it).slice(0, 3);
@@ -597,6 +554,8 @@
     return el("figure", { class: cls, "data-id": id, tabindex: -1, role: "gridcell" }, thumb, cap, actions);
   }
 
+  const junkCardNode = cardNode;
+
   function emptyHTML(e) {
     return `<div class="empty">${icon(e.icon || "image")}<h3>${esc(e.title)}</h3><p>${esc(e.text || "")}</p>` +
       (e.action ? `<button class="btn" ${e.action.attr}>${esc(e.action.label)}</button>` : "") + "</div>";
@@ -637,7 +596,7 @@
       host,
       pageSize: PAGE,
       renderCard: cfg.renderCard || cardNode,
-      captionH: cfg.captionH || 125,
+      captionH: cfg.captionH || 145,
       renderSkeleton: () => el("div", { class: "skel" }),
       async fetchPage(offset, limit) {
         const qs = cfg.params();

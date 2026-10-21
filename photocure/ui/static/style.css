@@ -657,7 +657,7 @@ kbd {
 /* ------------------------------------------------------------------ photo grid */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumb-min), 1fr)); gap: 22px 16px; align-items: start; }
 /* Virtual grid (C4): only the rows near the viewport exist. Sizes come from here and from --thumb-min. */
-:root { --vg-caption-h: 125px; }
+:root { --vg-caption-h: 145px; }
 .grid.vgrid { display: block; position: relative; }
 .vg-spacer { position: relative; width: 100%; }
 .vg-window {
@@ -666,7 +666,7 @@ kbd {
   gap: var(--vg-row-gap, 22px) var(--vg-col-gap, 16px); will-change: transform;
 }
 .vgrid .card, .vgrid .skel { height: var(--vg-card-h, auto); aspect-ratio: auto; }  /* no overflow clip: it would hide the selection ring */
-.vgrid .caption { height: var(--vg-caption-h); overflow: hidden; }
+.vgrid .caption { height: auto; min-height: 0; flex: 1 1 auto; overflow: hidden; }
 .vg-empty[hidden] { display: none; }
 .card.rejected .thumb img { opacity: .4; filter: grayscale(.7); }
 .badge.fav { background: var(--err-soft); color: var(--err); }
@@ -711,6 +711,9 @@ kbd {
 .lb-rate .btn { margin-left: 6px; }
 .lb-rate .btn[aria-pressed="true"] { background: var(--primary-soft); border-color: var(--primary); }
 .card {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
   position: relative; margin: 0; min-width: 0; outline: none;
   background: var(--sheet); border-radius: 20px; padding: 8px; width: 100%;
   box-shadow: 0 4px 16px rgba(15, 23, 42, .07);
@@ -840,26 +843,18 @@ body.has-picks .tools, body.has-picks .hover-actions {
 
 .loadmore { display: flex; justify-content: center; padding: 22px; min-height: 8px; }
 
-/* ----------------------------------------------------------------- junk cards */
-#junkgrid {
-  --vg-caption-h: 145px;
-}
-#junkgrid .card {
-  container-type: inline-size;
-  display: flex;
-  flex-direction: column;
-}
-#junkgrid .card .thumb {
+/* ----------------------------------------------------------------- photo cards */
+.card .thumb {
   flex: none;
 }
-#junkgrid .card .caption {
+.card .caption {
   height: auto;
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
   padding: 8px 4px 4px;
 }
-#junkgrid .card .actions {
+.card .actions {
   display: flex;
   gap: 6px;
   margin-top: auto;
@@ -868,7 +863,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
   box-sizing: border-box;
   flex: none;
 }
-#junkgrid .card .actions .btn {
+.card .actions .btn {
   height: 34px;
   border-radius: 10px;
   font-size: 11px;
@@ -888,48 +883,48 @@ body.has-picks .tools, body.has-picks .hover-actions {
   white-space: nowrap;
   box-sizing: border-box;
 }
-#junkgrid .card .actions .btn svg,
-#junkgrid .card .actions .btn .btn-ic svg {
+.card .actions .btn svg,
+.card .actions .btn .btn-ic svg {
   width: 15px;
   height: 15px;
   flex-shrink: 0;
 }
-#junkgrid .card .actions .btn-lbl {
+.card .actions .btn-lbl {
   display: none;
 }
 @container (min-width: 280px) {
-  #junkgrid .card .actions .btn-lbl {
+  .card .actions .btn-lbl {
     display: inline;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 }
-#junkgrid .card .actions .btn:hover {
+.card .actions .btn:hover {
   background: var(--well);
   border-color: var(--primary);
 }
 
 /* Delete button matching burst card .btn-del */
-#junkgrid .card .actions .btn-del {
+.card .actions .btn-del {
   border-color: var(--err);
   background: color-mix(in srgb, var(--err) 12%, var(--sheet));
   color: var(--err);
 }
-:root[data-theme="dark"] #junkgrid .card .actions .btn-del {
+:root[data-theme="dark"] .card .actions .btn-del {
   border-color: color-mix(in srgb, var(--err) 40%, transparent);
   background: color-mix(in srgb, var(--err) 16%, var(--well));
   color: color-mix(in srgb, var(--err) 85%, #fff);
 }
-#junkgrid .card .actions .btn-del svg {
+.card .actions .btn-del svg {
   stroke: currentColor;
 }
-#junkgrid .card .actions .btn-del:hover {
+.card .actions .btn-del:hover {
   background: var(--err);
   color: #fff;
   border-color: var(--err);
 }
-#junkgrid .card .actions .btn-del.is-del {
+.card .actions .btn-del.is-del {
   background: var(--err);
   color: #fff;
   border-color: var(--err);
@@ -937,38 +932,38 @@ body.has-picks .tools, body.has-picks .hover-actions {
 }
 
 /* Lock / Keep button */
-#junkgrid .card .actions .btn-lock:hover {
+.card .actions .btn-lock:hover {
   border-color: var(--commit);
   background: var(--well);
 }
-#junkgrid .card .actions .btn-lock.is-locked {
+.card .actions .btn-lock.is-locked {
   background: color-mix(in srgb, var(--commit) 16%, var(--sheet));
   border-color: var(--commit);
   color: var(--commit);
 }
 
 /* Pick / Select button */
-#junkgrid .card .actions .btn-pick:hover {
+.card .actions .btn-pick:hover {
   border-color: var(--blue, var(--primary));
   background: var(--well);
 }
 .card.picked .btn-pick,
-#junkgrid .card.picked .actions .btn-pick,
-#junkgrid .card .actions .btn-pick.is-picked {
+.card.picked .actions .btn-pick,
+.card .actions .btn-pick.is-picked {
   background: var(--blue, var(--primary)) !important;
   border-color: var(--blue, var(--primary)) !important;
   color: #fff !important;
   box-shadow: 0 0 10px color-mix(in srgb, var(--blue, var(--primary)) 40%, transparent);
 }
 .card.picked .btn-pick svg,
-#junkgrid .card.picked .actions .btn-pick svg,
-#junkgrid .card .actions .btn-pick.is-picked svg {
+.card.picked .actions .btn-pick svg,
+.card .actions .btn-pick.is-picked svg {
   stroke: #fff !important;
   color: #fff !important;
 }
 
 /* Similar button */
-#junkgrid .card .actions .btn-similar:hover {
+.card .actions .btn-similar:hover {
   border-color: var(--primary);
   background: var(--well);
 }
