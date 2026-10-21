@@ -195,6 +195,7 @@
               </div>
               <div class="actions">
                 <button id="btn-scan" data-busy class="btn accent"><svg class="ic sm" aria-hidden="true"><use href="#i-camera"/></svg>Scan</button>
+                <span class="step-hint" id="scan-hint">Already-indexed photos are skipped.</span>
               </div>
             </li>
             <li class="step" id="step-infer">
@@ -205,6 +206,7 @@
                 <button class="step-more" id="step-infer-more" type="button" title="Inference settings" aria-label="Inference settings" data-goto="settings"><svg class="ic sm" aria-hidden="true"><use href="#i-menu"/></svg></button>
               </div>
               <p>Finds faces, checks sharpness and exposure, labels what each photo shows, then groups burst shots and sorts everything into categories.</p>
+              <div id="infer-stages" class="infer-stages" aria-label="Analysis stages" role="status"></div>
               <div class="field">
                 <label for="infer-device">Run on</label>
                 <div class="device-chip">
@@ -225,6 +227,7 @@
               </div>
               <div class="actions">
                 <button id="btn-infer" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Analyze Now</button>
+                <span class="step-hint" id="infer-hint">Nothing waiting to analyze.</span>
               </div>
             </li>
           </ol>

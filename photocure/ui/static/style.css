@@ -933,7 +933,24 @@ body.has-picks .tools, body.has-picks .hover-actions {
 }
 .step.done .state { color: var(--ok); }
 .step p { margin: 0; color: var(--mut); }
-.step .actions { margin-top: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+.step .actions {
+  margin-top: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding-top: 16px; border-top: 1px solid var(--line);
+}
+.step-hint { font-size: 13px; font-weight: 500; color: var(--mut); line-height: 1.4; }
+
+/* Analysis stages pill row */
+.infer-stages { display: flex; flex-wrap: wrap; gap: 6px; }
+.infer-stages:empty { display: none; }
+.stage-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 700;
+  background: var(--well); color: var(--mut); border: 1px solid var(--line);
+  transition: background .2s ease, color .2s ease;
+}
+.stage-pill.done { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+.stage-pill.cur { background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--link); border-color: color-mix(in srgb, var(--primary) 30%, transparent); }
 
 /* Step 1: Sky Blue & White soft background */
 :root:not([data-theme="dark"]) #step-scan {

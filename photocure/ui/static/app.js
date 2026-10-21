@@ -3939,6 +3939,29 @@
     step("scan", flow.scan, total > 0 ? `${fmtN(total)} indexed` : "Not started");
     step("infer", flow.infer, pending > 0 ? `${fmtN(pending)} waiting`
       : flow.next === "infer" ? "Needs grouping" : total > 0 ? "Done" : "Needs step 1");
+
+    // Per-card hint text (beside each button)
+    const scanHint = $("#scan-hint");
+    if (scanHint) scanHint.textContent = total > 0 ? "Already-indexed photos are skipped." : "Choose a folder, then press Scan.";
+    const inferHint = $("#infer-hint");
+    if (inferHint) {
+      inferHint.textContent = pending > 0
+        ? `${fmtN(pending)} photo${pending === 1 ? "" : "s"} ready to analyze.`
+        : flow.next === "infer" ? "Ready when you are."
+        : total > 0 ? "Nothing waiting to analyze." : "Run Scan first.";
+    }
+
+    // Analysis stages pill row
+    const INFER_STAGES = ["Faces", "Sharpness", "Exposure", "Labels", "Bursts", "Categories"];
+    const stagesEl = $("#infer-stages");
+    if (stagesEl) {
+      const allDone = flow.infer === "done";
+      const running = pending > 0;
+      stagesEl.innerHTML = INFER_STAGES.map((s) =>
+        `<span class="stage-pill${allDone ? " done" : running ? " cur" : ""}">${allDone ? "✓ " : ""}${s}</span>`
+      ).join("");
+    }
+
     const hint = $("#dock-hint");
     if (hint) hint.textContent = nextHint(flow, total);
   }
