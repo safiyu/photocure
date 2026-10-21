@@ -45,7 +45,7 @@ Photocure works with JPEG, PNG, WebP, TIFF, HEIC and the common camera RAW forma
 - A Mac, Linux or Windows computer. Apple Silicon Macs and NVIDIA graphics cards make analysis much faster, but a plain processor works too. (Windows graphics-card support is best effort.)
 - Some patience for the first set-up, which is mostly waiting for the AI model to download. Allow a few gigabytes of free disk space for it.
 - An internet connection **for the first set-up only**. After that, Photocure works fully offline.
-- Python 3.10 or newer, unless you use the Debian/Ubuntu package or Docker below.
+- Python 3.11 or newer, unless you use the Debian/Ubuntu package or Docker below.
 
 ## Install and first start
 
@@ -68,7 +68,7 @@ Pick the way that suits you. All three end with the same app in your web browser
 
 ### Option 2: Mac, Windows or any Linux (from source)
 
-1. Install [Python 3.10 or newer](https://www.python.org/downloads/) if you do not have it.
+1. Install [Python 3.11 or newer](https://www.python.org/downloads/) if you do not have it.
 2. Download Photocure and open a terminal in its folder:
 
    ```bash
