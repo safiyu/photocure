@@ -576,7 +576,10 @@ def test_approve_delete_endpoints(env):
         s.commit()
         junk_a, junk_b, keeper = recs[0].id, recs[1].id, recs[2].id
     assert env.client.post("/api/images/99999/approve-delete", json={}).status_code == 404
-    assert env.client.post(f"/api/images/{keeper}/approve-delete", json={}).status_code == 400
+    # any photo can be marked, junk or not; only "approve all" is limited to junk
+    r = env.client.post(f"/api/images/{keeper}/approve-delete", json={})
+    assert r.status_code == 200 and r.json()["item"]["delete_approved"] is True
+    env.client.post(f"/api/images/{keeper}/approve-delete", json={})
     r = env.client.post(f"/api/images/{junk_a}/approve-delete", json={})
     assert r.status_code == 200 and r.json()["item"]["delete_approved"] is True
     r = env.client.post(f"/api/images/{junk_a}/approve-delete", json={})
@@ -636,3 +639,36 @@ def test_clean_export_refuses_library_folder(env):
     r = env.client.post("/api/export/clean", json={"ids": ids, "output_dir": str(env.lib / "x"),
                                                    "policy": "include"})
     assert r.status_code == 400
+
+
+def test_any_photo_can_be_marked_for_delete_in_any_section(env):
+    from sqlmodel import select as sselect
+    with get_session(env.db) as s:
+        recs = list(s.exec(sselect(M.ImageRecord).order_by(M.ImageRecord.id).limit(3)).all())
+        bg = M.BurstGroup(name="Burst_del", image_count=3, best_shot_id=recs[0].id)
+        s.add(bg)
+        s.flush()
+        for i, r in enumerate(recs):
+            r.burst_id, r.is_best_shot, r.is_alternate = bg.id, i == 0, i != 0
+        s.commit()
+        bid, best, alt1, alt2 = bg.id, recs[0].id, recs[1].id, recs[2].id
+    r = env.client.post(f"/api/images/{alt1}/approve-delete", json={})
+    assert r.status_code == 200 and r.json()["item"]["delete_approved"] is True
+    r = env.client.post("/api/deletes/approve", json={"ids": [best, alt1, alt2]}).json()
+    assert r["changed"] == 2 and r["approved_total"] == 3  # best and alt2 newly marked
+    detail = {m["id"]: m for m in env.client.get(f"/api/burst/{bid}").json()["members"]}
+    assert all(detail[i]["delete_approved"] for i in (best, alt1, alt2))
+    # a photo outside any burst or junk category (a plain category) can be marked too
+    other = next(i["id"] for i in env.client.get("/api/images?limit=50").json()["items"]
+                 if i["id"] not in (best, alt1, alt2))
+    assert env.client.post(f"/api/images/{other}/approve-delete", json={}).json()["item"]["delete_approved"]
+    env.client.post("/api/deletes/approve", json={"ids": [other], "approved": False})
+    env.client.post("/api/deletes/approve", json={"ids": [best], "approved": False})
+    # approve-all (no ids) is junk only, so it never touches burst frames
+    env.client.post("/api/deletes/approve", json={"ids": [alt1, alt2], "approved": False})
+    assert env.client.post("/api/deletes/approve", json={}).json()["changed"] == 0
+    # making a marked frame the best shot clears its mark
+    env.client.post(f"/api/images/{alt1}/approve-delete", json={})
+    assert env.client.post(f"/api/bursts/{bid}/best-shot", json={"image_id": alt1}).status_code == 200
+    detail = {m["id"]: m for m in env.client.get(f"/api/burst/{bid}").json()["members"]}
+    assert not detail[alt1]["delete_approved"]

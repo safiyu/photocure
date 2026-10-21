@@ -159,6 +159,8 @@ Choose a folder and press **Scan**, then **Analyze Now**. **Run All** does both 
 
 Every photo, oldest first. Narrow it down by category, camera, rating, country, favourites, or a date range (quick buttons for this year, last 90 days and last 30 days). The size slider changes thumbnail size. Click a photo to open it large, rate it, mark it as a favourite, change its category or lock it so a re-analysis never changes it. Click the tick on photos to select several and move them together.
 
+**Mark for delete.** Every photo, in every section, has a small trash icon (and the photo viewer and the selection bar have a **Mark for delete** button). A marked photo is dimmed and tagged, and it is left out of the result when you apply. With the trash option on (the default) it is moved to a trash folder you can restore or purge later; otherwise, or when you copy instead of move, your original stays where it is. Nothing is deleted just by marking, and unmarked photos are never removed. To mark everything Photocure flags as junk in one go, tick **Approve all proposed deletions** before you analyze.
+
 **Clean export.** With photos selected, press **Clean export** to make copies that are safe to share. Location, camera serial and other hidden details are removed, files get neutral names, and you can add a simple web gallery. Photocure can also check the selection for license plates, payment cards, screens, house numbers and ID documents, then blur those areas or leave those photos out. This check is a helper, not a guarantee: it can miss small details, so look over what you share. Your originals are never changed.
 
 ### Search
@@ -172,6 +174,8 @@ Every burst of similar shots, with the best frame marked. Faces are checked for 
 - **Everyone's eyes open** in one frame: keep that one.
 - **No single frame is perfect:** it names the two frames that together cover everybody. Press **Create fixed photo** and Photocure lines the frames up and blends the open eyes into the best frame, saving `IMG_xxxx_fixed.jpg` next to the original. If the heads moved too much it says so and leaves the photo alone. **Export layered PSD** gives you the aligned frames as layers with the mask already over the blinking face, for touching up by hand.
 - **Reject all blinks** sends spare frames with closed eyes to Junk review. Nothing is deleted, and you can restore them.
+
+Disagree with the pick? Press **Make best shot** on any frame. To get rid of the others, press **Mark for delete** on a frame (or mark all the other frames at once).
 
 ### Highlights
 

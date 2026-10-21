@@ -1267,13 +1267,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.post("/api/images/{image_id}/approve-delete", dependencies=auth)
     def approve_delete(image_id: int, body: ApproveDeleteReq = ApproveDeleteReq()):
-        """Approve (or withdraw approval) for staging one proposed deletion in the trash."""
+        """Mark one photo for deletion (or clear the mark): it is left out of the output."""
         with get_session(dbp) as s:
             rec = s.get(M.ImageRecord, image_id)
             if rec is None:
                 raise HTTPException(404, "image not found")
-            if (rec.manual_bucket or rec.category) not in JUNK_VALUES:
-                raise HTTPException(400, "only photos proposed for deletion can be approved")
             rec.delete_approved = (not rec.delete_approved) if body.approved is None else body.approved
             rec.updated_at = datetime.now(timezone.utc)
             s.flush()
@@ -1282,12 +1280,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.post("/api/deletes/approve", dependencies=auth)
     def approve_deletes(body: ApproveDeletesReq = ApproveDeletesReq()):
-        """Approve every photo currently proposed for deletion, or just the given ids."""
+        """Mark every junk photo for deletion, or exactly the given ids."""
         I = M.ImageRecord
         with exclusive(), get_session(dbp) as s:
-            stmt = select(I).where(func.coalesce(I.manual_bucket, I.category).in_(JUNK_VALUES))
-            if body.ids is not None:
-                stmt = stmt.where(I.id.in_(body.ids))
+            if body.ids is None:
+                stmt = select(I).where(func.coalesce(I.manual_bucket, I.category).in_(JUNK_VALUES))
+            else:
+                stmt = select(I).where(I.id.in_(body.ids))
             changed = 0
             for rec in s.exec(stmt).all():
                 if rec.delete_approved != body.approved:
@@ -1575,6 +1574,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             for m in members:
                 m.is_best_shot = (m.id == body.image_id)
                 m.is_alternate = (m.id != body.image_id)
+                if m.id == body.image_id:
+                    m.delete_approved = False  # choosing a frame to keep clears its delete mark
             bg.best_shot_id = body.image_id
             s.flush()
             return {"ok": True, "burst_id": burst_id, "best_shot_id": body.image_id}
@@ -1703,6 +1704,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     "eye_closed": (round(best_face.eye_closed_score, 3)
                                    if best_face and best_face.eye_closed_score is not None else None),
                     "manual_bucket": r.manual_bucket,
+                    "delete_approved": bool(r.delete_approved),
                 })
             blinkers = [m for m in members if m.has_blinks]
             movable = [m for m in blinkers if not m.is_best_shot and not m.locked
@@ -2086,6 +2088,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
             if a.operation == "copy" or (a.operation == "move" and crossdev):
                 need_bytes += st.st_size
         free = shutil.disk_usage(_nearest_existing(root)).free
+        ids = [a.image_id for a in actions if a.image_id]
+        marked = 0
+        with get_session(dbp) as s:
+            for i in range(0, len(ids), 500):
+                marked += int(s.exec(select(func.count()).select_from(M.ImageRecord).where(
+                    M.ImageRecord.id.in_(ids[i:i + 500]),
+                    M.ImageRecord.delete_approved == True)).one())  # noqa: E712
         by_cat: dict[str, int] = {}
         for a in actions:
             k = str(getattr(a.category, "value", a.category))
@@ -2096,7 +2105,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "collisions": len(collisions), "collision_samples": collisions[:20],
             "cross_device": cross, "missing_sources": missing,
             "bytes_total": total_bytes, "bytes_to_write": need_bytes,
-            "free_bytes": free, "enough_space": need_bytes <= free,
+            "free_bytes": free, "enough_space": need_bytes <= free, "marked_for_delete": marked,
         }
 
     @app.post("/api/plan/apply", dependencies=auth, status_code=202)
@@ -2163,6 +2172,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     "backup_warning": backup_warning,
                     "skipped_collisions": getattr(rep, "skipped_collisions", 0),
                     "unapproved_junk": getattr(rep, "unapproved_junk", 0),
+                    "marked_left_out": getattr(rep, "marked_left_out", 0),
                     "copy_fallbacks": getattr(rep, "copy_fallbacks", 0),
                     "failures": rep.failures, "errors": list(rep.errors)[:50]}
 
