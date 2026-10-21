@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import math
 from math import ceil
 
 from .blinks import Box, iou, track_faces
@@ -73,33 +74,119 @@ def _bridge(groups: list[dict[int, FaceObs]], max_gap: int = 2,
 
 
 def _subjects(frames: Sequence[Sequence[FaceObs]]) -> list[dict[int, FaceObs]]:
-    """Link faces into subjects: tracked by overlap, bridged across gaps by person id."""
-    boxed = [[f for f in fs if f.box is not None] for fs in frames]
-    tracks = track_faces([[f.box for f in fs] for fs in boxed])
-    groups = _bridge([{t: boxed[t][k] for t, k in tr} for tr in tracks])
+    """Link faces into subjects: tracked by spatial position, scale, and overlap, bridged across gaps."""
+    tracks: list[dict[int, FaceObs]] = []
+    for t, fs in enumerate(frames):
+        boxed = [f for f in fs if f.box is not None]
+        if not boxed:
+            continue
+        if not tracks:
+            for f in boxed:
+                tracks.append({t: f})
+            continue
+
+        cand_matches = []
+        for ti, tr in enumerate(tracks):
+            last_t = max(tr.keys())
+            last_f = tr[last_t]
+            gap = t - last_t
+            if gap > 8:
+                continue
+            b1 = last_f.box
+            cx1, cy1 = (b1[0] + b1[2]) / 2.0, (b1[1] + b1[3]) / 2.0
+            w1, h1 = max(0.01, b1[2] - b1[0]), max(0.01, b1[3] - b1[1])
+
+            for fi, f2 in enumerate(boxed):
+                b2 = f2.box
+                cx2, cy2 = (b2[0] + b2[2]) / 2.0, (b2[1] + b2[3]) / 2.0
+                w2, h2 = max(0.01, b2[2] - b2[0]), max(0.01, b2[3] - b2[1])
+
+                d = math.hypot(cx1 - cx2, cy1 - cy2)
+                rw = min(w1, w2) / max(w1, w2)
+                rh = min(h1, h2) / max(h1, h2)
+                ov = iou(b1, b2)
+
+                pid_bonus = 0.3 if (last_f.person_id is not None and last_f.person_id == f2.person_id) else 0.0
+                cost = 1.8 * d + 0.4 * (1.0 - (rw + rh) / 2.0) - 0.5 * ov + (gap - 1) * 0.04 - pid_bonus
+                if cost < 0.48:
+                    cand_matches.append((cost, ti, fi))
+
+        cand_matches.sort(key=lambda x: x[0])
+        used_t = set()
+        used_f = set()
+        for cost, ti, fi in cand_matches:
+            if ti in used_t or fi in used_f:
+                continue
+            tracks[ti][t] = boxed[fi]
+            used_t.add(ti)
+            used_f.add(fi)
+
+        for fi, f in enumerate(boxed):
+            if fi not in used_f:
+                tracks.append({t: f})
+
+    changed = True
+    while changed:
+        changed = False
+        best_merge = None
+        best_cost = 0.42
+        for i in range(len(tracks)):
+            for j in range(i + 1, len(tracks)):
+                tr1 = tracks[i]
+                tr2 = tracks[j]
+                if set(tr1.keys()) & set(tr2.keys()):
+                    continue
+
+                pids1 = {f.person_id for f in tr1.values() if f.person_id is not None}
+                pids2 = {f.person_id for f in tr2.values() if f.person_id is not None}
+                if pids1 and pids2 and (pids1 & pids2):
+                    best_merge = (i, j)
+                    best_cost = -1.0
+                    break
+
+                min_gap = min(abs(t1 - t2) for t1 in tr1 for t2 in tr2)
+                cx1 = sum((f.box[0] + f.box[2]) / 2.0 for f in tr1.values() if f.box) / len(tr1)
+                cy1 = sum((f.box[1] + f.box[3]) / 2.0 for f in tr1.values() if f.box) / len(tr1)
+                cx2 = sum((f.box[0] + f.box[2]) / 2.0 for f in tr2.values() if f.box) / len(tr2)
+                cy2 = sum((f.box[1] + f.box[3]) / 2.0 for f in tr2.values() if f.box) / len(tr2)
+                d_avg = math.hypot(cx1 - cx2, cy1 - cy2)
+
+                t1_end = max(tr1.keys()) if min(tr2.keys()) > max(tr1.keys()) else min(tr1.keys())
+                t2_start = min(tr2.keys()) if min(tr2.keys()) > max(tr1.keys()) else max(tr2.keys())
+                f1_end = tr1[t1_end]
+                f2_start = tr2[t2_start]
+                if f1_end.box and f2_start.box:
+                    d_end = math.hypot((f1_end.box[0] + f1_end.box[2]) / 2.0 - (f2_start.box[0] + f2_start.box[2]) / 2.0,
+                                       (f1_end.box[1] + f1_end.box[3]) / 2.0 - (f2_start.box[1] + f2_start.box[3]) / 2.0)
+                else:
+                    d_end = d_avg
+
+                cost = min(d_avg, d_end) + min_gap * 0.02
+                if cost < best_cost:
+                    best_cost = cost
+                    best_merge = (i, j)
+            if best_cost < 0:
+                break
+
+        if best_merge:
+            i, j = best_merge
+            tracks[i].update(tracks[j])
+            tracks.pop(j)
+            changed = True
+
     for t, fs in enumerate(frames):
         for f in fs:
             if f.box is None and f.person_id is not None:
-                groups.append({t: f})
-    merged: list[dict[int, FaceObs]] = []
-    owner: dict[int, int] = {}
-    for g in groups:
-        pids = {f.person_id for f in g.values() if f.person_id is not None}
-        target = None
-        for pid in pids:
-            idx = owner.get(pid)
-            # Two faces in one frame are two people, whatever the cluster id says.
-            if idx is not None and not (merged[idx].keys() & g.keys()):
-                target = idx
-                break
-        if target is None:
-            merged.append(dict(g))
-            target = len(merged) - 1
-        else:
-            merged[target].update(g)
-        for pid in pids:
-            owner.setdefault(pid, target)
-    return merged
+                matched = False
+                for tr in tracks:
+                    if t not in tr and any(f_other.person_id == f.person_id for f_other in tr.values()):
+                        tr[t] = f
+                        matched = True
+                        break
+                if not matched:
+                    tracks.append({t: f})
+
+    return tracks
 
 
 def _quality(face: FaceObs, sharp_ref: float | None) -> float:

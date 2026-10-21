@@ -2484,7 +2484,15 @@
                 </th>
                 ${subjects.map((subj, sIdx) => {
                   const color = FACE_PALETTE[sIdx % FACE_PALETTE.length];
-                  const posText = subj.avg_x < 0.35 ? 'Left subject' : (subj.avg_x > 0.65 ? 'Right subject' : 'Center subject');
+                  let posText = 'Subject ' + (sIdx + 1);
+                  const K = subjects.length;
+                  if (K === 2) {
+                    posText = sIdx === 0 ? 'Left' : 'Right';
+                  } else if (K === 3) {
+                    posText = sIdx === 0 ? 'Left' : (sIdx === 1 ? 'Center' : 'Right');
+                  } else if (K >= 4) {
+                    posText = sIdx === 0 ? 'Left' : (sIdx === K - 1 ? 'Right' : (sIdx === 1 ? 'Center-Left' : (sIdx === K - 2 ? 'Center-Right' : 'Center')));
+                  }
                   return `
                     <th class="bio-matrix-th bio-matrix-th-person" style="border-top: 3px solid ${color};">
                       <div class="bio-matrix-person-hd">
