@@ -2305,131 +2305,567 @@
     await showBurst(keep);
   }
 
-  // Tight face crops with the eye state, built from DOM nodes only.
-  async function showFaces(imageId, host, filename) {
-    const head = document.createElement("div");
-    head.className = "face-popover-head";
+  // ============================================================================
+  // DIRECT 1-TO-1 FACE-TO-ZOOM BIOMETRIC PROJECTION (NeuralVision)
+  // ============================================================================
+  const FACE_PALETTE = ['#22d3ee', '#34d399', '#f472b6', '#fbbf24', '#a855f7', '#38bdf8', '#fb7185', '#4ade80'];
 
-    const title = document.createElement("div");
-    title.className = "face-popover-title";
-    title.textContent = filename ? `Faces in ${filename}` : "Face inspection";
-    head.appendChild(title);
+  let activeOverlayBurstId = null;
+  let activeOverlayImageId = null;
+  let activeOverlayMembers = [];
+  let activeOverlayFaces = [];
+  let overlayLayout = 'radial';      // 'radial' | 'split' | 'cinema'
+  let faceZoomMultiplier = 1.08;     // 0.86 (1.5x) | 1.08 (2.5x) | 1.28 (3.5x)
+  let hoveredFaceId = null;
+  let selectedFaceId = null;
+  let currentBurstId = null;
 
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "face-popover-close";
-    close.setAttribute("aria-label", "Close");
-    close.textContent = "✕";
-    close.onclick = hideFacePanel;
-    head.appendChild(close);
+  function closeBiometricProjection() {
+    const overlay = $("#facepanel");
+    if (overlay) {
+      overlay.hidden = true;
+      overlay.replaceChildren();
+    }
+    activeOverlayBurstId = null;
+    activeOverlayImageId = null;
+    activeOverlayMembers = [];
+    activeOverlayFaces = [];
+    hoveredFaceId = null;
+    selectedFaceId = null;
+  }
 
-    host.replaceChildren(head);
+  function setOverlayLayout(mode) {
+    overlayLayout = mode;
+    if (activeOverlayImageId) renderBiometricOverlay();
+  }
 
-    const loading = document.createElement("p");
-    loading.className = "help";
-    loading.textContent = "Loading face crops...";
-    host.appendChild(loading);
+  function setFaceZoom(multiplier) {
+    faceZoomMultiplier = multiplier;
+    if (activeOverlayImageId) renderBiometricOverlay();
+  }
+
+  function setSpeed(speed) {
+    document.documentElement.style.setProperty('--speed', speed);
+    const s1 = $("#bio-speed-1");
+    const sSlow = $("#bio-speed-slow");
+    if (s1 && sSlow) {
+      s1.classList.toggle("on", speed === 1);
+      sSlow.classList.toggle("on", speed !== 1);
+    }
+    if (activeOverlayImageId) renderBiometricOverlay();
+  }
+
+  function setHoveredFace(faceId) {
+    if (hoveredFaceId === faceId) return;
+    hoveredFaceId = faceId;
+    if (faceId) selectedFaceId = faceId;
+    updateBiometricSpotlight();
+  }
+
+  function selectFaceInOverlay(faceId) {
+    selectedFaceId = faceId;
+    hoveredFaceId = faceId;
+    updateBiometricSpotlight();
+  }
+
+  async function openBiometricProjection(burstId, imageId) {
+    activeOverlayBurstId = burstId;
+    activeOverlayImageId = imageId;
+    hoveredFaceId = null;
+    selectedFaceId = null;
+
+    const overlay = $("#facepanel");
+    if (!overlay) return;
+    overlay.hidden = false;
+    overlay.className = "bio-overlay bg-cyber-grid";
+    overlay.innerHTML = `
+      <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
+      <div style="position:relative;z-index:30;padding:24px;text-align:center;color:#94a3b8;font-family:var(--font-mono, monospace);">
+        Loading biometric 1-to-1 face projection...
+      </div>
+    `;
 
     try {
-      const data = await api(`/api/images/${num(imageId)}/faces`);
-      loading.remove();
-      if (!data.items || !data.items.length) {
-        const p = document.createElement("p");
-        p.className = "help";
-        p.textContent = "No faces were found in this photo.";
-        host.appendChild(p);
-        return;
-      }
-      title.textContent = `${filename ? filename : "Faces"} (${data.items.length})`;
-      const grid = document.createElement("div");
-      grid.className = "face-popover-grid";
+      const [burstData, faceData] = await Promise.all([
+        api("/api/burst/" + num(burstId)),
+        api(`/api/images/${num(imageId)}/faces`)
+      ]);
 
+      activeOverlayMembers = burstData.members || [];
+      const curMember = activeOverlayMembers.find((m) => m.id === imageId) || activeOverlayMembers[0];
+      if (!curMember) throw new Error("Frame not found");
+
+      const items = faceData.items || [];
       const wording = { open: "Eyes open", possible: "Eyes may be closing", closed: "Eyes closed", unknown: "Eyes not measured" };
-      data.items.forEach((f, idx) => {
-        const chip = document.createElement("figure");
-        chip.className = "facechip" + (f.is_blink ? " blink" : "");
-        if (f.url) {
-          const img = document.createElement("img");
-          img.loading = "lazy";
-          img.alt = `Person ${idx + 1}`;
-          img.src = f.url;
-          chip.appendChild(img);
+
+      activeOverlayFaces = items.map((f, idx) => {
+        let x = 50, y = 50, w = 15, h = 20;
+        if (f.box && f.box.length === 4) {
+          w = Math.max(8, (f.box[2] - f.box[0]) * 100);
+          h = Math.max(8, (f.box[3] - f.box[1]) * 100);
+          x = ((f.box[0] + f.box[2]) / 2) * 100;
+          y = ((f.box[1] + f.box[3]) / 2) * 100;
+        } else {
+          const count = Math.max(1, items.length);
+          x = count > 1 ? 20 + (idx / (count - 1)) * 60 : 50;
+          y = 45;
         }
-        const cap = document.createElement("figcaption");
-        const person = document.createElement("div");
-        person.className = "facechip-person";
-        person.textContent = `Person ${idx + 1}`;
-        cap.appendChild(person);
-
-        const score = f.eye_closed_score != null ? " (" + num(f.eye_closed_score).toFixed(2) + ")" : "";
+        const color = f.is_blink ? "#ef4444" : FACE_PALETTE[idx % FACE_PALETTE.length];
         const stateKey = f.eye_status || "unknown";
-        const tag = document.createElement("span");
-        tag.className = `eye-tag ${stateKey}`;
-        tag.textContent = (wording[stateKey] || wording.unknown) + score;
-        cap.appendChild(tag);
+        const eyeScoreText = f.eye_closed_score != null ? ` (${num(f.eye_closed_score).toFixed(2)})` : "";
+        const confPercent = f.confidence ? Math.round(f.confidence * 100) + "%" : "99%";
+        const statusLabel = f.is_blink ? "BLINK" : (stateKey === "open" ? "OPEN" : (stateKey === "possible" ? "POSSIBLE" : "DETECTED"));
+        const statusBg = f.is_blink ? "#ef4444" : (stateKey === "open" ? "#10b981" : (stateKey === "possible" ? "#f59e0b" : "#64748b"));
 
-        chip.appendChild(cap);
-        grid.appendChild(chip);
+        return {
+          id: f.id,
+          name: `Person ${idx + 1}`,
+          role: f.is_blink ? "Closed Eyes" : (stateKey === "open" ? "Clear / Open" : "Subject"),
+          conf: confPercent,
+          sharpness: f.sharpness,
+          eyeStatusText: (wording[stateKey] || wording.unknown) + eyeScoreText,
+          eyeStatus: stateKey,
+          isBlink: f.is_blink,
+          statusLabel,
+          statusBg,
+          color,
+          url: f.url || thumbUrl(imageId, "preview"),
+          x, y, w, h
+        };
       });
-      host.appendChild(grid);
-    } catch (e) {
-      loading.textContent = "Failed to load faces: " + (e.message || e);
-    }
-  }
 
-  let activeFaceId = null;
-
-  function hideFacePanel() {
-    const panel = $("#facepanel");
-    if (panel) {
-      panel.hidden = true;
-      panel.replaceChildren();
-    }
-    $$("[data-faces]", $("#burstdetail")).forEach((b) => {
-      b.classList.remove("on");
-      const c = b.dataset.count;
-      b.textContent = c ? `Faces (${c})` : "Faces";
-    });
-    activeFaceId = null;
-  }
-
-  function positionFacePopover(pop, anchorEl) {
-    pop.style.visibility = "hidden";
-    pop.hidden = false;
-    const rect = anchorEl.getBoundingClientRect();
-    const popRect = pop.getBoundingClientRect();
-    const pad = 12;
-
-    let top = rect.bottom + 8;
-    if (top + popRect.height > window.innerHeight - pad && rect.top - popRect.height - 8 > pad) {
-      top = rect.top - popRect.height - 8;
-    }
-    let left = rect.left;
-    if (left + popRect.width > window.innerWidth - pad) {
-      left = Math.max(pad, window.innerWidth - popRect.width - pad);
-    }
-    if (left < pad) left = pad;
-
-    pop.style.top = `${Math.round(top)}px`;
-    pop.style.left = `${Math.round(left)}px`;
-    pop.style.visibility = "visible";
-  }
-
-  document.addEventListener("pointerdown", (e) => {
-    const panel = $("#facepanel");
-    if (panel && !panel.hidden) {
-      if (!panel.contains(e.target) && !e.target.closest("[data-faces]")) {
-        hideFacePanel();
+      if (activeOverlayFaces.length) {
+        selectedFaceId = activeOverlayFaces[0].id;
       }
+
+      renderBiometricOverlay();
+    } catch (e) {
+      overlay.innerHTML = `
+        <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
+        <div style="position:relative;z-index:30;padding:40px;text-align:center;color:#ef4444;font-family:var(--font-mono, monospace);">
+          Failed to load face projection: ${esc(e.message || e)}
+          <br><br>
+          <button type="button" class="bio-close-btn" style="margin:0 auto;" onclick="closeBiometricProjection()">Close</button>
+        </div>
+      `;
+    }
+  }
+
+  function renderBiometricOverlay() {
+    const overlay = $("#facepanel");
+    if (!overlay || !activeOverlayImageId) return;
+
+    const curMember = activeOverlayMembers.find((m) => m.id === activeOverlayImageId) || activeOverlayMembers[0];
+    if (!curMember) return;
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const centerX = vw / 2;
+    const centerY = vh / 2 + 6;
+
+    const baseNodeSize = vw < 640 ? 88 : 124;
+    const nodeDiameter = Math.round(baseNodeSize * faceZoomMultiplier);
+    const count = activeOverlayFaces.length;
+
+    const aspect = (curMember.width && curMember.height) ? (curMember.height / curMember.width) : 0.67;
+
+    let sourceBox = { x: centerX - 210, y: centerY - 145, w: 420, h: 290 };
+    const faceNodesPositions = [];
+
+    if (overlayLayout === 'radial') {
+      if (vw >= 1024) {
+        const srcW = Math.min(460, vw * 0.36);
+        const srcH = Math.round(srcW * aspect);
+        sourceBox = { x: centerX - srcW / 2, y: centerY - srcH / 2 - 15, w: srcW, h: srcH };
+
+        const half = Math.ceil(count / 2);
+        const leftFaces = activeOverlayFaces.slice(0, half);
+        const rightFaces = activeOverlayFaces.slice(half);
+        const flankOffsetX = srcW / 2 + nodeDiameter / 2 + 115;
+
+        leftFaces.forEach((f, i) => {
+          const totalLeft = leftFaces.length;
+          const ySpread = totalLeft > 1 ? ((i / (totalLeft - 1)) - 0.5) * 210 : 0;
+          const xCurve = totalLeft > 1 ? Math.abs((i / (totalLeft - 1)) - 0.5) * 28 : 0;
+          faceNodesPositions.push({ face: f, cx: centerX - flankOffsetX + xCurve, cy: centerY - 15 + ySpread });
+        });
+
+        rightFaces.forEach((f, i) => {
+          const totalRight = rightFaces.length;
+          const ySpread = totalRight > 1 ? ((i / (totalRight - 1)) - 0.5) * 210 : 0;
+          const xCurve = totalRight > 1 ? Math.abs((i / (totalRight - 1)) - 0.5) * -28 : 0;
+          faceNodesPositions.push({ face: f, cx: centerX + flankOffsetX + xCurve, cy: centerY - 15 + ySpread });
+        });
+      } else {
+        const srcW = Math.min(340, vw * 0.84);
+        const srcH = Math.round(srcW * aspect);
+        sourceBox = { x: centerX - srcW / 2, y: 95, w: srcW, h: srcH };
+        const spanW = Math.min(vw * 0.86, count * (nodeDiameter + 20));
+        const startX = centerX - spanW / 2 + nodeDiameter / 2;
+        const stepX = count > 1 ? (spanW - nodeDiameter) / (count - 1) : 0;
+        activeOverlayFaces.forEach((f, idx) => {
+          faceNodesPositions.push({ face: f, cx: startX + idx * stepX, cy: sourceBox.y + sourceBox.h + 115 });
+        });
+      }
+    } else if (overlayLayout === 'split') {
+      if (vw >= 1024) {
+        const srcW = Math.min(480, vw * 0.38);
+        const srcH = Math.round(srcW * aspect);
+        sourceBox = { x: Math.max(56, centerX - 540), y: centerY - srcH / 2 - 12, w: srcW, h: srcH };
+
+        const rightAreaStart = sourceBox.x + sourceBox.w + 140;
+        const rightAreaWidth = Math.min(620, vw - rightAreaStart - 56);
+
+        activeOverlayFaces.forEach((f, idx) => {
+          const cols = count <= 3 ? count : 2;
+          const rows = Math.ceil(count / cols);
+          const colIdx = idx % cols;
+          const rowIdx = Math.floor(idx / cols);
+
+          const colSpacing = cols > 1 ? Math.min(280, rightAreaWidth / (cols - 0.3)) : 0;
+          const rowSpacing = 205;
+          const gridOriginX = rightAreaStart + nodeDiameter / 2 + 20;
+          const gridOriginY = centerY - ((rows - 1) * rowSpacing) / 2 - 15;
+
+          faceNodesPositions.push({ face: f, cx: gridOriginX + colIdx * colSpacing, cy: gridOriginY + rowIdx * rowSpacing });
+        });
+      } else {
+        const srcW = Math.min(340, vw * 0.84);
+        const srcH = Math.round(srcW * aspect);
+        sourceBox = { x: centerX - srcW / 2, y: 95, w: srcW, h: srcH };
+        const spanW = Math.min(vw * 0.86, count * (nodeDiameter + 20));
+        const startX = centerX - spanW / 2 + nodeDiameter / 2;
+        const stepX = count > 1 ? (spanW - nodeDiameter) / (count - 1) : 0;
+        activeOverlayFaces.forEach((f, idx) => {
+          faceNodesPositions.push({ face: f, cx: startX + idx * stepX, cy: sourceBox.y + sourceBox.h + 115 });
+        });
+      }
+    } else if (overlayLayout === 'cinema') {
+      const srcW = Math.min(440, vw * 0.78);
+      const srcH = Math.round(srcW * aspect);
+      sourceBox = { x: centerX - srcW / 2, y: Math.max(84, centerY - srcH - 56), w: srcW, h: srcH };
+
+      const dockSpanWidth = Math.min(vw * 0.82, count * (nodeDiameter + 78));
+      const startX = centerX - dockSpanWidth / 2 + nodeDiameter / 2;
+      const stepX = count > 1 ? (dockSpanWidth - nodeDiameter) / (count - 1) : 0;
+
+      activeOverlayFaces.forEach((f, idx) => {
+        const normIdx = count > 1 ? (idx / (count - 1)) * 2 - 1 : 0;
+        const gentleArcY = Math.pow(normIdx, 2) * -18;
+        faceNodesPositions.push({ face: f, cx: count === 1 ? centerX : startX + idx * stepX, cy: sourceBox.y + sourceBox.h + 130 + gentleArcY });
+      });
+    }
+
+    overlay.dataset.sourceBox = JSON.stringify(sourceBox);
+    overlay.dataset.nodeDiameter = String(nodeDiameter);
+    window._currentFaceNodes = faceNodesPositions;
+
+    overlay.innerHTML = `
+      <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
+      <svg id="overlay-svg-canvas" class="bio-svg-canvas"></svg>
+
+      <!-- TOP HUD -->
+      <header class="bio-hud-top">
+        <div class="bio-hud-left">
+          <div class="bio-live-indicator">
+            <span class="bio-ping-dot"></span>
+            <span>1-TO-1 FACE PROJECTION</span>
+          </div>
+          <div>
+            <h2 class="bio-photo-title">${esc(curMember.filename)}</h2>
+            <p class="bio-photo-sub">${num(curMember.width)}×${num(curMember.height)} • ${count} detected faces • Direct biometric tethers</p>
+          </div>
+        </div>
+
+        <!-- Layout Selector -->
+        <div class="bio-layout-bar">
+          <button type="button" class="bio-layout-btn${overlayLayout === 'radial' ? ' on' : ''}" onclick="setOverlayLayout('radial')">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>
+            <span>Radial</span>
+          </button>
+          <button type="button" class="bio-layout-btn${overlayLayout === 'split' ? ' on' : ''}" onclick="setOverlayLayout('split')">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"/></svg>
+            <span>Split</span>
+          </button>
+          <button type="button" class="bio-layout-btn${overlayLayout === 'cinema' ? ' on' : ''}" onclick="setOverlayLayout('cinema')">
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="11" rx="2"/><rect x="3" y="16" width="5" height="5" rx="1"/><rect x="10" y="16" width="5" height="5" rx="1"/><rect x="17" y="16" width="5" height="5" rx="1"/></svg>
+            <span>Cinema</span>
+          </button>
+        </div>
+
+        <!-- Zoom & Speed & Close -->
+        <div class="bio-hud-right">
+          <div class="bio-zoom-bar">
+            <span class="bio-ctrl-label">Zoom:</span>
+            <button type="button" class="bio-zoom-btn${faceZoomMultiplier === 0.86 ? ' on' : ''}" onclick="setFaceZoom(0.86)">1.5x</button>
+            <button type="button" class="bio-zoom-btn${faceZoomMultiplier === 1.08 ? ' on' : ''}" onclick="setFaceZoom(1.08)">2.5x</button>
+            <button type="button" class="bio-zoom-btn${faceZoomMultiplier === 1.28 ? ' on' : ''}" onclick="setFaceZoom(1.28)">3.5x</button>
+          </div>
+
+          <div class="bio-speed-bar">
+            <span class="bio-ctrl-label">Speed:</span>
+            <button type="button" class="bio-speed-btn on" id="bio-speed-1" onclick="setSpeed(1)">1x</button>
+            <button type="button" class="bio-speed-btn" id="bio-speed-slow" onclick="setSpeed(0.45)">0.5x</button>
+          </div>
+
+          <button type="button" class="bio-close-btn" onclick="closeBiometricProjection()" title="Close (ESC)">
+            <span>ESC</span>
+            <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- CENTER STAGE -->
+      <div id="overlay-stage" class="bio-stage">
+        <!-- SOURCE PHOTO BOX -->
+        <div 
+          style="left:${sourceBox.x}px; top:${sourceBox.y}px; width:${sourceBox.w}px; height:${sourceBox.h}px;"
+          class="bio-source-box"
+        >
+          <img 
+            src="${thumbUrl(curMember.id, "preview")}" 
+            alt="${esc(curMember.filename)}"
+            class="bio-source-img${hoveredFaceId ? ' dimmed' : ''}"
+          />
+          <div class="bio-source-badge-bar">
+            <span>SOURCE PHOTO • ${esc(curMember.filename)}</span>
+            <span style="color:#22d3ee;">${count} FACES</span>
+          </div>
+
+          <!-- Face reticles on photo -->
+          ${activeOverlayFaces.map((f) => {
+            const isHovered = hoveredFaceId === f.id;
+            return `
+              <div
+                class="bio-face-reticle"
+                data-reticle-id="${f.id}"
+                onmouseenter="setHoveredFace(${f.id})"
+                onmouseleave="setHoveredFace(null)"
+                onclick="selectFaceInOverlay(${f.id})"
+                style="left:${f.x - f.w/2}%; top:${f.y - f.h/2}%; width:${f.w}%; height:${f.h}%; border-color:${f.color}; box-shadow:0 0 ${isHovered ? '24px' : '10px'} ${f.color};"
+              >
+                <span class="tick tick-tl"></span>
+                <span class="tick tick-tr"></span>
+                <span class="tick tick-bl"></span>
+                <span class="tick tick-br"></span>
+                <span class="bio-face-reticle-tag" style="background:${f.color};">
+                  ${esc(f.name)}
+                </span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+
+        <!-- ENLARGED FACE NODES -->
+        ${faceNodesPositions.map((node) => {
+          const f = node.face;
+          const isHovered = hoveredFaceId === f.id;
+          const diam = isHovered ? Math.round(nodeDiameter * 1.1) : nodeDiameter;
+          return `
+            <figure
+              class="enlarged-face-node facechip${f.isBlink ? ' blink' : ''}"
+              data-node-id="${f.id}"
+              onmouseenter="setHoveredFace(${f.id})"
+              onmouseleave="setHoveredFace(null)"
+              onclick="selectFaceInOverlay(${f.id})"
+              style="left:${node.cx}px; top:${node.cy}px; width:${diam}px; height:${diam}px; transform:translate(-50%, -50%);"
+            >
+              <!-- Outer Rotating Ring -->
+              <svg class="hud-ring-spin" viewBox="0 0 120 120">
+                <circle cx="60" cy="60" r="56" fill="none" stroke="${f.color}" stroke-width="${isHovered ? '2.4' : '1.4'}" stroke-dasharray="20 10 6 10" stroke-opacity="${isHovered ? '1' : '0.65'}"/>
+              </svg>
+              <!-- Inner Counter-Rotating Ring -->
+              <svg class="hud-ring-reverse" viewBox="0 0 120 120">
+                <circle cx="60" cy="60" r="56" fill="none" stroke="${f.color}" stroke-width="1" stroke-dasharray="4 14" stroke-opacity="0.7"/>
+              </svg>
+              <!-- Face Cutout Circle -->
+              <div class="face-crop-circle" style="border-color:${f.color}; box-shadow: 0 16px 45px rgba(0,0,0,0.85), 0 0 ${isHovered ? '32px' : '16px'} ${f.color}88;">
+                <img src="${f.url}" alt="${esc(f.name)}" loading="lazy">
+              </div>
+              <!-- Badge -->
+              <div class="face-badge-pill" style="background:${f.statusBg}; color:#fff;">
+                ${f.statusLabel}
+              </div>
+              <!-- Figcaption Nameplate -->
+              <figcaption class="face-nameplate" style="border-color:${isHovered ? f.color : 'rgba(51,65,85,0.8)'};">
+                <div class="face-nameplate-title">
+                  <span class="face-dot" style="background:${f.color}"></span>
+                  <span>${esc(f.name)}</span>
+                </div>
+                <div class="face-nameplate-sub">
+                  <span>${esc(f.eyeStatusText)}</span>
+                  ${f.sharpness ? `<span>• Sharpness ${num(f.sharpness).toFixed(1)}</span>` : ''}
+                </div>
+              </figcaption>
+            </figure>
+          `;
+        }).join('')}
+      </div>
+
+      <!-- BOTTOM HUD -->
+      <footer class="bio-hud-bottom">
+        <div class="bio-frame-switcher-wrap">
+          <span class="bio-frame-label">Frames:</span>
+          <div id="overlay-card-switcher" class="bio-frame-switcher">
+            ${activeOverlayMembers.map((m, idx) => `
+              <button 
+                type="button" 
+                class="bio-frame-btn${m.id === activeOverlayImageId ? ' on' : ''}" 
+                onclick="openBiometricProjection(${activeOverlayBurstId}, ${m.id})"
+                title="${esc(m.filename)}"
+              >
+                ${m.is_best_shot ? '★ ' : ''}Frame 0${idx + 1}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+
+        <div id="selected-face-drawer" class="bio-face-inspector"></div>
+      </footer>
+    `;
+
+    updateBiometricSpotlight();
+  }
+
+  function updateBiometricSpotlight() {
+    const overlay = $("#facepanel");
+    if (!overlay || !window._currentFaceNodes) return;
+
+    const sourceBox = JSON.parse(overlay.dataset.sourceBox || "{}");
+    const nodeDiameter = Number(overlay.dataset.nodeDiameter || "120");
+    const faceNodesPositions = window._currentFaceNodes;
+    const svgEl = $("#overlay-svg-canvas");
+    if (!svgEl) return;
+
+    let svgMarkup = '';
+
+    faceNodesPositions.forEach((node) => {
+      const f = node.face;
+      const isHovered = hoveredFaceId === f.id;
+      const isDimmed = hoveredFaceId && !isHovered;
+
+      const faceCenterX = sourceBox.x + (f.x / 100) * sourceBox.w;
+      const faceCenterY = sourceBox.y + (f.y / 100) * sourceBox.h;
+      const boxHalfW = ((f.w / 100) * sourceBox.w) / 2;
+      const boxHalfH = ((f.h / 100) * sourceBox.h) / 2;
+
+      const dx = node.cx - faceCenterX;
+      const dy = node.cy - faceCenterY;
+      const angle = Math.atan2(dy, dx);
+      const radius = (isHovered ? nodeDiameter * 1.1 : nodeDiameter) / 2 + 6;
+
+      const targetEdgeX = node.cx - Math.cos(angle) * radius;
+      const targetEdgeY = node.cy - Math.sin(angle) * radius;
+
+      let startX = faceCenterX;
+      let startY = faceCenterY;
+      let c1x, c1y, c2x, c2y;
+
+      if (overlayLayout === 'split' && window.innerWidth >= 1024) {
+        startX = faceCenterX + boxHalfW;
+        startY = faceCenterY;
+        const midX = (startX + targetEdgeX) / 2;
+        c1x = midX; c1y = startY; c2x = midX; c2y = targetEdgeY;
+      } else if (overlayLayout === 'cinema') {
+        startX = faceCenterX;
+        startY = faceCenterY + boxHalfH;
+        const midY = (startY + targetEdgeY) / 2;
+        c1x = startX; c1y = midY; c2x = targetEdgeX; c2y = midY;
+      } else {
+        const isRightFlank = node.cx >= sourceBox.x + sourceBox.w / 2;
+        startX = faceCenterX + (isRightFlank ? boxHalfW : -boxHalfW);
+        startY = faceCenterY;
+        const midX = (startX + targetEdgeX) / 2;
+        c1x = midX; c1y = startY; c2x = midX; c2y = targetEdgeY;
+      }
+
+      const pathD = `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${targetEdgeX} ${targetEdgeY}`;
+      const opacity = isHovered ? '1' : isDimmed ? '0.14' : '0.78';
+      const strokeW = isHovered ? '3.2' : '1.8';
+
+      svgMarkup += `
+        <g style="opacity:${opacity}; transition: opacity 0.25s ease;">
+          <path d="${pathD}" fill="none" stroke="${f.color}" stroke-width="${isHovered ? '8' : '4'}" stroke-opacity="0.22" stroke-linecap="round"/>
+          <path d="${pathD}" fill="none" stroke="${f.color}" stroke-width="${strokeW}" stroke-linecap="round" class="tether-beam"/>
+          <path d="${pathD}" fill="none" stroke="#ffffff" stroke-width="${isHovered ? '3.2' : '2'}" stroke-linecap="round" class="tether-pulse"/>
+          <circle cx="${startX}" cy="${startY}" r="${isHovered ? '5.5' : '4'}" fill="${f.color}" stroke="#05070c" stroke-width="1.5"/>
+          <circle cx="${targetEdgeX}" cy="${targetEdgeY}" r="${isHovered ? '5.5' : '4'}" fill="#ffffff" stroke="${f.color}" stroke-width="2"/>
+        </g>
+      `;
+    });
+
+    svgEl.innerHTML = svgMarkup;
+
+    const activeFace = activeOverlayFaces.find((f) => f.id === selectedFaceId) || activeOverlayFaces[0];
+    const drawerEl = $("#selected-face-drawer");
+    if (drawerEl && activeFace) {
+      drawerEl.innerHTML = `
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div 
+            style="width:36px; height:36px; border-radius:50%; overflow:hidden; border:2px solid ${activeFace.color}; flex:none;"
+          >
+            <img src="${activeFace.url}" style="width:100%; height:100%; object-fit:cover;" alt="">
+          </div>
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:13px; font-weight:700; color:#fff;">${esc(activeFace.name)}</span>
+              <span style="font-size:10px; font-family:var(--font-mono, monospace); font-weight:700; padding:1px 6px; border-radius:4px; background:${activeFace.statusBg}; color:#fff;">
+                ${esc(activeFace.statusLabel)}
+              </span>
+            </div>
+            <div style="font-size:11px; font-family:var(--font-mono, monospace); color:#94a3b8; margin-top:1px;">
+              ${esc(activeFace.eyeStatusText)}${activeFace.sharpness ? ` • Sharpness ${num(activeFace.sharpness).toFixed(1)}` : ''}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    $$(".enlarged-face-node", overlay).forEach((node) => {
+      const id = Number(node.dataset.nodeId);
+      const isHovered = hoveredFaceId === id;
+      const isDimmed = hoveredFaceId && !isHovered;
+      node.style.opacity = isDimmed ? '0.35' : '1';
+      node.style.filter = isDimmed ? 'brightness(0.75)' : 'none';
+    });
+
+    $$(".bio-face-reticle", overlay).forEach((ret) => {
+      const id = Number(ret.dataset.reticleId);
+      const isHovered = hoveredFaceId === id;
+      const isDimmed = hoveredFaceId && !isHovered;
+      ret.style.opacity = isDimmed ? '0.35' : '1';
+    });
+  }
+
+  // Window listeners for projection
+  window.addEventListener("resize", () => {
+    const overlay = $("#facepanel");
+    if (overlay && !overlay.hidden && activeOverlayImageId) {
+      renderBiometricOverlay();
     }
   });
 
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") {
-      const panel = $("#facepanel");
-      if (panel && !panel.hidden) hideFacePanel();
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && activeOverlayImageId) {
+      closeBiometricProjection();
     }
   });
+
+  // Expose handlers to window for inline onclick attributes
+  window.openBiometricProjection = openBiometricProjection;
+  window.closeBiometricProjection = closeBiometricProjection;
+  window.setOverlayLayout = setOverlayLayout;
+  window.setFaceZoom = setFaceZoom;
+  window.setSpeed = setSpeed;
+  window.setHoveredFace = setHoveredFace;
+  window.selectFaceInOverlay = selectFaceInOverlay;
+
+  // Compatibility alias
+  async function showFaces(imageId, host, filename) {
+    if (currentBurstId) {
+      await openBiometricProjection(currentBurstId, imageId);
+    }
+  }
 
   async function rejectBlinks(burstId, count) {
     const yes = await showConfirmDialog({
@@ -2469,7 +2905,8 @@
     unknown: "eyes not measured", missing: "not seen in this frame" };
 
   async function showBurst(id) {
-    hideFacePanel();
+    currentBurstId = id;
+    closeBiometricProjection();
     $$(".burstrow", $("#burstlist")).forEach((r) => r.classList.toggle("on", num(r.dataset.burst) === id));
     const data = await api("/api/burst/" + num(id));
     const group = data.group;
@@ -2503,7 +2940,7 @@
         ${banner}
         <div class="btn-row burst-toolbar" id="blinkbar"></div>
       </div>
-      <div id="facepanel" class="face-popover" hidden role="dialog" aria-label="Face inspection"></div>
+      <div id="facepanel" class="bio-overlay bg-cyber-grid" hidden role="dialog" aria-label="Biometric face projection"></div>
       <div class="burstgrid anim-in">` +
       data.members.map((m) => {
         const bits = [];
@@ -2511,7 +2948,7 @@
         if (m.face_confidence != null) bits.push("face " + num(m.face_confidence).toFixed(2));
         if (m.eye_closed != null) bits.push("eyes closed " + num(m.eye_closed).toFixed(2));
         return `<figure class="card${m.is_best_shot ? " best" : ""}${m.delete_approved ? " marked" : ""}" data-id="${num(m.id)}" tabindex="0">
-          <div class="thumb">
+          <div class="thumb" ${m.face_count ? `data-thumb-faces="${num(m.id)}" style="cursor:pointer;" title="Click to view 1-to-1 face projection"` : ""}>
             <img loading="lazy" src="${thumbUrl(m.id)}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
             <div class="flags">${m.is_best_shot ? '<span class="badge best">★ Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}${m.delete_approved ? '<span class="badge danger">Marked for delete</span>' : ""}${gmBadge(m)}</div>
           </div>
@@ -2525,7 +2962,7 @@
                 ? `<button class="mini is-best" disabled title="This is the best shot">★ Best shot</button>`
                 : `<button class="mini" data-makebest="${num(m.id)}" title="Set as best shot">Set best</button>`}
               <button class="mini danger${m.delete_approved ? " on" : ""}${m.is_best_shot ? " warn-best" : ""}" data-markdelete="${num(m.id)}" data-is-best="${m.is_best_shot ? "1" : "0"}" aria-pressed="${m.delete_approved ? "true" : "false"}" title="${m.is_best_shot ? "Marking the best shot for delete" : "Mark this frame for delete"}">${m.delete_approved ? "Marked (undo)" : "Mark delete"}</button>
-              ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}" data-count="${num(m.face_count)}" title="Inspect face crops">Faces (${num(m.face_count)})</button>` : ""}
+              ${m.face_count ? `<button class="mini btn-faces-glow" data-faces="${num(m.id)}" data-count="${num(m.face_count)}" title="View 1-to-1 face projection">Faces (${num(m.face_count)})</button>` : ""}
             </div>
           </figcaption>
         </figure>`;
@@ -2553,25 +2990,13 @@
     $$("[data-faces]", $("#burstdetail")).forEach((b) => {
       b.onclick = async () => {
         const imgId = num(b.dataset.faces);
-        const card = b.closest(".card");
-        const filename = card ? (card.querySelector(".fn")?.textContent || "") : "";
-        const panel = $("#facepanel");
-        if (!panel) return;
-
-        if (activeFaceId === imgId && !panel.hidden) {
-          hideFacePanel();
-          return;
-        }
-
-        activeFaceId = imgId;
-        $$("[data-faces]", $("#burstdetail")).forEach((btn) => {
-          const isThis = btn === b;
-          btn.classList.toggle("on", isThis);
-          btn.textContent = isThis ? "Hide faces" : (btn.dataset.count ? `Faces (${btn.dataset.count})` : "Faces");
-        });
-
-        await showFaces(imgId, panel, filename);
-        positionFacePopover(panel, b);
+        await openBiometricProjection(id, imgId);
+      };
+    });
+    $$("[data-thumb-faces]", $("#burstdetail")).forEach((t) => {
+      t.onclick = async () => {
+        const imgId = num(t.dataset.thumbFaces);
+        await openBiometricProjection(id, imgId);
       };
     });
     $$("[data-makebest]", $("#burstdetail")).forEach((b) => {
