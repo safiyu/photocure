@@ -443,7 +443,7 @@
     if (it.is_favorite) add("fav", "\u2665 Favourite");
     if (num(it.rating) > 0) add("", "\u2605" + num(it.rating));
     if (it.is_best_shot) add("best", "Best shot");
-    if (it.delete_approved) add("warn", "Marked for delete");
+
     if (it.is_duplicate) add("warn", "Duplicate");
     if (it.near_dup_of != null) add("warn", "Near duplicate");
     if (it.is_alternate) add("", "Alternate");
@@ -528,10 +528,10 @@
         type: "button",
         class: "btn btn-lock" + (it.locked ? " is-locked" : ""),
         "data-lock": id,
-        title: (it.locked ? "Unlock" : "Lock / Keep") + " (l)",
-        "aria-label": it.locked ? "Unlock" : "Lock / Keep",
+        title: (it.locked ? "Unlock" : "Keep") + " (l)",
+        "aria-label": it.locked ? "Unlock" : "Keep",
         tabindex: -1,
-      }, el("span", { class: "btn-ic", html: icon("lock", "sm") }), el("span", { class: "btn-lbl", text: it.locked ? "Locked" : "Keep" })),
+      }, el("span", { class: "btn-ic", html: icon("heart", "sm") }), el("span", { class: "btn-lbl", text: it.locked ? "Kept" : "Keep" })),
       el("button", {
         type: "button",
         class: "btn btn-pick" + (picked ? " is-picked" : ""),
