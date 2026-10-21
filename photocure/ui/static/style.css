@@ -158,8 +158,9 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; overflow-y: scroll; }
+html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; overflow-y: scroll; overflow-x: hidden; }
 body {
+  overflow-x: hidden;
   margin: 0; background: var(--table);
   background-image:
     radial-gradient(1200px 650px at 8% -5%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 60%),
@@ -1200,7 +1201,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .diff-target b { color: var(--ink); }
 
 /* ------------------------------------------------------------------ split lists */
-.split { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.split { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 20px; align-items: start; min-width: 0; width: 100%; box-sizing: border-box; }
 .burstlist { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 190px); overflow-y: auto; position: sticky; top: 100px; padding-right: 4px; }
 .burst-item, .burstrow {
   display: flex; align-items: center; justify-content: space-between; gap: 10px; text-align: left;
@@ -1222,13 +1223,15 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .rowmain { display: flex; gap: 12px; align-items: center; min-width: 0; }
 .rowthumb { width: 46px; height: 46px; object-fit: cover; border-radius: 6px; background: var(--well); flex: none; }
 
+.detail { min-width: 0; width: 100%; box-sizing: border-box; }
 .detail h3 { font-size: 20px; margin-bottom: 14px; }
-.burstgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; align-items: stretch; margin-top: 20px; }
+.burstgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 16px; align-items: stretch; margin-top: 18px; min-width: 0; width: 100%; box-sizing: border-box; }
 
 /* ------------------------------------------------------------------ Burst Card Wrap & Redesign */
 .card-wrap {
   border-radius: 25px; padding: 0; box-shadow: 0 8px 22px rgba(60, 70, 140, 0.13); display: flex;
   transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s ease; position: relative;
+  min-width: 0;
 }
 :root[data-theme="dark"] .card-wrap { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
 .card-wrap:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(60, 70, 140, 0.18); }
@@ -1239,6 +1242,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .card-wrap .card {
   background: var(--sheet); border-radius: 22px; padding: 10px; display: flex; flex-direction: column;
   width: 100%; border: 1px solid var(--line); box-sizing: border-box; margin: 0; position: relative; overflow: hidden;
+  min-width: 0;
 }
 .card-wrap.is-best .card { border: none; }
 
@@ -1253,13 +1257,13 @@ body.has-picks .tools, body.has-picks .hover-actions {
   position: static; padding: 10px 4px 6px; color: var(--ink); pointer-events: auto; display: flex; flex-direction: column; gap: 4px;
 }
 .card-wrap .burst-row-title {
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0;
 }
 .card-wrap .caption .file {
-  font-size: 13px; font-weight: 800; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 13px; font-weight: 800; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1;
 }
 .card-wrap .caption .meta {
-  font-size: 11px; font-weight: 500; color: var(--mut); margin: 0;
+  font-size: 11px; font-weight: 500; color: var(--mut); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .card-wrap .tag-badge {
   font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
@@ -1269,39 +1273,50 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .card-wrap .tag-badge.warn { background: color-mix(in srgb, var(--err) 16%, var(--sheet)); color: var(--err); border-color: var(--err); }
 
 .card-wrap .burst-stats {
-  display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px;
+  display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; align-items: center;
 }
 .card-wrap .stat-pill {
-  font-size: 11px; font-weight: 600; padding: 3px 7px; border-radius: 6px;
+  font-size: 11px; font-weight: 600; padding: 2px 6px; border-radius: 6px;
   background: var(--well); color: var(--mut); border: 1px solid var(--line);
+  white-space: nowrap; line-height: 1.4;
 }
 .card-wrap .stat-pill b { color: var(--ink); font-weight: 700; }
 .card-wrap .stat-pill.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
 .card-wrap .stat-pill.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
 
-.card-wrap .actions { display: flex; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.card-wrap .actions { display: flex; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .card-wrap .btn {
-  height: 38px; border-radius: 12px; font-size: 13px; font-weight: 700; display: flex;
-  align-items: center; justify-content: center; gap: 6px; border: 0; cursor: pointer; transition: all .18s ease;
+  height: 35px; border-radius: 10px; font-size: 12px; font-weight: 700; display: inline-flex;
+  align-items: center; justify-content: center; gap: 5px; border: 0; cursor: pointer; transition: all .18s ease;
+  padding: 0 8px; flex: 1 1 0; min-width: 0; white-space: nowrap; box-sizing: border-box;
 }
-.card-wrap .btn svg { width: 15px; height: 15px; }
-.card-wrap .btn-best { flex: 1.2; border: 1.5px solid var(--line); background: var(--sheet); color: var(--ink); }
+.card-wrap .btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+.card-wrap .btn-best {
+  flex: 1.1 1 0; min-width: 0; padding: 0 8px; border: 1.5px solid var(--line); background: var(--sheet); color: var(--ink);
+}
 .card-wrap .btn-best:hover:not([disabled]) { border-color: var(--primary); background: var(--well); }
-.card-wrap.is-best .btn-best { background: var(--ok); border-color: var(--ok); color: #04281d; opacity: 1; }
+.card-wrap.is-best .btn-best, .card-wrap .btn-best.is-best {
+  background: var(--ok); border-color: var(--ok); color: #04281d; opacity: 1;
+}
 .card-wrap .btn-del {
-  width: auto; min-width: 82px; padding: 0 12px; height: 38px; border-radius: 12px;
+  flex: 1 1 0; min-width: 0; padding: 0 8px; height: 35px; border-radius: 10px;
   border: 1.5px solid var(--err); background: color-mix(in srgb, var(--err) 12%, var(--sheet));
-  color: var(--err); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;
-  gap: 6px; cursor: pointer; flex: none; transition: all .18s ease;
+  color: var(--err); font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+  gap: 5px; cursor: pointer; transition: all .18s ease; box-sizing: border-box;
 }
 :root[data-theme="dark"] .card-wrap .btn-del {
   border-color: color-mix(in srgb, var(--err) 40%, transparent); background: color-mix(in srgb, var(--err) 16%, var(--well));
   color: color-mix(in srgb, var(--err) 85%, #fff);
 }
-.card-wrap .btn-del svg { width: 16px; height: 16px; flex: none; stroke: currentColor; }
+.card-wrap .btn-del svg { width: 14px; height: 14px; flex-shrink: 0; stroke: currentColor; }
 .card-wrap .btn-del:hover { background: var(--err); color: #fff; border-color: var(--err); }
 .card-wrap .btn-del.is-del { background: var(--err); color: #fff; border-color: var(--err); box-shadow: 0 0 10px color-mix(in srgb, var(--err) 40%, transparent); }
-.card-wrap .btn-faces { flex: 1; background: var(--primary-soft); color: var(--link); border: 1.5px solid transparent; }
+.card-wrap .btn-faces {
+  flex: 1 1 0; min-width: 0; padding: 0 8px; height: 35px; border-radius: 10px;
+  background: var(--primary-soft); color: var(--link); border: 1.5px solid transparent;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px; font-size: 12px; font-weight: 700;
+  box-sizing: border-box;
+}
 .card-wrap .btn-faces:hover { background: var(--well); border-color: var(--primary); }
 
 /* ----------------------------------------------------- progress card (global) */
