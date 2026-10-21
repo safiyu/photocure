@@ -2696,7 +2696,7 @@
           </div>
 
           <!-- Face reticles on photo -->
-          ${activeOverlayFaces.map((f) => {
+          ${activeOverlayFaces.map((f, idx) => {
             const isHovered = hoveredFaceId === f.id;
             return `
               <div
@@ -2705,7 +2705,7 @@
                 onmouseenter="setHoveredFace(${f.id})"
                 onmouseleave="setHoveredFace(null)"
                 onclick="selectFaceInOverlay(${f.id})"
-                style="left:${f.x - f.w/2}%; top:${f.y - f.h/2}%; width:${f.w}%; height:${f.h}%; border-color:${f.color}; box-shadow:0 0 ${isHovered ? '24px' : '10px'} ${f.color};"
+                style="left:${f.x - f.w/2}%; top:${f.y - f.h/2}%; width:${f.w}%; height:${f.h}%; border-color:${f.color}; box-shadow:0 0 ${isHovered ? '24px' : '10px'} ${f.color}; animation-delay:${idx * 40}ms;"
               >
                 <span class="tick tick-tl"></span>
                 <span class="tick tick-tr"></span>
@@ -2720,7 +2720,7 @@
         </div>
 
         <!-- ENLARGED FACE NODES (Clean and uncrossed) -->
-        ${faceNodesPositions.map((node) => {
+        ${faceNodesPositions.map((node, idx) => {
           const f = node.face;
           const isHovered = hoveredFaceId === f.id;
           const diam = isHovered ? Math.round(safeNodeDiameter * 1.08) : safeNodeDiameter;
@@ -2733,33 +2733,35 @@
               onclick="selectFaceInOverlay(${f.id})"
               style="left:${node.cx}px; top:${node.cy}px; width:${diam}px; height:${diam}px; transform:translate(-50%, -50%);"
             >
-              <!-- Outer Rotating Ring -->
-              <svg class="hud-ring-spin" viewBox="0 0 120 120">
-                <circle cx="60" cy="60" r="56" fill="none" stroke="${f.color}" stroke-width="${isHovered ? '2.4' : '1.4'}" stroke-dasharray="20 10 6 10" stroke-opacity="${isHovered ? '1' : '0.65'}"/>
-              </svg>
-              <!-- Inner Counter-Rotating Ring -->
-              <svg class="hud-ring-reverse" viewBox="0 0 120 120">
-                <circle cx="60" cy="60" r="56" fill="none" stroke="${f.color}" stroke-width="1" stroke-dasharray="4 14" stroke-opacity="0.7"/>
-              </svg>
-              <!-- Face Cutout Circle -->
-              <div class="face-crop-circle" style="border-color:${f.color}; box-shadow: 0 16px 45px rgba(0,0,0,0.85), 0 0 ${isHovered ? '32px' : '16px'} ${f.color}88;">
-                <img src="${f.url}" alt="${esc(f.name)}" loading="lazy">
-              </div>
-              <!-- Badge -->
-              <div class="face-badge-pill" style="background:${f.statusBg}; color:#fff;">
-                ${f.statusLabel}
-              </div>
-              <!-- Figcaption Nameplate -->
-              <figcaption class="face-nameplate" style="border-color:${isHovered ? f.color : 'rgba(51,65,85,0.8)'};">
-                <div class="face-nameplate-title">
-                  <span class="face-dot" style="background:${f.color}"></span>
-                  <span>${esc(f.name)}</span>
+              <div class="bio-node-enter" style="animation-delay:${idx * 40}ms;">
+                <!-- Outer Rotating Ring -->
+                <svg class="hud-ring-spin" viewBox="0 0 120 120">
+                  <circle cx="60" cy="60" r="56" fill="none" stroke="${f.color}" stroke-width="${isHovered ? '2.4' : '1.4'}" stroke-dasharray="20 10 6 10" stroke-opacity="${isHovered ? '1' : '0.65'}"/>
+                </svg>
+                <!-- Inner Counter-Rotating Ring -->
+                <svg class="hud-ring-reverse" viewBox="0 0 120 120">
+                  <circle cx="60" cy="60" r="56" fill="none" stroke="${f.color}" stroke-width="1" stroke-dasharray="4 14" stroke-opacity="0.7"/>
+                </svg>
+                <!-- Face Cutout Circle -->
+                <div class="face-crop-circle" style="border-color:${f.color}; box-shadow: 0 16px 45px rgba(0,0,0,0.85), 0 0 ${isHovered ? '32px' : '16px'} ${f.color}88;">
+                  <img src="${f.url}" alt="${esc(f.name)}" loading="lazy">
                 </div>
-                <div class="face-nameplate-sub">
-                  <span>${esc(f.eyeStatusText)}</span>
-                  ${f.sharpness ? `<span>• Sharpness ${num(f.sharpness).toFixed(1)}</span>` : ''}
+                <!-- Badge -->
+                <div class="face-badge-pill" style="background:${f.statusBg}; color:#fff;">
+                  ${f.statusLabel}
                 </div>
-              </figcaption>
+                <!-- Figcaption Nameplate -->
+                <figcaption class="face-nameplate" style="border-color:${isHovered ? f.color : 'rgba(51,65,85,0.8)'};">
+                  <div class="face-nameplate-title">
+                    <span class="face-dot" style="background:${f.color}"></span>
+                    <span>${esc(f.name)}</span>
+                  </div>
+                  <div class="face-nameplate-sub">
+                    <span>${esc(f.eyeStatusText)}</span>
+                    ${f.sharpness ? `<span>• Sharpness ${num(f.sharpness).toFixed(1)}</span>` : ''}
+                  </div>
+                </figcaption>
+              </div>
             </figure>
           `;
         }).join('')}

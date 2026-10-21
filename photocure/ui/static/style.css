@@ -1884,6 +1884,17 @@ body.has-picks .pick { opacity: 1; }
   pointer-events: auto;
   transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, opacity 0.2s ease;
   z-index: 25;
+  animation: bioReticleIn calc(0.3s / var(--speed, 0.5)) cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes bioReticleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 .bio-face-reticle .tick {
   position: absolute;
@@ -1928,6 +1939,25 @@ body.has-picks .pick { opacity: 1; }
     left calc(0.55s / var(--speed, 0.5)) cubic-bezier(0.22, 1, 0.36, 1),
     top calc(0.55s / var(--speed, 0.5)) cubic-bezier(0.22, 1, 0.36, 1),
     opacity calc(0.25s / var(--speed, 0.5)) ease;
+}
+
+/* Subtle Face Entrance Animation Container */
+.bio-node-enter {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  animation: bioFaceIn calc(0.32s / var(--speed, 0.5)) cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes bioFaceIn {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .face-crop-circle {
@@ -2181,6 +2211,8 @@ body.has-picks .pick { opacity: 1; }
   .burst-header.anim-fade,
   .face-popover,
   .facechip,
+  .bio-node-enter,
+  .bio-face-reticle,
   .card.best .thumb,
   .badge.danger,
   .card {
