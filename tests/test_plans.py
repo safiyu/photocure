@@ -308,3 +308,50 @@ def test_schema_migration_adds_missing_columns(tmp_path):
     assert "created_dir" in led and ver == SCHEMA_VERSION
     with get_session(db) as s:  # ORM works against the migrated table
         assert PhotoRepository(s).all_images() == []
+
+
+def test_any_marked_photo_is_trashed_and_unmarked_ones_are_not(tmp_path):
+    w = build_world(tmp_path, n=3)
+    set_bucket(w, w.ids[0], "food")  # not junk: any photo can be marked
+    approve_delete(w, w.ids[0])
+    p = w.planner.build_plan(organize_root=w.out, operation="move")
+    rep = w.planner.execute_plan(p, trash=True)
+    trash = w.out / ".trash" / rep.transaction_id
+    assert list(trash.rglob(_src(w, 0).name))  # marked: staged in the trash folder
+    assert not list(trash.rglob(_src(w, 1).name))  # unmarked: organized normally
+    assert any(w.out.rglob(_src(w, 1).name))
+
+
+def test_marked_photo_is_left_out_without_trash_or_when_copying(tmp_path):
+    w = build_world(tmp_path, n=2)
+    approve_delete(w, w.ids[0])
+    p = w.planner.build_plan(organize_root=w.out, operation="move")
+    rep = w.planner.execute_plan(p, trash=False)
+    assert rep.marked_left_out == 1 and _src(w, 0).exists()  # not moved, not deleted
+    assert not any(w.out.rglob(_src(w, 0).name)) and not (w.out / ".trash").exists()
+    w2 = build_world(tmp_path / "copy", n=2)
+    approve_delete(w2, w2.ids[0])
+    p2 = w2.planner.build_plan(organize_root=w2.out, operation="copy")
+    rep2 = w2.planner.execute_plan(p2, trash=True)
+    assert rep2.marked_left_out == 1 and _src(w2, 0).exists()
+    assert not any(w2.out.rglob(_src(w2, 0).name))
+
+
+def test_marked_burst_alternate_is_trashed_unmarked_stays(tmp_path):
+    from photocure.db import models as M
+    w = build_world(tmp_path, n=3)
+    with get_session(w.db) as s:
+        bg = M.BurstGroup(name="Burst_t", image_count=3, best_shot_id=w.ids[0])
+        s.add(bg)
+        s.flush()
+        for i, iid in enumerate(w.ids):
+            r = s.get(M.ImageRecord, iid)
+            r.burst_id, r.is_best_shot, r.is_alternate = bg.id, i == 0, i != 0
+        s.commit()
+    approve_delete(w, w.ids[1])
+    p = w.planner.build_plan(organize_root=w.out, operation="move")
+    rep = w.planner.execute_plan(p, trash=True)
+    trash = w.out / ".trash" / rep.transaction_id
+    assert list(trash.rglob(_src(w, 1).name))
+    assert not list(trash.rglob(_src(w, 2).name)) and not list(trash.rglob(_src(w, 0).name))
+    assert rep.unapproved_junk == 0

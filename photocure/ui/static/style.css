@@ -681,6 +681,9 @@ kbd {
 body.has-picks .pick { opacity: 1; }
 .card.picked .pick { opacity: 1; }
 @media (hover: none) { .pick, .hover-actions button { opacity: 1; } }
+.hover-actions button.del[aria-pressed="true"] { opacity: 1; background: #c0392b; color: #fff; }
+.card.marked .thumb img { opacity: .45; }
+.card.marked { outline: 2px solid #c0392b; outline-offset: -2px; }
 
 .caption { padding: 8px 2px 0; }
 .fn { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

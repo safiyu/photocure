@@ -443,7 +443,7 @@
     if (it.is_favorite) add("fav", "\u2665 Favourite");
     if (num(it.rating) > 0) add("", "\u2605" + num(it.rating));
     if (it.is_best_shot) add("best", "Best shot");
-    if (it.delete_approved) add("warn", "Approved to delete");
+    if (it.delete_approved) add("warn", "Marked for delete");
     if (it.is_duplicate) add("warn", "Duplicate");
     if (it.near_dup_of != null) add("warn", "Near duplicate");
     if (it.is_alternate) add("", "Alternate");
@@ -490,7 +490,8 @@
     if (it.taken_at) meta.push(String(it.taken_at).slice(0, 10));
     if (it.score != null) meta.push("match " + num(it.score).toFixed(2));
     const picked = state.picks.has(id);
-    const cls = ["card", it.locked ? "locked" : "", picked ? "picked" : "", num(it.rating) === -1 ? "rejected" : ""]
+    const cls = ["card", it.locked ? "locked" : "", picked ? "picked" : "", num(it.rating) === -1 ? "rejected" : "",
+      it.delete_approved ? "marked" : ""]
       .filter(Boolean).join(" ");
     const img = el("img", { loading: "lazy", decoding: "async", src: thumbUrl(id), alt: it.filename || "" });
     img.onerror = () => { img.style.opacity = ".15"; };
@@ -499,6 +500,9 @@
       el("button", { class: "pick", "data-pick": id, "aria-label": "Select " + (it.filename || ""),
         "aria-pressed": String(picked), tabindex: -1, html: icon("check") }),
       el("div", { class: "hover-actions" },
+        el("button", { "data-approve-delete": id, class: "del", "aria-pressed": String(!!it.delete_approved),
+          title: it.delete_approved ? "Marked for delete. Click to undo" : "Mark for delete: leave out of the result",
+          "aria-label": it.delete_approved ? "Clear delete mark" : "Mark for delete", tabindex: -1, html: icon("trash", "sm") }),
         el("button", { "data-lock": id, title: lockTitle, "aria-label": it.locked ? "Unlock" : "Lock", tabindex: -1, html: icon("lock", "sm") }),
         el("button", { "data-similar": id, title: "Find similar photos", "aria-label": "Find similar photos", tabindex: -1, html: icon("copy", "sm") })),
       el("div", { class: "flags" }, flagList(it).slice(0, 3).map((f) => el("span", { class: "badge " + f.cls, text: f.text }))));
@@ -507,11 +511,6 @@
       el("div", { class: "fn", title: it.relative_path || it.filename, text: it.filename }),
       showReason ? el("div", { class: "reason", title: it.uncertain_reason.text, text: shortReason(it) }) : null,
       el("div", { class: "meta", text: meta.join(", ") }),
-      state.junk.has(rawCat)
-        ? el("button", { class: "mini", type: "button", "data-approve-delete": id, tabindex: -1,
-            "aria-pressed": String(!!it.delete_approved),
-            text: it.delete_approved ? "Approved to delete (undo)" : "Approve delete" })
-        : null,
       el("div", { class: "catline", style: catStyle(rawCat) },
         el("button", { class: "catpick", type: "button", "data-catpick": id, title: "Change category",
           "aria-haspopup": "listbox", "aria-label": `Category ${catLabel(rawCat)}, change`, tabindex: -1 },
@@ -989,6 +988,16 @@
     if (ok) toast(`Moved ${fmtN(ok)} photo${ok === 1 ? "" : "s"} to ${catLabel(bucket)}`, "ok");
     clearPicks();
     loadStats();
+  }
+
+  async function bulkMarkDelete() {
+    const ids = Array.from(state.picks);
+    try {
+      await post("/api/deletes/approve", { ids, approved: true });
+      toast(`Marked ${fmtN(ids.length)} photo${ids.length === 1 ? "" : "s"} for delete. They will be left out of the result.`, "ok");
+      clearPicks();
+      resetVisibleGrids();
+    } catch (e) { toast(e.message, "err"); }
   }
 
   async function bulkLock() {
@@ -1831,10 +1840,9 @@
     $("#lb-clear").disabled = !full || !it.manual_bucket;
     $("#lb-lock span").textContent = it.locked ? "Unlock" : "Lock";
     const ap = $("#lb-approve");
-    ap.hidden = !state.junk.has(eff(it));
     ap.disabled = !full;
     ap.setAttribute("aria-pressed", String(!!it.delete_approved));
-    ap.textContent = it.delete_approved ? "Approved to delete (undo)" : "Approve delete";
+    ap.textContent = it.delete_approved ? "Marked for delete (undo)" : "Mark for delete";
     $("#lb-prev").disabled = lb.i === 0;
     $("#lb-next").disabled = lb.i >= lbCount() - 1;
     $("#lb-count").textContent = `${fmtN(lb.i + 1)} of ${fmtN(lbCount())}`;
@@ -2239,8 +2247,8 @@
   async function toggleApproveDelete(id) {
     const r = await post(`/api/images/${num(id)}/approve-delete`, {});
     itemUpdated(r.item);
-    toast(r.item.delete_approved ? "Approved for deletion. It is staged when you apply with the trash option."
-      : "Approval withdrawn. This photo will not be deleted", "ok");
+    toast(r.item.delete_approved ? "Marked for delete. It will be left out of the result."
+      : "Delete mark cleared. This photo stays in the result", "ok");
   }
 
   // Runs after sorting when "Approve all proposed deletions" was ticked before analysing.
@@ -2268,9 +2276,10 @@
   }
 
   // ------------------------------------------------------------------ bursts
-  async function renderBursts() {
+  async function renderBursts(keepId) {
     const data = await api("/api/bursts");
     const list = $("#burstlist");
+    const scroll = list.scrollTop;
     if (!data.items.length) {
       list.innerHTML = "";
       $("#burstdetail").innerHTML = emptyHTML({
@@ -2291,7 +2300,9 @@
       row.onclick = go;
       row.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
     });
-    await showBurst(data.items[0].id);
+    const keep = keepId != null && data.items.some((b) => b.id === keepId) ? keepId : data.items[0].id;
+    list.scrollTop = scroll;
+    await showBurst(keep);
   }
 
   // Tight face crops with the eye state, built from DOM nodes only.
@@ -2392,10 +2403,10 @@
         if (m.sharpness_norm != null) bits.push("sharpness " + num(m.sharpness_norm).toFixed(2));
         if (m.face_confidence != null) bits.push("face " + num(m.face_confidence).toFixed(2));
         if (m.eye_closed != null) bits.push("eyes closed " + num(m.eye_closed).toFixed(2));
-        return `<figure class="card${m.is_best_shot ? " best" : ""}" data-id="${num(m.id)}" tabindex="0">
+        return `<figure class="card${m.is_best_shot ? " best" : ""}${m.delete_approved ? " marked" : ""}" data-id="${num(m.id)}" tabindex="0">
           <div class="thumb">
             <img loading="lazy" src="${thumbUrl(m.id)}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
-            <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}${gmBadge(m)}</div>
+            <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}${m.delete_approved ? '<span class="badge warn">Marked for delete</span>' : ""}${gmBadge(m)}</div>
           </div>
           <figcaption class="caption">
             <div class="fn">${esc(m.filename)}</div>
@@ -2403,7 +2414,8 @@
             <div class="meta">${esc(bits.join(", "))}</div>
             ${gmDetail(m)}
             <div class="btn-row">
-              ${m.is_best_shot ? "" : `<button class="mini" data-makebest="${num(m.id)}">Make best shot</button>`}
+              ${m.is_best_shot ? "" : `<button class="mini" data-makebest="${num(m.id)}">Make best shot</button>
+              <button class="mini" data-markdelete="${num(m.id)}" aria-pressed="${m.delete_approved ? "true" : "false"}">${m.delete_approved ? "Marked for delete (undo)" : "Mark for delete"}</button>`}
               ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}">Inspect faces</button>` : ""}
             </div>
           </figcaption>
@@ -2422,6 +2434,11 @@
       addBtn("Create fixed photo", () => makeComposite(id, "fixed"));
       addBtn("Export layered PSD", () => makeComposite(id, "layered"));
     }
+    const others = data.members.filter((m) => !m.is_best_shot);
+    const unmarked = others.filter((m) => !m.delete_approved).map((m) => m.id);
+    const marked = others.filter((m) => m.delete_approved).map((m) => m.id);
+    if (unmarked.length) addBtn(`Mark ${fmtN(unmarked.length)} other frame${unmarked.length === 1 ? "" : "s"} for delete`, () => markBurstDeletes(id, unmarked, true));
+    if (marked.length) addBtn(`Clear ${fmtN(marked.length)} delete mark${marked.length === 1 ? "" : "s"}`, () => markBurstDeletes(id, marked, false));
     if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
     if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
     $$("[data-faces]", $("#burstdetail")).forEach((b) => {
@@ -2430,6 +2447,19 @@
     $$("[data-makebest]", $("#burstdetail")).forEach((b) => {
       b.onclick = () => makeBestShot(id, num(b.dataset.makebest));
     });
+    $$("[data-markdelete]", $("#burstdetail")).forEach((b) => {
+      b.onclick = () => markBurstDeletes(id, [num(b.dataset.markdelete)], b.getAttribute("aria-pressed") !== "true");
+    });
+  }
+
+  async function markBurstDeletes(burstId, ids, approved) {
+    try {
+      await post("/api/deletes/approve", { ids, approved });
+      toast(approved
+        ? `Marked ${fmtN(ids.length)} for delete. They are moved to the trash folder when you apply with the trash option.`
+        : `Delete mark cleared on ${fmtN(ids.length)}`, "ok");
+      await showBurst(burstId);
+    } catch (e) { toast(e.message, "err"); }
   }
 
   async function makeComposite(burstId, mode) {
@@ -2446,8 +2476,7 @@
     try {
       await post(`/api/bursts/${num(burstId)}/best-shot`, { image_id: num(imageId) });
       toast("Best shot updated", "ok");
-      await showBurst(burstId);
-      renderBursts().catch(() => {});
+      await renderBursts(burstId);
     } catch (e) { toast(e.message, "err"); }
   }
 
@@ -2562,6 +2591,7 @@
     const notices = [];
     if (!d.enough_space) notices.push(["err", "There is not enough free space on the destination drive."]);
     if (d.missing_sources) notices.push(["err", `${fmtN(d.missing_sources)} source files are missing and will fail.`]);
+    if (d.marked_for_delete) notices.push(["", `${fmtN(d.marked_for_delete)} photo${d.marked_for_delete === 1 ? " is" : "s are"} marked for delete and will be left out of the result${$("#trash").checked && d.operation === "move" ? ", moved to the trash folder" : ", staying where they are"}.`]);
     if (d.collisions) notices.push(["", `${fmtN(d.collisions)} files share a name at the destination. They will get a short suffix.`]);
     if (d.cross_device) notices.push(["", `${fmtN(d.cross_device)} files are on another drive. They are copied, then removed from the source.`]);
     const verb = OPVERB[d.operation] || "Apply";
@@ -2598,6 +2628,7 @@
       const res = await followJob(r.job_id, "Apply");
       if (res && res.ok) {
         logLine(`Applied ${fmtN(res.executed)} files (change ${res.transaction_id})`, "ok");
+        if (res.marked_left_out) logLine(`${fmtN(res.marked_left_out)} photos marked for delete were left out and stay where they are (turn on the trash option to move them)`, "warn");
         if (res.unapproved_junk) logLine(`${fmtN(res.unapproved_junk)} junk photos were not approved for deletion and stay in the junk review folder`, "warn");
         toast(`Organized ${fmtN(res.executed)} photos. You can undo this from this page.`, "ok");
         if (res.backup_warning) toast(res.backup_warning, "err");
@@ -3575,6 +3606,7 @@
     updateLearn();
     $("#bulk-clear").onclick = clearPicks;
     $("#bulk-lock").onclick = () => bulkLock();
+    $("#bulk-delete").onclick = () => bulkMarkDelete();
     $("#bulk-clean").onclick = openCleanExport;
     $("#ce-scan").onclick = ceScan;
     $("#ce-go").onclick = ceExport;

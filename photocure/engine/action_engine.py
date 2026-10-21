@@ -55,6 +55,7 @@ class ExecutionReport:
     filtered: int = 0  # skipped by the only_category filter
     in_place: int = 0  # target already is this photo (re-apply no-op)
     unapproved_junk: int = 0  # junk kept out of the trash because deletion was not approved
+    marked_left_out: int = 0  # marked for delete but not staged (no trash option or not a move)
     # image_id -> final on-disk target actually used (after collision rename).
     resolved_targets: dict = field(default_factory=dict)
     # Dry-run diff: what an apply would cost.
@@ -185,12 +186,19 @@ class ActionEngine:
                 sha = action.sha256 or ""
                 size = action.file_size or 0
                 try:
-                    if trash and action.operation == "move" and _is_junk(action):
-                        approved = repo.get_by_id(action.image_id) if action.image_id else None
-                        if approved is not None and approved.delete_approved:
+                    marked = False
+                    if action.image_id:
+                        rec0 = repo.get_by_id(action.image_id)
+                        marked = bool(rec0 is not None and rec0.delete_approved)
+                    if marked:
+                        if trash and action.operation == "move":
                             action.target = self._trash_target(action, root, txn)
-                        else:
-                            rep.unapproved_junk += 1  # not approved: stays in the junk review folder
+                        else:  # marked for delete: never placed in the output, the original stays put
+                            rep.skipped += 1
+                            rep.marked_left_out += 1
+                            continue
+                    elif trash and action.operation == "move" and _is_junk(action):
+                        rep.unapproved_junk += 1  # not approved: stays in the junk review folder
                     if self._is_in_place(action, repo):
                         self._mark_in_place(action, repo, root)
                         session.commit()
