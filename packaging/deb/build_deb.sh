@@ -7,11 +7,18 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DIST_DIR="$PROJECT_ROOT/dist"
 STAGING_DIR="$DIST_DIR/deb_staging"
 
-# Extract version (can be passed as $1 or from pyproject.toml)
-VERSION="${1:-${VERSION_OVERRIDE:-$(grep -m1 '^version = ' "$PROJECT_ROOT/pyproject.toml" | cut -d '"' -f2)}}"
+# Extract version (can be passed as $1, VERSION_OVERRIDE, or dynamically from photocure)
+VERSION="${1:-${VERSION_OVERRIDE:-}}"
+if [ -z "$VERSION" ]; then
+    VERSION="$(python3 -c 'import photocure; print(photocure.__version__)' 2>/dev/null || true)"
+fi
+if [ -z "$VERSION" ]; then
+    VERSION="$(python3 -c 'from pathlib import Path; import re; m = re.search(r"__version__\s*=\s*[\x22\x27]([^\x22\x27]+)", (Path("photocure/__init__.py")).read_text()); print(m.group(1) if m else "")' 2>/dev/null || true)"
+fi
 VERSION="${VERSION#v}"
 if [ -z "$VERSION" ]; then
-    VERSION="1.2.1"
+    echo "Error: Could not determine version from photocure package." >&2
+    exit 1
 fi
 ARCH="amd64"
 DEB_NAME="photocure_${VERSION}_${ARCH}.deb"
@@ -45,12 +52,12 @@ rm -rf "$WHEEL_SRC"
 mkdir -p "$WHEEL_SRC"
 cp -r "$PROJECT_ROOT/photocure" "$PROJECT_ROOT/pyproject.toml" "$PROJECT_ROOT/README.md" "$WHEEL_SRC/"
 find "$WHEEL_SRC" -type d -name "__pycache__" -prune -exec rm -rf {} +
-python3 - "$WHEEL_SRC/pyproject.toml" "$VERSION" <<'PY'
+python3 - "$WHEEL_SRC/photocure/__init__.py" "$VERSION" <<'PY'
 import re, sys
 path, version = sys.argv[1:3]
 text = open(path).read()
-text, n = re.subn(r'(?m)^version = ".*"$', f'version = "{version}"', text, count=1)
-assert n == 1, "no version line found in pyproject.toml"
+text, n = re.subn(r'(?m)^__version__\s*=\s*".*"$', f'__version__ = "{version}"', text, count=1)
+assert n == 1, "no __version__ line found in photocure/__init__.py"
 open(path, "w").write(text)
 PY
 python3 -m pip wheel --no-deps --quiet -w "$STAGING_DIR/opt/photocure/wheels" "$WHEEL_SRC"
@@ -62,6 +69,21 @@ printf '%s\n' "$VERSION" > "$STAGING_DIR/opt/photocure/VERSION"
 cp "$SCRIPT_DIR/photocure-wrapper" "$STAGING_DIR/usr/bin/photocure"
 cp "$SCRIPT_DIR/photocure.desktop" "$STAGING_DIR/usr/share/applications/io.github.safiyu.photocure.desktop"
 cp "$SCRIPT_DIR/photocure.metainfo.xml" "$STAGING_DIR/usr/share/metainfo/io.github.safiyu.photocure.metainfo.xml"
+python3 - "$STAGING_DIR/usr/share/metainfo/io.github.safiyu.photocure.metainfo.xml" "$VERSION" <<'PY'
+import sys, xml.etree.ElementTree as ET
+from datetime import date
+path, version = sys.argv[1:3]
+tree = ET.parse(path)
+root = tree.getroot()
+releases = root.find("releases")
+if releases is not None and not any(r.get("version") == version for r in releases):
+    rel = ET.Element("release", {"version": version, "type": "stable", "date": str(date.today())})
+    desc = ET.SubElement(rel, "description")
+    p = ET.SubElement(desc, "p")
+    p.text = f"Photocure release {version}"
+    releases.insert(0, rel)
+    tree.write(path, encoding="utf-8", xml_declaration=True)
+PY
 cp "$SCRIPT_DIR/photocure.service" "$STAGING_DIR/usr/lib/systemd/user/photocure.service"
 
 # 4. Icons - generate multi-resolution from source or use source directly

@@ -14,7 +14,7 @@
   </script>
   <link rel="icon" type="image/png" href="/static/favicon.png">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/style.css?v=1.2.1">
+  <link rel="stylesheet" href="/static/style.css?v={{VERSION}}">
 </head>
 <body>
   <!-- icon sprite -->
@@ -105,7 +105,7 @@
           </div>
           <button class="icon-btn help-btn" id="btn-help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
         </div>
-        <div class="sidebar-footer"><span class="app-credit">v <button id="sidebar-version" class="sidebar-version-badge" type="button" data-goto="settings" data-anchor="sect-about" title="Click to view About Photocure">1.2.1</button> by Safiyu</span></div>
+        <div class="sidebar-footer"><span class="app-credit">v <button id="sidebar-version" class="sidebar-version-badge" type="button" data-goto="settings" data-anchor="sect-about" title="Click to view About Photocure">{{VERSION}}</button> by Safiyu</span></div>
       </div>
     </aside>
 
@@ -813,6 +813,6 @@
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script type="module" src="/static/virtual_grid.mjs"></script>
-  <script src="/static/app.js?v=1.2.1"></script>
+  <script src="/static/app.js?v={{VERSION}}"></script>
 </body>
 </html>

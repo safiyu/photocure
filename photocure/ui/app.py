@@ -2335,8 +2335,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index():
         html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-        return HTMLResponse(html.replace(TOKEN_PLACEHOLDER, ""),
-                            headers={"Cache-Control": "no-store"})
+        html = html.replace(TOKEN_PLACEHOLDER, "").replace("{{VERSION}}", __version__)
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     @app.get("/healthz")
     def health():

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "photocure"
-version = "1.2.1"
+dynamic = ["version"]
 description = "Intelligent image curator. Offline, GPU-accelerated, transactionally reversible photo library curation engine."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -61,6 +61,9 @@ photo-curator = "photocure.cli:cli"  # old command name, kept so existing habits
 
 [tool.setuptools.packages.find]
 include = ["photocure*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "photocure.__version__" }
 
 [tool.setuptools.package-data]
 photocure = ["ui/static/*", "models/*"]
