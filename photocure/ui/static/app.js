@@ -1030,8 +1030,13 @@
     $$(".card").forEach((c) => {
       const on = state.picks.has(num(c.dataset.id));
       c.classList.toggle("picked", on);
-      const b = $(".pick", c);
-      if (b) b.setAttribute("aria-pressed", String(on));
+      const b = $(".pick, .btn-pick", c);
+      if (b) {
+        b.setAttribute("aria-pressed", String(on));
+        b.classList.toggle("is-picked", on);
+        const lbl = $(".btn-lbl", b);
+        if (lbl) lbl.textContent = on ? "Selected" : "Select";
+      }
     });
     const n = state.picks.size;
     document.body.classList.toggle("has-picks", n > 0);

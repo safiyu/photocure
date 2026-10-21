@@ -952,10 +952,19 @@ body.has-picks .tools, body.has-picks .hover-actions {
   border-color: var(--blue, var(--primary));
   background: var(--well);
 }
+.card.picked .btn-pick,
+#junkgrid .card.picked .actions .btn-pick,
 #junkgrid .card .actions .btn-pick.is-picked {
-  background: var(--blue, var(--primary));
-  border-color: var(--blue, var(--primary));
-  color: #fff;
+  background: var(--blue, var(--primary)) !important;
+  border-color: var(--blue, var(--primary)) !important;
+  color: #fff !important;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--blue, var(--primary)) 40%, transparent);
+}
+.card.picked .btn-pick svg,
+#junkgrid .card.picked .actions .btn-pick svg,
+#junkgrid .card .actions .btn-pick.is-picked svg {
+  stroke: #fff !important;
+  color: #fff !important;
 }
 
 /* Similar button */
