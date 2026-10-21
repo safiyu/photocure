@@ -2308,7 +2308,8 @@
   // ============================================================================
   // DIRECT 1-TO-1 FACE-TO-ZOOM BIOMETRIC PROJECTION (NeuralVision)
   // ============================================================================
-  const FACE_PALETTE = ['#22d3ee', '#34d399', '#f472b6', '#fbbf24', '#a855f7', '#38bdf8', '#fb7185', '#4ade80'];
+  // Brand palette: blue, pink, white, amber (Photocure design system)
+  const FACE_PALETTE = ['#2b9af6', '#fa3b91', '#ffffff', '#f6a315', '#36bdfb', '#ff5aa5', '#fcce40', '#94a3b8'];
 
   let activeOverlayBurstId = null;
   let activeOverlayImageId = null;
@@ -2410,12 +2411,12 @@
           x = count > 1 ? 20 + (idx / (count - 1)) * 60 : 50;
           y = 45;
         }
-        const color = f.is_blink ? "#ef4444" : FACE_PALETTE[idx % FACE_PALETTE.length];
+        const color = f.is_blink ? "var(--err, #dc2626)" : FACE_PALETTE[idx % FACE_PALETTE.length];
         const stateKey = f.eye_status || "unknown";
         const eyeScoreText = f.eye_closed_score != null ? ` (${num(f.eye_closed_score).toFixed(2)})` : "";
         const confPercent = f.confidence ? Math.round(f.confidence * 100) + "%" : "99%";
         const statusLabel = f.is_blink ? "BLINK" : (stateKey === "open" ? "OPEN" : (stateKey === "possible" ? "POSSIBLE" : "DETECTED"));
-        const statusBg = f.is_blink ? "#ef4444" : (stateKey === "open" ? "#10b981" : (stateKey === "possible" ? "#f59e0b" : "#64748b"));
+        const statusBg = f.is_blink ? "var(--err, #dc2626)" : (stateKey === "open" ? "var(--ok, #059669)" : (stateKey === "possible" ? "var(--commit, #f6a315)" : "var(--mut, #475569)"));
 
         return {
           id: f.id,
@@ -2465,99 +2466,161 @@
 
     const baseNodeSize = vw < 640 ? 88 : 124;
     const nodeDiameter = Math.round(baseNodeSize * faceZoomMultiplier);
+    // Prevent overlap when there are many faces by calculating safe diameter and spacing
     const count = activeOverlayFaces.length;
+    let safeNodeDiameter = nodeDiameter;
+    // For many faces (e.g. 4+ per flank), reduce node size so they never touch or overlap
+    const maxFlankCount = Math.ceil(count / 2);
+    if (overlayLayout === 'radial') {
+      const availH = vh - 180;
+      if (maxFlankCount * (safeNodeDiameter + 24) > availH) {
+        safeNodeDiameter = Math.max(68, Math.floor((availH / maxFlankCount) - 20));
+      }
+    } else if (overlayLayout === 'cinema') {
+      const availW = vw - 80;
+      if (count * (safeNodeDiameter + 24) > availW) {
+        safeNodeDiameter = Math.max(68, Math.floor((availW / count) - 16));
+      }
+    }
 
-    const aspect = (curMember.width && curMember.height) ? (curMember.height / curMember.width) : 0.67;
+    // Use oriented dimensions so photos taken in portrait orientation don't get cropped
+    let rawW = curMember.width || 4;
+    let rawH = curMember.height || 3;
+    const orient = curMember.orientation || 1;
+    if (orient >= 5 && orient <= 8) {
+      const tmp = rawW;
+      rawW = rawH;
+      rawH = tmp;
+    }
+    const aspect = rawH / rawW;
 
     let sourceBox = { x: centerX - 210, y: centerY - 145, w: 420, h: 290 };
     const faceNodesPositions = [];
 
     if (overlayLayout === 'radial') {
       if (vw >= 1024) {
-        const srcW = Math.min(460, vw * 0.36);
-        const srcH = Math.round(srcW * aspect);
+        let srcW = Math.min(460, vw * 0.35);
+        let srcH = Math.round(srcW * aspect);
+        const maxH = vh * 0.58;
+        if (srcH > maxH) {
+          srcH = Math.round(maxH);
+          srcW = Math.round(srcH / aspect);
+        }
         sourceBox = { x: centerX - srcW / 2, y: centerY - srcH / 2 - 15, w: srcW, h: srcH };
 
         const half = Math.ceil(count / 2);
         const leftFaces = activeOverlayFaces.slice(0, half);
         const rightFaces = activeOverlayFaces.slice(half);
-        const flankOffsetX = srcW / 2 + nodeDiameter / 2 + 115;
+        const flankOffsetX = srcW / 2 + safeNodeDiameter / 2 + 80;
 
+        // Position left faces in clean non-overlapping vertical column
+        const leftH = (leftFaces.length - 1) * (safeNodeDiameter + 28);
+        const leftStartY = centerY - 15 - leftH / 2;
         leftFaces.forEach((f, i) => {
-          const totalLeft = leftFaces.length;
-          const ySpread = totalLeft > 1 ? ((i / (totalLeft - 1)) - 0.5) * 210 : 0;
-          const xCurve = totalLeft > 1 ? Math.abs((i / (totalLeft - 1)) - 0.5) * 28 : 0;
-          faceNodesPositions.push({ face: f, cx: centerX - flankOffsetX + xCurve, cy: centerY - 15 + ySpread });
+          faceNodesPositions.push({
+            face: f,
+            cx: centerX - flankOffsetX,
+            cy: leftStartY + i * (safeNodeDiameter + 28)
+          });
         });
 
+        // Position right faces in clean non-overlapping vertical column
+        const rightH = (rightFaces.length - 1) * (safeNodeDiameter + 28);
+        const rightStartY = centerY - 15 - rightH / 2;
         rightFaces.forEach((f, i) => {
-          const totalRight = rightFaces.length;
-          const ySpread = totalRight > 1 ? ((i / (totalRight - 1)) - 0.5) * 210 : 0;
-          const xCurve = totalRight > 1 ? Math.abs((i / (totalRight - 1)) - 0.5) * -28 : 0;
-          faceNodesPositions.push({ face: f, cx: centerX + flankOffsetX + xCurve, cy: centerY - 15 + ySpread });
+          faceNodesPositions.push({
+            face: f,
+            cx: centerX + flankOffsetX,
+            cy: rightStartY + i * (safeNodeDiameter + 28)
+          });
         });
       } else {
-        const srcW = Math.min(340, vw * 0.84);
-        const srcH = Math.round(srcW * aspect);
+        let srcW = Math.min(340, vw * 0.84);
+        let srcH = Math.round(srcW * aspect);
+        const maxH = vh * 0.38;
+        if (srcH > maxH) {
+          srcH = Math.round(maxH);
+          srcW = Math.round(srcH / aspect);
+        }
         sourceBox = { x: centerX - srcW / 2, y: 95, w: srcW, h: srcH };
-        const spanW = Math.min(vw * 0.86, count * (nodeDiameter + 20));
-        const startX = centerX - spanW / 2 + nodeDiameter / 2;
-        const stepX = count > 1 ? (spanW - nodeDiameter) / (count - 1) : 0;
+        const spanW = Math.min(vw * 0.9, count * (safeNodeDiameter + 16));
+        const startX = centerX - spanW / 2 + safeNodeDiameter / 2;
+        const stepX = count > 1 ? (spanW - safeNodeDiameter) / (count - 1) : 0;
         activeOverlayFaces.forEach((f, idx) => {
-          faceNodesPositions.push({ face: f, cx: startX + idx * stepX, cy: sourceBox.y + sourceBox.h + 115 });
+          faceNodesPositions.push({ face: f, cx: startX + idx * stepX, cy: sourceBox.y + sourceBox.h + 90 });
         });
       }
     } else if (overlayLayout === 'split') {
       if (vw >= 1024) {
-        const srcW = Math.min(480, vw * 0.38);
-        const srcH = Math.round(srcW * aspect);
+        let srcW = Math.min(480, vw * 0.38);
+        let srcH = Math.round(srcW * aspect);
+        const maxH = vh * 0.62;
+        if (srcH > maxH) {
+          srcH = Math.round(maxH);
+          srcW = Math.round(srcH / aspect);
+        }
         sourceBox = { x: Math.max(56, centerX - 540), y: centerY - srcH / 2 - 12, w: srcW, h: srcH };
 
-        const rightAreaStart = sourceBox.x + sourceBox.w + 140;
+        const rightAreaStart = sourceBox.x + sourceBox.w + 100;
         const rightAreaWidth = Math.min(620, vw - rightAreaStart - 56);
+        const cols = count <= 3 ? 1 : count <= 8 ? 2 : 3;
+        const rows = Math.ceil(count / cols);
+        const colSpacing = cols > 1 ? Math.min(220, rightAreaWidth / (cols - 0.2)) : 0;
+        const rowSpacing = safeNodeDiameter + 32;
+
+        const gridOriginX = rightAreaStart + safeNodeDiameter / 2 + 20;
+        const gridOriginY = centerY - ((rows - 1) * rowSpacing) / 2 - 15;
 
         activeOverlayFaces.forEach((f, idx) => {
-          const cols = count <= 3 ? count : 2;
-          const rows = Math.ceil(count / cols);
           const colIdx = idx % cols;
           const rowIdx = Math.floor(idx / cols);
-
-          const colSpacing = cols > 1 ? Math.min(280, rightAreaWidth / (cols - 0.3)) : 0;
-          const rowSpacing = 205;
-          const gridOriginX = rightAreaStart + nodeDiameter / 2 + 20;
-          const gridOriginY = centerY - ((rows - 1) * rowSpacing) / 2 - 15;
-
-          faceNodesPositions.push({ face: f, cx: gridOriginX + colIdx * colSpacing, cy: gridOriginY + rowIdx * rowSpacing });
+          faceNodesPositions.push({
+            face: f,
+            cx: gridOriginX + colIdx * colSpacing,
+            cy: gridOriginY + rowIdx * rowSpacing
+          });
         });
       } else {
-        const srcW = Math.min(340, vw * 0.84);
-        const srcH = Math.round(srcW * aspect);
+        let srcW = Math.min(340, vw * 0.84);
+        let srcH = Math.round(srcW * aspect);
+        const maxH = vh * 0.38;
+        if (srcH > maxH) {
+          srcH = Math.round(maxH);
+          srcW = Math.round(srcH / aspect);
+        }
         sourceBox = { x: centerX - srcW / 2, y: 95, w: srcW, h: srcH };
-        const spanW = Math.min(vw * 0.86, count * (nodeDiameter + 20));
-        const startX = centerX - spanW / 2 + nodeDiameter / 2;
-        const stepX = count > 1 ? (spanW - nodeDiameter) / (count - 1) : 0;
+        const spanW = Math.min(vw * 0.9, count * (safeNodeDiameter + 16));
+        const startX = centerX - spanW / 2 + safeNodeDiameter / 2;
+        const stepX = count > 1 ? (spanW - safeNodeDiameter) / (count - 1) : 0;
         activeOverlayFaces.forEach((f, idx) => {
-          faceNodesPositions.push({ face: f, cx: startX + idx * stepX, cy: sourceBox.y + sourceBox.h + 115 });
+          faceNodesPositions.push({ face: f, cx: startX + idx * stepX, cy: sourceBox.y + sourceBox.h + 90 });
         });
       }
     } else if (overlayLayout === 'cinema') {
-      const srcW = Math.min(440, vw * 0.78);
-      const srcH = Math.round(srcW * aspect);
+      let srcW = Math.min(460, vw * 0.78);
+      let srcH = Math.round(srcW * aspect);
+      const maxH = vh * 0.44;
+      if (srcH > maxH) {
+        srcH = Math.round(maxH);
+        srcW = Math.round(srcH / aspect);
+      }
       sourceBox = { x: centerX - srcW / 2, y: Math.max(84, centerY - srcH - 56), w: srcW, h: srcH };
 
-      const dockSpanWidth = Math.min(vw * 0.82, count * (nodeDiameter + 78));
-      const startX = centerX - dockSpanWidth / 2 + nodeDiameter / 2;
-      const stepX = count > 1 ? (dockSpanWidth - nodeDiameter) / (count - 1) : 0;
+      const dockSpanWidth = Math.min(vw * 0.88, count * (safeNodeDiameter + 24));
+      const startX = centerX - dockSpanWidth / 2 + safeNodeDiameter / 2;
+      const stepX = count > 1 ? (dockSpanWidth - safeNodeDiameter) / (count - 1) : 0;
 
       activeOverlayFaces.forEach((f, idx) => {
-        const normIdx = count > 1 ? (idx / (count - 1)) * 2 - 1 : 0;
-        const gentleArcY = Math.pow(normIdx, 2) * -18;
-        faceNodesPositions.push({ face: f, cx: count === 1 ? centerX : startX + idx * stepX, cy: sourceBox.y + sourceBox.h + 130 + gentleArcY });
+        faceNodesPositions.push({
+          face: f,
+          cx: count === 1 ? centerX : startX + idx * stepX,
+          cy: sourceBox.y + sourceBox.h + safeNodeDiameter / 2 + 50
+        });
       });
     }
 
     overlay.dataset.sourceBox = JSON.stringify(sourceBox);
-    overlay.dataset.nodeDiameter = String(nodeDiameter);
+    overlay.dataset.nodeDiameter = String(safeNodeDiameter);
     window._currentFaceNodes = faceNodesPositions;
 
     overlay.innerHTML = `
@@ -2573,7 +2636,7 @@
           </div>
           <div>
             <h2 class="bio-photo-title">${esc(curMember.filename)}</h2>
-            <p class="bio-photo-sub">${num(curMember.width)}×${num(curMember.height)} • ${count} detected faces • Direct biometric tethers</p>
+            <p class="bio-photo-sub">${num(curMember.width)}×${num(curMember.height)} • ${count} detected faces</p>
           </div>
         </div>
 
@@ -2629,7 +2692,7 @@
           />
           <div class="bio-source-badge-bar">
             <span>SOURCE PHOTO • ${esc(curMember.filename)}</span>
-            <span style="color:#22d3ee;">${count} FACES</span>
+            <span style="color:var(--primary, #2b9af6);">${count} FACES</span>
           </div>
 
           <!-- Face reticles on photo -->
@@ -2656,11 +2719,11 @@
           }).join('')}
         </div>
 
-        <!-- ENLARGED FACE NODES -->
+        <!-- ENLARGED FACE NODES (Clean and uncrossed) -->
         ${faceNodesPositions.map((node) => {
           const f = node.face;
           const isHovered = hoveredFaceId === f.id;
-          const diam = isHovered ? Math.round(nodeDiameter * 1.1) : nodeDiameter;
+          const diam = isHovered ? Math.round(safeNodeDiameter * 1.08) : safeNodeDiameter;
           return `
             <figure
               class="enlarged-face-node facechip${f.isBlink ? ' blink' : ''}"
@@ -2731,70 +2794,11 @@
     const overlay = $("#facepanel");
     if (!overlay || !window._currentFaceNodes) return;
 
-    const sourceBox = JSON.parse(overlay.dataset.sourceBox || "{}");
-    const nodeDiameter = Number(overlay.dataset.nodeDiameter || "120");
-    const faceNodesPositions = window._currentFaceNodes;
+    // Clear SVG tether lines per user request ("remove the line from the photo to the circular zoom face.. no need of it")
     const svgEl = $("#overlay-svg-canvas");
-    if (!svgEl) return;
-
-    let svgMarkup = '';
-
-    faceNodesPositions.forEach((node) => {
-      const f = node.face;
-      const isHovered = hoveredFaceId === f.id;
-      const isDimmed = hoveredFaceId && !isHovered;
-
-      const faceCenterX = sourceBox.x + (f.x / 100) * sourceBox.w;
-      const faceCenterY = sourceBox.y + (f.y / 100) * sourceBox.h;
-      const boxHalfW = ((f.w / 100) * sourceBox.w) / 2;
-      const boxHalfH = ((f.h / 100) * sourceBox.h) / 2;
-
-      const dx = node.cx - faceCenterX;
-      const dy = node.cy - faceCenterY;
-      const angle = Math.atan2(dy, dx);
-      const radius = (isHovered ? nodeDiameter * 1.1 : nodeDiameter) / 2 + 6;
-
-      const targetEdgeX = node.cx - Math.cos(angle) * radius;
-      const targetEdgeY = node.cy - Math.sin(angle) * radius;
-
-      let startX = faceCenterX;
-      let startY = faceCenterY;
-      let c1x, c1y, c2x, c2y;
-
-      if (overlayLayout === 'split' && window.innerWidth >= 1024) {
-        startX = faceCenterX + boxHalfW;
-        startY = faceCenterY;
-        const midX = (startX + targetEdgeX) / 2;
-        c1x = midX; c1y = startY; c2x = midX; c2y = targetEdgeY;
-      } else if (overlayLayout === 'cinema') {
-        startX = faceCenterX;
-        startY = faceCenterY + boxHalfH;
-        const midY = (startY + targetEdgeY) / 2;
-        c1x = startX; c1y = midY; c2x = targetEdgeX; c2y = midY;
-      } else {
-        const isRightFlank = node.cx >= sourceBox.x + sourceBox.w / 2;
-        startX = faceCenterX + (isRightFlank ? boxHalfW : -boxHalfW);
-        startY = faceCenterY;
-        const midX = (startX + targetEdgeX) / 2;
-        c1x = midX; c1y = startY; c2x = midX; c2y = targetEdgeY;
-      }
-
-      const pathD = `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${targetEdgeX} ${targetEdgeY}`;
-      const opacity = isHovered ? '1' : isDimmed ? '0.14' : '0.78';
-      const strokeW = isHovered ? '3.2' : '1.8';
-
-      svgMarkup += `
-        <g style="opacity:${opacity}; transition: opacity 0.25s ease;">
-          <path d="${pathD}" fill="none" stroke="${f.color}" stroke-width="${isHovered ? '8' : '4'}" stroke-opacity="0.22" stroke-linecap="round"/>
-          <path d="${pathD}" fill="none" stroke="${f.color}" stroke-width="${strokeW}" stroke-linecap="round" class="tether-beam"/>
-          <path d="${pathD}" fill="none" stroke="#ffffff" stroke-width="${isHovered ? '3.2' : '2'}" stroke-linecap="round" class="tether-pulse"/>
-          <circle cx="${startX}" cy="${startY}" r="${isHovered ? '5.5' : '4'}" fill="${f.color}" stroke="#05070c" stroke-width="1.5"/>
-          <circle cx="${targetEdgeX}" cy="${targetEdgeY}" r="${isHovered ? '5.5' : '4'}" fill="#ffffff" stroke="${f.color}" stroke-width="2"/>
-        </g>
-      `;
-    });
-
-    svgEl.innerHTML = svgMarkup;
+    if (svgEl) {
+      svgEl.innerHTML = '';
+    }
 
     const activeFace = activeOverlayFaces.find((f) => f.id === selectedFaceId) || activeOverlayFaces[0];
     const drawerEl = $("#selected-face-drawer");

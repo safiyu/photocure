@@ -1697,6 +1697,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     "is_alternate": r.is_alternate,
                     "taken_at": r.taken_at.isoformat() if r.taken_at else None,
                     "width": r.width, "height": r.height,
+                    "orientation": r.orientation,
                     "sharpness_norm": round(qm.sharpness_norm, 3) if qm else None,
                     "face_count": len(faces),
                     "face_confidence": round(best_face.confidence, 3) if best_face else None,
