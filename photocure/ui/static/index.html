@@ -67,7 +67,7 @@
         <span id="nav-indicator" class="nav-indicator" aria-hidden="true"></span>
         <div class="navgroup">
           <h2>Get started</h2>
-          <button class="tab navitem active" data-tab="library"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg><span>Import</span><em class="count"></em></button>
+          <button class="tab navitem active" data-tab="library"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg><span>Pipeline</span><em class="count"></em></button>
         </div>
         <div class="navgroup" style="margin-top:18px">
           <h2>Browse</h2>
@@ -113,7 +113,7 @@
       <header class="topbar hero">
         <button class="icon-btn menu-btn" id="menu-btn" aria-label="Open menu"><svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg></button>
         <div class="grow">
-          <h1 id="page-title">Import</h1>
+          <h1 id="page-title">Pipeline</h1>
           <div class="sub" id="page-sub"></div>
         </div>
         <div id="progress-card" class="progress-card" hidden>
@@ -144,11 +144,39 @@
       </header>
 
       <main id="main">
-        <!-- IMPORT -->
+        <!-- PIPELINE -->
         <section id="tab-library" class="panel active">
           <div class="banner-host"></div>
 
-          <ol class="steps">
+          <!-- Pipeline progress bar -->
+          <div class="pipe" aria-label="Import progress">
+            <div class="pipe-node" id="pipe-node-scan">
+              <span class="pipe-dot" id="pipe-dot-scan">1</span>
+              <div>
+                <b>Find photos</b>
+                <small id="pipe-label-scan">Not started</small>
+              </div>
+            </div>
+            <div class="pipe-link" id="pipe-link-1"><i></i></div>
+            <div class="pipe-node" id="pipe-node-infer">
+              <span class="pipe-dot" id="pipe-dot-infer">2</span>
+              <div>
+                <b>Analyze</b>
+                <small id="pipe-label-infer">Waiting</small>
+              </div>
+            </div>
+            <div class="pipe-link" id="pipe-link-2"><i></i></div>
+            <div class="pipe-node" id="pipe-node-review">
+              <span class="pipe-dot">3</span>
+              <div>
+                <b>Review &amp; apply</b>
+                <small>Nothing moved yet</small>
+              </div>
+            </div>
+          </div>
+
+          <!-- Two-column step cards -->
+          <ol class="steps pipe-cols" aria-label="Import steps">
             <li class="step" id="step-scan">
               <div class="step-head">
                 <span class="step-num"><span class="n">1</span><svg class="ic" aria-hidden="true"><use href="#i-check"/></svg></span>
@@ -175,11 +203,6 @@
               </div>
               <div class="actions">
                 <button id="btn-scan" data-busy class="btn accent"><svg class="ic sm" aria-hidden="true"><use href="#i-camera"/></svg>Scan</button>
-              </div>
-              <div class="step-flow" aria-hidden="true">
-                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
-                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
-                <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#i-right"/></svg>
               </div>
             </li>
             <li class="step" id="step-infer">
@@ -218,7 +241,6 @@
             <div class="dock-summary">
               <span class="dock-total" id="dock-total">0</span>
               <span class="dock-label" id="dock-label">photos in your library</span>
-
             </div>
             <div class="dock-actions">
               <button id="btn-ingest-all" data-busy class="btn commit" title="Run Scan and Analyze" aria-label="Run Scan and Analyze"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Run All</button>

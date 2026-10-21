@@ -22,7 +22,7 @@
   };
 
   const TITLES = {
-    library: ["Import", "Choose a folder and let Photocure sort what it finds. Nothing is moved until you apply a plan."],
+    library: ["Pipeline", "Choose a folder and let Photocure sort what it finds. Nothing is moved until you apply a plan."],
     categories: ["Library", "Every photo, grouped by the category it was sorted into."],
     search: ["Search", "Describe a photo in your own words and Photocure finds it."],
     duplicates: ["Duplicates", "Identical and look-alike photos. Choose the one to keep in each group."],
@@ -3936,6 +3936,8 @@
       li.classList.toggle("active", cls === "active");
       li.classList.toggle("locked", cls === "locked");
       $("#state-" + id).textContent = text;
+      const pipeLabel = $("#pipe-label-" + id);
+      if (pipeLabel) pipeLabel.textContent = text;
     };
     step("scan", flow.scan, total > 0 ? `${fmtN(total)} indexed` : "Not started");
     step("infer", flow.infer, pending > 0 ? `${fmtN(pending)} waiting`

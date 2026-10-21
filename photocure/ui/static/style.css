@@ -849,6 +849,65 @@ body.has-picks .tools, body.has-picks .hover-actions {
 /* C9: danger-sect heading keeps the sect-shape accent bar but swaps colour so it does not fight the crimson border. */
 .sect.danger > h2 { border-left-color: var(--err); }
 
+/* ---------------------------------------------------------------- Pipeline progress bar */
+.pipe {
+  display: flex; align-items: center;
+  padding: 14px 22px; border-radius: 20px; margin-bottom: 20px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--line);
+  box-shadow: 0 4px 16px -4px color-mix(in srgb, var(--accent) 8%, transparent);
+  gap: 10px; flex-wrap: wrap;
+}
+:root[data-theme="dark"] .pipe {
+  background: linear-gradient(160deg, rgba(20, 24, 38, 0.85) 0%, rgba(11, 14, 24, 0.88) 100%);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+.pipe-node { display: flex; align-items: center; gap: 12px; }
+.pipe-dot {
+  width: 34px; height: 34px; border-radius: 50%; flex: none; display: flex;
+  align-items: center; justify-content: center; font-weight: 800; font-size: 14px;
+  background: var(--well); color: var(--mut); border: 1.5px solid var(--line);
+  transition: background .25s ease, color .25s ease, border-color .25s ease, box-shadow .25s ease;
+}
+.pipe-node b { display: block; font-size: 14px; font-weight: 700; }
+.pipe-node small { display: block; font-size: 12px; font-weight: 600; color: var(--mut); margin-top: 1px; }
+.pipe-link {
+  flex: 1; min-width: 40px; height: 4px; border-radius: 4px; background: var(--well); margin: 0 6px;
+  position: relative; overflow: hidden;
+}
+.pipe-link i {
+  position: absolute; inset: 0; width: 0; background: var(--aurora); border-radius: 4px;
+  transition: width .5s ease;
+}
+.pipe-link.full i { width: 100%; }
+
+/* Sync pipe dots from step card classes via :has() */
+#tab-library:has(#step-scan.done) #pipe-dot-scan {
+  background: var(--ok); border-color: var(--ok); color: #fff;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--ok) 35%, transparent);
+}
+#tab-library:has(#step-scan.active) #pipe-dot-scan {
+  background: var(--primary); border-color: var(--primary); color: #fff;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+#tab-library:has(#step-infer.done) #pipe-dot-infer {
+  background: var(--ok); border-color: var(--ok); color: #fff;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--ok) 35%, transparent);
+}
+#tab-library:has(#step-infer.active) #pipe-dot-infer {
+  background: var(--primary); border-color: var(--primary); color: #fff;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+#tab-library:has(#step-scan.done) #pipe-label-scan { color: var(--ok); }
+#tab-library:has(#step-infer.done) #pipe-label-infer { color: var(--ok); }
+#tab-library:has(#step-scan.done) #pipe-link-1 i { width: 100%; }
+#tab-library:has(#step-infer.done) #pipe-link-2 i { width: 100%; }
+
+/* pipe-cols variant: same two-column grid but no step-flow chevron needed */
+.steps.pipe-cols { list-style: none; margin: 0 0 24px; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.steps.pipe-cols .step-flow { display: none; }
+
 .steps { list-style: none; margin: 0 0 36px; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .step {
   background: rgba(255, 255, 255, 0.92);
