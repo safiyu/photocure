@@ -2656,8 +2656,23 @@
           </button>
         </div>
 
-        <!-- Zoom & Speed & Close -->
+        <!-- Frame Actions (Best Shot & Mark Delete) & Zoom & Speed & Close -->
         <div class="bio-hud-right">
+          <!-- Frame Actions -->
+          <div class="bio-actions-bar">
+            ${curMember.is_best_shot
+              ? `<button type="button" class="bio-action-btn best-active" disabled title="This is the best shot">★ Best shot</button>`
+              : `<button type="button" class="bio-action-btn best" onclick="makeOverlayBestShot(${curMember.id})" title="Set this frame as best shot">★ Set best</button>`}
+            <button 
+              type="button" 
+              class="bio-action-btn delete${curMember.delete_approved ? ' on' : ''}" 
+              onclick="toggleOverlayMarkDelete(${curMember.id}, ${curMember.is_best_shot ? 'true' : 'false'}, ${curMember.delete_approved ? 'true' : 'false'})" 
+              title="${curMember.is_best_shot ? 'Marking best shot for delete' : 'Mark this frame for delete'}"
+            >
+              ${curMember.delete_approved ? 'Marked (undo)' : 'Mark delete'}
+            </button>
+          </div>
+
           <div class="bio-zoom-bar">
             <span class="bio-ctrl-label">Zoom:</span>
             <button type="button" class="bio-zoom-btn${faceZoomMultiplier === 0.86 ? ' on' : ''}" onclick="setFaceZoom(0.86)">1.5x</button>
@@ -2855,6 +2870,26 @@
     }
   });
 
+  async function makeOverlayBestShot(imageId) {
+    if (!activeOverlayBurstId) return;
+    await makeBestShot(activeOverlayBurstId, imageId);
+    await openBiometricProjection(activeOverlayBurstId, imageId);
+  }
+
+  async function toggleOverlayMarkDelete(imageId, isBest, currentlyApproved) {
+    if (!activeOverlayBurstId) return;
+    const approve = !currentlyApproved;
+    if (approve && isBest) {
+      const ok = await showConfirmDialog({
+        title: "Mark the best shot for delete?",
+        message: "This is the current best shot of the burst. If you still want to delete it, consider promoting another frame to best first.",
+        confirmText: "Mark delete", variant: "warning" });
+      if (!ok) return;
+    }
+    await markBurstDeletes(activeOverlayBurstId, [imageId], approve);
+    await openBiometricProjection(activeOverlayBurstId, imageId);
+  }
+
   // Expose handlers to window for inline onclick attributes
   window.openBiometricProjection = openBiometricProjection;
   window.closeBiometricProjection = closeBiometricProjection;
@@ -2863,6 +2898,8 @@
   window.setSpeed = setSpeed;
   window.setHoveredFace = setHoveredFace;
   window.selectFaceInOverlay = selectFaceInOverlay;
+  window.makeOverlayBestShot = makeOverlayBestShot;
+  window.toggleOverlayMarkDelete = toggleOverlayMarkDelete;
 
   // Compatibility alias
   async function showFaces(imageId, host, filename) {

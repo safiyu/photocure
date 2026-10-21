@@ -1736,6 +1736,60 @@ body.has-picks .pick { opacity: 1; }
   align-items: center;
   gap: 10px;
 }
+.bio-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(11, 26, 51, 0.85);
+  padding: 3px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+.bio-action-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.08);
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.bio-action-btn.best {
+  background: rgba(246, 163, 21, 0.15);
+  border-color: rgba(246, 163, 21, 0.4);
+  color: var(--amber-400, #fcce40);
+}
+.bio-action-btn.best:hover {
+  background: rgba(246, 163, 21, 0.3);
+  border-color: var(--amber-400, #fcce40);
+  color: #ffffff;
+}
+.bio-action-btn.best-active {
+  background: var(--commit, #f6a315);
+  color: var(--navy, #0b1a33);
+  font-weight: 700;
+  cursor: default;
+  opacity: 0.9;
+}
+.bio-action-btn.delete {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.85);
+}
+.bio-action-btn.delete:hover {
+  background: rgba(220, 38, 38, 0.2);
+  border-color: rgba(220, 38, 38, 0.5);
+  color: #fca5a5;
+}
+.bio-action-btn.delete.on {
+  background: var(--err, #dc2626);
+  border-color: #ef4444;
+  color: #ffffff;
+  font-weight: 700;
+}
 .bio-zoom-bar, .bio-speed-bar {
   display: flex;
   align-items: center;
