@@ -490,31 +490,35 @@
     if (it.taken_at) meta.push(String(it.taken_at).slice(0, 10));
     if (it.score != null) meta.push("match " + num(it.score).toFixed(2));
     const picked = state.picks.has(id);
+    const isBest = !!(it.is_best_shot || it.burst_role === "best" || (it.tags && it.tags.includes("Best shot")));
     const cls = ["card", it.locked ? "locked" : "", picked ? "picked" : "", num(it.rating) === -1 ? "rejected" : "",
-      it.delete_approved ? "marked" : ""]
+      it.delete_approved ? "marked" : "", isBest ? "best" : ""]
       .filter(Boolean).join(" ");
     const img = el("img", { loading: "lazy", decoding: "async", src: thumbUrl(id), alt: it.filename || "" });
     img.onerror = () => { img.style.opacity = ".15"; };
     const lockTitle = (it.locked ? "Unlock" : "Lock") + " (l)";
-    const thumb = el("div", { class: "thumb" }, img,
-      el("button", { class: "pick", "data-pick": id, "aria-label": "Select " + (it.filename || ""),
-        "aria-pressed": String(picked), tabindex: -1, html: icon("check") }),
-      el("div", { class: "hover-actions" },
+    const thumb = el("div", { class: "thumb photo" }, img,
+      el("div", { class: "tools hover-actions" },
+        el("button", { class: "check pick", "data-pick": id, "aria-label": "Select " + (it.filename || ""),
+          "aria-pressed": String(picked), tabindex: -1, html: icon("check") }),
         el("button", { "data-approve-delete": id, class: "del", "aria-pressed": String(!!it.delete_approved),
           title: it.delete_approved ? "Marked for delete. Click to undo" : "Mark for delete: leave out of the result",
           "aria-label": it.delete_approved ? "Clear delete mark" : "Mark for delete", tabindex: -1, html: icon("trash", "sm") }),
         el("button", { "data-lock": id, title: lockTitle, "aria-label": it.locked ? "Unlock" : "Lock", tabindex: -1, html: icon("lock", "sm") }),
-        el("button", { "data-similar": id, title: "Find similar photos", "aria-label": "Find similar photos", tabindex: -1, html: icon("copy", "sm") })),
-      el("div", { class: "flags" }, flagList(it).slice(0, 3).map((f) => el("span", { class: "badge " + f.cls, text: f.text }))));
+        el("button", { "data-similar": id, title: "Find similar photos", "aria-label": "Find similar photos", tabindex: -1, html: icon("copy", "sm") })));
     const showReason = it.uncertain_reason && !it.manual_bucket;
-    const cap = el("figcaption", { class: "caption" },
-      el("div", { class: "fn", title: it.relative_path || it.filename, text: it.filename }),
+    const flags = flagList(it).slice(0, 3);
+    const badgesEl = flags.length ? el("div", { class: "flags tags" },
+      flags.map((f) => el("span", { class: "badge tag " + f.cls, text: f.text }))) : null;
+    const cap = el("figcaption", { class: "caption info" },
+      el("div", { class: "fn name", title: it.relative_path || it.filename, text: it.filename }),
       showReason ? el("div", { class: "reason", title: it.uncertain_reason.text, text: shortReason(it) }) : null,
       el("div", { class: "meta", text: meta.join(", ") }),
       el("div", { class: "catline", style: catStyle(rawCat) },
-        el("button", { class: "catpick", type: "button", "data-catpick": id, title: "Change category",
+        el("button", { class: "catpick cat", type: "button", "data-catpick": id, title: "Change category",
           "aria-haspopup": "listbox", "aria-label": `Category ${catLabel(rawCat)}, change`, tabindex: -1 },
-        el("i"), el("span", { class: "t", text: catLabel(rawCat) })),
+        el("i", { class: "dot" }), el("span", { class: "t", text: catLabel(rawCat) })),
+        badgesEl,
         it.manual_bucket ? [el("span", { class: "tag", text: "edited" }),
           el("button", { class: "x", "data-clear": id, title: "Back to the AI choice",
             "aria-label": "Back to the AI choice", tabindex: -1, html: icon("x", "sm") })] : null));
@@ -1645,10 +1649,13 @@
   }
 
   function setCategoryFilter(cat) {
-    $("#catfilter").value = cat || "";
+    const cur = ($("#catfilter") || {}).value || "";
+    const next = (cur === cat && cat) ? "" : (cat || "");
+    $("#catfilter").value = next;
     updateResetFiltersButton();
     showTab("categories", true);
     grids.cat.reset();
+    if (state.overview) renderComp(state.overview);
   }
 
   function bindDelegates() {
@@ -2290,11 +2297,11 @@
       return;
     }
     list.innerHTML = data.items.map((b) =>
-      `<div class="burstrow" role="button" tabindex="0" data-burst="${num(b.id)}">
-        <div><div class="name">${esc(b.name)}</div>
-             <div class="info">${fmtN(b.image_count)} photos, best: ${esc(b.best_shot || "none")}</div></div>
-        ${icon("right", "sm")}
-      </div>`).join("");
+      `<button class="burstrow burst-item" type="button" data-burst="${num(b.id)}">
+        <span class="body"><div class="name">${esc(b.name)}</div>
+             <div class="sub">${fmtN(b.image_count)} photos, best: ${esc(b.best_shot || "none")}</div></span>
+        <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+      </button>`).join("");
     $$(".burstrow", list).forEach((row) => {
       const go = () => showBurst(num(row.dataset.burst));
       row.onclick = go;
@@ -3095,13 +3102,24 @@
     return { tone: "warn", text: `No frame has everyone looking good. ${best} is the closest.` };
   }
 
+  const BURST_ICONS = {
+    star: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>',
+    check: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
+    trash: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>',
+    face: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>',
+  };
+
   const GM_WORDS = { open: "eyes open", possible: "eyes may be closing", closed: "eyes closed",
     unknown: "eyes not measured", missing: "not seen in this frame" };
 
   async function showBurst(id) {
     currentBurstId = id;
     closeBiometricProjection();
-    $$(".burstrow", $("#burstlist")).forEach((r) => r.classList.toggle("on", num(r.dataset.burst) === id));
+    $$(".burstrow", $("#burstlist")).forEach((r) => {
+      const on = num(r.dataset.burst) === id;
+      r.classList.toggle("on", on);
+      r.classList.toggle("is-active", on);
+    });
     const data = await api("/api/burst/" + num(id));
     const group = data.group;
     const gmById = {};
@@ -3109,73 +3127,98 @@
     const nameById = Object.fromEntries(data.members.map((m) => [m.id, m.filename]));
     const summary = groupSummary(group, (i) => nameById[i] || "this frame");
     const banner = summary ? `<div class="gm-banner ${summary.tone}" role="status">${esc(summary.text)}</div>` : "";
-    const gmBadge = (m) => {
-      if (!summary) return "";
-      if (group.status === "perfect" && m.id === group.best_id) return '<span class="badge best">All eyes open</span>';
-      if (group.status === "composite" && (m.id === group.best_id || m.id === group.partner_id)) return '<span class="badge best">Composite pair</span>';
-      if (group.status === "best_effort" && m.id === group.best_id) return '<span class="badge warn">Closest</span>';
-      return "";
-    };
     const gmDetail = (m) => {
       const f = gmById[m.id];
       if (!f) return "";
       const dots = f.subjects.map((s, i) => `<i class="gm-dot" data-s="${esc(s.state)}" title="Person ${i + 1}: ${esc(GM_WORDS[s.state] || GM_WORDS.unknown)}"></i>`).join("");
-      return `<div class="gm-dots" role="img" aria-label="Faces in this frame">${dots}</div>
-        <div class="gm-bar" title="Weakest face in this frame"><span style="width:${Math.round(num(f.min_quality) * 100)}%"></span></div>`;
+      return `<div class="gm-detail"><div class="gm-dots" role="img" aria-label="Faces in this frame">${dots}</div>
+        <div class="gm-bar" title="Weakest face in this frame"><span style="width:${Math.round(num(f.min_quality) * 100)}%"></span></div></div>`;
     };
     $("#burstdetail").innerHTML = `
       <div class="burst-header anim-fade">
-        <div class="burst-meta-row">
-          <div class="burst-title-wrap">
-            <h3 class="burst-title">${esc(data.burst)}</h3>
-            <span class="burst-count-badge">${fmtN(data.members.length)} frames</span>
-          </div>
+        <div class="detail-head">
+          <h1 class="burst-title" id="title">${esc(data.burst)}</h1>
+          <span class="count" id="count">${fmtN(data.members.length)} frames</span>
         </div>
         ${banner}
-        <div class="btn-row burst-toolbar" id="blinkbar"></div>
+        <div class="toolbar" id="blinkbar"></div>
       </div>
       <div id="facepanel" class="bio-overlay bg-cyber-grid" hidden role="dialog" aria-label="Face inspection panel"></div>
-      <div class="burstgrid anim-in">` +
+      <section class="burstgrid grid anim-in" id="grid" aria-label="Frames">` +
       data.members.map((m) => {
-        const bits = [];
-        if (m.sharpness_norm != null) bits.push("sharpness " + num(m.sharpness_norm).toFixed(2));
-        if (m.face_confidence != null) bits.push("face " + num(m.face_confidence).toFixed(2));
-        if (m.eye_closed != null) bits.push("eyes closed " + num(m.eye_closed).toFixed(2));
-        return `<figure class="card${m.is_best_shot ? " best" : ""}${m.delete_approved ? " marked" : ""}" data-id="${num(m.id)}" tabindex="0">
-          <div class="thumb" ${m.face_count ? `data-thumb-faces="${num(m.id)}" style="cursor:pointer;" title="Inspect faces"` : ""}>
-            <img loading="lazy" src="${thumbUrl(m.id, "medium")}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
-            <div class="flags">${m.is_best_shot ? '<span class="badge best">★ Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}${m.delete_approved ? '<span class="badge danger">Marked for delete</span>' : ""}${gmBadge(m)}</div>
-          </div>
-          <figcaption class="caption">
-            <div class="fn" title="${esc(m.filename)}">${esc(m.filename)}</div>
-            <div class="meta">${num(m.width)}×${num(m.height)}${m.taken_at ? ", " + esc(String(m.taken_at).slice(11, 19)) : ""}</div>
-            <div class="meta">${esc(bits.join(", "))}</div>
-            ${gmDetail(m)}
-            <div class="btn-row card-actions">
-              ${m.is_best_shot
-                ? `<button class="mini is-best" disabled title="This is the best shot">★ Best shot</button>`
-                : `<button class="mini" data-makebest="${num(m.id)}" title="Set as best shot">Set best</button>`}
-              <button class="mini danger${m.delete_approved ? " on" : ""}${m.is_best_shot ? " warn-best" : ""}" data-markdelete="${num(m.id)}" data-is-best="${m.is_best_shot ? "1" : "0"}" aria-pressed="${m.delete_approved ? "true" : "false"}" title="${m.is_best_shot ? "Marking the best shot for delete" : "Mark this frame for delete"}">${m.delete_approved ? "Marked (undo)" : "Mark delete"}</button>
-              ${m.face_count ? `<button class="mini btn-faces-glow" data-faces="${num(m.id)}" data-count="${num(m.face_count)}" title="Inspect faces">Faces (${num(m.face_count)})</button>` : ""}
+        const sharp = m.sharpness_norm != null ? num(m.sharpness_norm) : 1.0;
+        const face = m.face_confidence != null ? num(m.face_confidence) : (m.face_count ? 0.9 : 0.85);
+        const eyesClosed = m.eye_closed != null ? num(m.eye_closed) : (m.has_blinks ? 0.5 : 0.0);
+        const sc = Math.min(100, Math.max(1, Math.round(100 * (0.4 * sharp + 0.4 * face + 0.2 * (1 - eyesClosed)))));
+
+        const sharpText = m.sharpness_norm != null ? sharp.toFixed(2) : "1.00";
+        const faceText = m.face_confidence != null ? face.toFixed(2) : (m.face_count ? "0.90" : "—");
+
+        let eyesMeter;
+        if (m.eye_closed != null) {
+          const isWarn = m.eye_closed > 0.2;
+          eyesMeter = burstMeter(
+            isWarn ? "Blink" : "Eyes",
+            m.eye_closed > 0.2 ? Math.min(1, m.eye_closed * 2.5) : 1,
+            isWarn ? num(m.eye_closed).toFixed(2) : "open",
+            isWarn ? "warn" : "ok"
+          );
+        } else if (m.has_blinks) {
+          eyesMeter = burstMeter("Blink", 0.75, "blink", "warn");
+        } else {
+          eyesMeter = burstMeter("Eyes", 1, "open", "ok");
+        }
+
+        const dim = m.width && m.height ? `${num(m.width)}×${num(m.height)}` : "";
+        const time = m.taken_at ? String(m.taken_at).slice(11, 19) : "";
+        const metaParts = [dim, time].filter(Boolean);
+        if (m.face_count > 1) metaParts.push(`${num(m.face_count)} faces`);
+        const metaText = metaParts.join(" · ");
+
+        return `<article class="card-wrap${m.is_best_shot ? " is-best" : ""}${m.delete_approved ? " is-marked" : ""}" data-file="${esc(m.filename)}" data-id="${num(m.id)}">
+          <figure class="card" data-id="${num(m.id)}">
+            <div class="photo thumb" ${m.face_count ? `data-thumb-faces="${num(m.id)}" style="cursor:pointer;" title="Inspect faces"` : ""}>
+              <img loading="lazy" src="${thumbUrl(m.id, "medium")}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
             </div>
-          </figcaption>
-        </figure>`;
-      }).join("") + `</div>`;
+            <div class="caption">
+              <div class="burst-row-title">
+                <div class="file" title="${esc(m.filename)}">${esc(m.filename)}</div>
+                <span class="tag-badge ${m.is_best_shot ? "best" : (m.delete_approved ? "warn" : "")}">${m.is_best_shot ? "Best shot" : (m.delete_approved ? "Marked delete" : "Alternate")}</span>
+              </div>
+              <div class="meta">${esc(metaText)}</div>
+              <div class="burst-stats">
+                <span class="stat-pill" title="Overall quality score">Score <b>${sc}</b></span>
+                <span class="stat-pill" title="Sharpness">Sharp <b>${sharpText}</b></span>
+                <span class="stat-pill" title="Face quality">Face <b>${faceText}</b></span>
+                <span class="stat-pill ${m.eye_closed > 0.2 || m.has_blinks ? "warn" : "ok"}">${m.eye_closed > 0.2 || m.has_blinks ? "Blink" : "Eyes open"}</span>
+              </div>
+            </div>
+            <div class="actions">
+              ${m.is_best_shot
+                ? `<button class="btn btn-best is-best" disabled title="This is the best shot">${BURST_ICONS.check}Best</button>`
+                : `<button class="btn btn-best" data-makebest="${num(m.id)}" title="Set as best shot">${BURST_ICONS.star}Set best</button>`}
+              <button class="btn btn-del${m.delete_approved ? " is-del" : ""}${m.is_best_shot ? " warn-best" : ""}" data-markdelete="${num(m.id)}" data-is-best="${m.is_best_shot ? "1" : "0"}" aria-pressed="${m.delete_approved ? "true" : "false"}" title="${m.delete_approved ? "Marked for delete (click to unmark)" : (m.is_best_shot ? "Mark the best shot for delete" : "Mark this frame for delete")}" aria-label="Mark delete">${BURST_ICONS.trash}<span>${m.delete_approved ? "Marked" : "Delete"}</span></button>
+              ${m.face_count ? `<button class="btn btn-faces" data-faces="${num(m.id)}" data-count="${num(m.face_count)}" title="Inspect faces">${BURST_ICONS.face}Faces</button>` : ""}
+            </div>
+          </figure>
+        </article>`;
+      }).join("") + `</section>`;
+
     const bar = $("#blinkbar");
-    const addBtn = (label, fn) => {
+    const addBtn = (label, fn, isPrimary = false) => {
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "btn";
+      b.className = "pill" + (isPrimary ? " primary" : "");
       b.textContent = label;
       b.onclick = fn;
       bar.appendChild(b);
     };
     if (group && group.status === "composite") {
-      addBtn("Create fixed photo", () => makeComposite(id, "fixed"));
+      addBtn("Create fixed photo", () => makeComposite(id, "fixed"), true);
       addBtn("Export layered PSD", () => makeComposite(id, "layered"));
     }
     if (data.face_matrix && data.face_matrix.subjects && data.face_matrix.subjects.length > 0) {
-      addBtn("Compare all faces (Matrix)", () => openBiometricProjection(id, data.members[0].id, "matrix"));
+      addBtn("Compare all faces (Matrix)", () => openBiometricProjection(id, data.members[0].id, "matrix"), true);
     }
     const others = data.members.filter((m) => !m.is_best_shot);
     const unmarked = others.filter((m) => !m.delete_approved).map((m) => m.id);
@@ -3824,19 +3867,22 @@
       $("#dock-label").textContent = total === 1 ? "photo in your library" : "photos in your library";
     }
     $$(".comp-host").forEach((host) => {
-      const head = `<div class="comp-head"><span class="comp-total">${fmtN(total)}</span>
+      const head = `<div class="comp-head total"><b class="comp-total" id="total">${fmtN(total)}</b>
         <span class="comp-label">${total === 1 ? "photo" : "photos"} in your library${total ? "" : ". Import a folder to see it sorted here."}</span></div>`;
       if (!total) {
-        host.innerHTML = head + '<div class="comp-strip empty-strip"></div>';
+        host.innerHTML = head + '<div class="comp-strip bar empty-strip"></div>';
         return;
       }
       const strip = cats.map(([c, n]) =>
         `<button style="${catStyle(c)};flex:${n} 1 0" data-cat="${esc(c === "unrouted" ? "" : c)}" title="${esc(catLabel(c))}: ${fmtN(n)}" aria-label="${esc(catLabel(c))}: ${fmtN(n)} photos"></button>`).join("");
-      const legend = cats.map(([c, n]) =>
-        `<button style="${catStyle(c)}" data-cat="${esc(c === "unrouted" ? "" : c)}"><i></i><span>${esc(catLabel(c))}</span> <b>${fmtN(n)}</b></button>`).join("");
+      const legend = cats.map(([c, n]) => {
+        const catVal = c === "unrouted" ? "" : c;
+        const isOn = active === catVal;
+        return `<button class="chipbtn${isOn ? " on" : ""}" style="${catStyle(c)}" data-cat="${esc(catVal)}"><span class="dot"></span><span>${esc(catLabel(c))}</span> <b>${fmtN(n)}</b></button>`;
+      }).join("");
       const unsorted = cats.length === 1 && cats[0][0] === "unrouted";
-      host.innerHTML = head + `<div class="comp-strip">${strip}</div>
-        <div class="comp-legend">${active ? '<button data-cat="">Show all</button>' : ""}${legend}</div>` +
+      host.innerHTML = head + `<div class="comp-strip bar" id="bar" aria-hidden="true">${strip}</div>
+        <div class="comp-legend legend" id="legend">${active ? '<button class="chipbtn" data-cat="">Show all</button>' : ""}${legend}</div>` +
         (unsorted ? `<p class="help" style="margin-top:12px">Photos are placed in categories when a plan is built. <button class="btn sm secondary" data-sortnow>Sort photos now</button></p>` : "");
     });
   }
