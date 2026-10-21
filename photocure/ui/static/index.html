@@ -263,7 +263,7 @@
             <label class="toggle"><input type="checkbox" id="f-fav">Favourites</label>
             <button id="reset-filters" class="btn sm ghost" type="button" hidden>Reset filters</button>
             <span class="grow"></span>
-            <label class="density">Size <input type="range" id="density" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
+            <label class="density">Size <input type="range" id="density" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="rowcount" class="rowcount"></span>
           </div>
           <div class="scrubber" id="scrubber" hidden>
@@ -292,6 +292,7 @@
             <button class="btn primary" type="submit">Search</button>
             <label class="toggle"><input type="checkbox" id="search-dups">Include duplicates</label>
             <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="searchcount" class="rowcount" role="status"></span>
           </form>
           <div id="searchgrid" class="grid"></div>
@@ -336,6 +337,7 @@
             </div>
             <button id="btn-rescore" class="btn sm secondary" type="button" title="Looks at your already analyzed photos again with the latest categories. No photo is read again.">Re-check my photos</button>
             <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="utilitycount" class="rowcount"></span>
           </div>
           <div id="utilitygrid" class="grid"></div>
@@ -354,6 +356,7 @@
               <option value="unreadable">Unreadable</option>
             </select>
             <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="junkcount" class="rowcount"></span>
           </div>
           <div class="keys kbhint"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>1</kbd>-<kbd>9</kbd> set category</span><span><kbd>u</kbd> undo</span><span><kbd>l</kbd> lock</span><span><kbd>Space</kbd> open</span></div>
@@ -367,7 +370,9 @@
           <div class="learn">
             <button id="btn-learn" class="btn primary" type="button">Learn from my choices</button>
             <span id="learn-help" class="help">Fix a few photos, then let the app re-sort the rest using what you chose.</span>
-            <span class="grow"></span><span id="uncertaincount" class="rowcount"></span>
+            <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
+            <span id="uncertaincount" class="rowcount"></span>
           </div>
           <div class="keys kbhint"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>u</kbd> undo</span><span><kbd>l</kbd> lock</span><span><kbd>Space</kbd> open</span></div>
           <div id="triage-legend" class="keys"></div>
@@ -387,6 +392,7 @@
             <select id="hl-year" aria-label="Year in review"><option value="">Year in review</option></select>
             <button id="btn-hl-export" class="btn secondary" type="button" disabled>Download page</button>
             <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="highlightcount" class="rowcount"></span>
           </div>
           <details id="hl-tune" class="sect tune">
@@ -424,6 +430,7 @@
             <label class="inline-num">Distance <input id="ev-km" type="number" step="0.5" value="1"> km</label>
             <button id="btn-events" class="btn primary" data-busy>Find events</button>
             <span class="grow"></span>
+            <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="eventcount" class="rowcount"></span>
           </div>
           <div class="split">

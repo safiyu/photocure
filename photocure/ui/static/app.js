@@ -565,6 +565,7 @@
       host,
       pageSize: PAGE,
       renderCard: cardNode,
+      captionH: 125,
       renderSkeleton: () => el("div", { class: "skel" }),
       async fetchPage(offset, limit) {
         const qs = cfg.params();
@@ -4354,17 +4355,23 @@
     $("#help-close").onclick = closeHelp;
     $("#help").addEventListener("click", (e) => { if (e.target.id === "help") closeHelp(); });
 
-    const dens = $("#density");
     let saved = null;
     try { saved = localStorage.getItem("pcur-density"); } catch (e) { /* ignore */ }
-    if (saved) dens.value = saved;
-    const setDens = () => {
-      document.documentElement.style.setProperty("--thumb-min", dens.value + "px");
-      try { localStorage.setItem("pcur-density", dens.value); } catch (e) { /* ignore */ }
-      allGrids().forEach((g) => g.vg.update());  // card size changed, so the rows are different
+    const curVal = saved || ($("#density") ? $("#density").value : "200") || "200";
+    const setDens = (val) => {
+      document.documentElement.style.setProperty("--thumb-min", val + "px");
+      try { localStorage.setItem("pcur-density", val); } catch (e) { /* ignore */ }
+      $$(".density input, #density, .density-slider").forEach((s) => {
+        if (s.value !== String(val)) s.value = val;
+      });
+      allGrids().forEach((g) => g.vg.update());
     };
-    dens.addEventListener("input", setDens);
-    setDens();
+    document.addEventListener("input", (e) => {
+      if (e.target && e.target.matches && e.target.matches(".density input, #density, .density-slider")) {
+        setDens(e.target.value);
+      }
+    });
+    setDens(curVal);
 
     ["catfilter", "manualonly", "neardup"].forEach((id) =>
       $("#" + id).addEventListener("change", () => {

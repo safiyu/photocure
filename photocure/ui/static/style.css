@@ -560,10 +560,10 @@ input:hover, select:hover { border-color: var(--faint); }
 .toolbar .toggle:has(input:checked), .toolbar .toggle.on, .toolbar .pill.on {
   background: var(--accent); border-color: var(--accent); color: #fff;
 }
-.toolbar .density, .toolbar .size {
+.toolbar .density, .toolbar .size, .learn .density {
   display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--mut);
 }
-.toolbar .density input, .toolbar .size input {
+.toolbar .density input, .toolbar .size input, .learn .density input {
   accent-color: var(--accent); width: 110px; height: auto; padding: 0; border: 0; background: none;
 }
 .toolbar .rowcount, .toolbar .count {
@@ -608,7 +608,7 @@ kbd {
 /* ------------------------------------------------------------------ photo grid */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--thumb-min), 1fr)); gap: 22px 16px; align-items: start; }
 /* Virtual grid (C4): only the rows near the viewport exist. Sizes come from here and from --thumb-min. */
-:root { --vg-caption-h: 92px; }
+:root { --vg-caption-h: 125px; }
 .grid.vgrid { display: block; position: relative; }
 .vg-spacer { position: relative; width: 100%; }
 .vg-window {
@@ -762,7 +762,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .catpick, .cat {
   display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px;
   font-size: 12px; font-weight: 700; color: var(--ink); border: 0; background: color-mix(in srgb, var(--cat, var(--c-unrouted)) 14%, var(--sheet));
-  cursor: pointer; transition: background .12s ease;
+  cursor: pointer; transition: background .12s ease; flex: none;
 }
 .catpick:hover, .catpick:focus-visible, .cat:hover {
   background: color-mix(in srgb, var(--cat, var(--c-unrouted)) 24%, var(--sheet));
@@ -771,7 +771,6 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .catline .tag { color: var(--warn); font-weight: 600; background: none; padding: 0 2px; }
 .catline .x { margin-left: auto; border: 0; background: none; color: var(--faint); padding: 0 4px; line-height: 1; border-radius: 4px; cursor: pointer; }
 .catline .x:hover { color: var(--err); background: var(--err-soft); }
-.catpick:hover, .catpick:focus-visible { background: var(--well); }
 .catpick .t { text-decoration: underline dotted transparent; text-underline-offset: 3px; }
 .catpick:hover .t { text-decoration-color: var(--faint); }
 

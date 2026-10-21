@@ -78,7 +78,7 @@ export class VirtualGrid {
    */
   constructor({
     host, fetchPage, renderCard, renderSkeleton, pageSize = 200, minCard = 200, colGap = 16,
-    rowGap = 22, aspect = 0.75, captionH = 92, overscanRows = 2, topInset = 84,
+    rowGap = 22, aspect = 0.75, captionH = 125, overscanRows = 2, topInset = 84,
     onChange = () => {}, onError = () => {}, win = window,
   }) {
     Object.assign(this, { host, fetchPage, renderCard, renderSkeleton, pageSize, minCard, colGap, rowGap,
