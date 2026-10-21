@@ -130,6 +130,10 @@ export class VirtualGrid {
       if (this.raf) return;
       this.raf = win.requestAnimationFrame(() => { this.raf = 0; this.update(); });
     };
+    this._scroller = (host && typeof host.closest === "function") ? host.closest(".content") : null;
+    if (this._scroller && typeof this._scroller.addEventListener === "function") {
+      this._scroller.addEventListener("scroll", this._schedule, { passive: true });
+    }
     win.addEventListener("scroll", this._schedule, { passive: true });
     win.addEventListener("resize", this._schedule);
     if (typeof ResizeObserver !== "undefined") {
@@ -138,9 +142,19 @@ export class VirtualGrid {
     }
   }
 
+  _getScroller() {
+    if (!this._scroller && this.host && typeof this.host.closest === "function") {
+      this._scroller = this.host.closest(".content");
+    }
+    return this._scroller;
+  }
+
   destroy() {
     if (typeof this.host.removeEventListener === "function") {
       this.host.removeEventListener("focusin", this._onFocusIn);
+    }
+    if (this._scroller && typeof this._scroller.removeEventListener === "function") {
+      this._scroller.removeEventListener("scroll", this._schedule);
     }
     this.win.removeEventListener("scroll", this._schedule);
     this.win.removeEventListener("resize", this._schedule);
@@ -165,7 +179,17 @@ export class VirtualGrid {
     this._clearCards();
     this.empty.hidden = true;
     this.spacer.hidden = false;
-    if (this.host.getBoundingClientRect().top < 0) this._scrollToTop();
+    const scroller = this._getScroller();
+    if (scroller && typeof this.host.getBoundingClientRect === "function") {
+      const sRect = typeof scroller.getBoundingClientRect === "function" ? scroller.getBoundingClientRect() : { top: 0 };
+      const hRect = this.host.getBoundingClientRect();
+      if (hRect.top < sRect.top) {
+        if (typeof scroller.scrollTo === "function") scroller.scrollTo(0, 0);
+        else scroller.scrollTop = 0;
+      }
+    } else if (typeof this.host.getBoundingClientRect === "function" && this.host.getBoundingClientRect().top < 0) {
+      this._scrollToTop();
+    }
     this._bootSkeletons();
     await this._load(0, this.pageSize);
     this.update();
@@ -221,9 +245,22 @@ export class VirtualGrid {
   update() {
     if (this.total == null || !this.visible) return;
     this._measure();
-    const gridTop = this.host.getBoundingClientRect().top + this.win.scrollY;
+    const scroller = this._getScroller();
+    let scrollTop, gridTop, viewportH;
+    if (scroller && typeof scroller.scrollTop === "number" && typeof scroller.clientHeight === "number") {
+      scrollTop = scroller.scrollTop;
+      const sRect = typeof scroller.getBoundingClientRect === "function" ? scroller.getBoundingClientRect() : { top: 0 };
+      const hRect = typeof this.host.getBoundingClientRect === "function" ? this.host.getBoundingClientRect() : { top: 0 };
+      gridTop = scroller.scrollTop + (hRect.top - sRect.top);
+      viewportH = scroller.clientHeight;
+    } else {
+      scrollTop = this.win.scrollY || 0;
+      const hRect = typeof this.host.getBoundingClientRect === "function" ? this.host.getBoundingClientRect() : { top: 0 };
+      gridTop = hRect.top + (this.win.scrollY || 0);
+      viewportH = this.win.innerHeight || 800;
+    }
     const w = computeWindow({
-      scrollTop: this.win.scrollY, gridTop, viewportH: this.win.innerHeight, rowH: this.rowH,
+      scrollTop, gridTop, viewportH, rowH: this.rowH,
       cols: this.cols, total: this.total,
       overscanRows: this.cols > 10 ? 1 : this.overscanRows,
     });
@@ -361,10 +398,29 @@ export class VirtualGrid {
   async scrollToIndex(idx) {
     if (idx < 0 || this.total == null || idx >= this.total) return;
     this._measure();
-    const gridTop = this.host.getBoundingClientRect().top + this.win.scrollY;
-    const y = scrollTarget({ row: Math.floor(idx / this.cols), rowH: this.rowH, gridTop,
-      scrollTop: this.win.scrollY, viewportH: this.win.innerHeight, topInset: this.topInset });
-    if (y != null) this.win.scrollTo(0, y);
+    const scroller = this._getScroller();
+    let scrollTop, gridTop, viewportH;
+    if (scroller && typeof scroller.scrollTop === "number" && typeof scroller.clientHeight === "number") {
+      scrollTop = scroller.scrollTop;
+      const sRect = typeof scroller.getBoundingClientRect === "function" ? scroller.getBoundingClientRect() : { top: 0 };
+      const hRect = typeof this.host.getBoundingClientRect === "function" ? this.host.getBoundingClientRect() : { top: 0 };
+      gridTop = scroller.scrollTop + (hRect.top - sRect.top);
+      viewportH = scroller.clientHeight;
+      const y = scrollTarget({ row: Math.floor(idx / this.cols), rowH: this.rowH, gridTop,
+        scrollTop, viewportH, topInset: this.topInset });
+      if (y != null) {
+        if (typeof scroller.scrollTo === "function") scroller.scrollTo(0, y);
+        else scroller.scrollTop = y;
+      }
+    } else {
+      scrollTop = this.win.scrollY || 0;
+      const hRect = typeof this.host.getBoundingClientRect === "function" ? this.host.getBoundingClientRect() : { top: 0 };
+      gridTop = hRect.top + (this.win.scrollY || 0);
+      viewportH = this.win.innerHeight || 800;
+      const y = scrollTarget({ row: Math.floor(idx / this.cols), rowH: this.rowH, gridTop,
+        scrollTop, viewportH, topInset: this.topInset });
+      if (y != null) this.win.scrollTo(0, y);
+    }
     await this.ensureLoaded(idx, idx + 1);
     this.update();
   }

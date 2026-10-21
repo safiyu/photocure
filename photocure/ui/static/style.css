@@ -158,9 +158,10 @@
 }
 
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; overflow-y: scroll; overflow-x: hidden; }
+html { -webkit-text-size-adjust: 100%; height: 100%; overflow: hidden; }
 body {
-  overflow-x: hidden;
+  height: 100%;
+  overflow: hidden;
   margin: 0; background: var(--table);
   background-image:
     radial-gradient(1200px 650px at 8% -5%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 60%),
@@ -188,15 +189,25 @@ button { cursor: pointer; }
 .ic.sm { width: 15px; height: 15px; }
 
 /* ------------------------------------------------------------------ shell */
-.shell { display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr); min-height: 100vh; }
+.shell {
+  display: grid;
+  grid-template-columns: var(--side-w) minmax(0, 1fr);
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+}
 
 .side {
-  position: sticky; top: 0; height: 100vh; overflow: auto;
+  height: 100vh;
+  max-height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex; flex-direction: column; gap: 22px;
   padding: 22px 14px 16px;
   background: rgba(255, 255, 255, 0.35);
   backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
   border-right: 1px solid rgba(255, 255, 255, 0.45);
+  flex-shrink: 0;
 }
 .brand { display: flex; align-items: center; gap: 11px; padding: 0 6px; }
 .brand .logo { width: 42px; height: 42px; flex: none; display: block; }
@@ -423,7 +434,10 @@ button { cursor: pointer; }
   min-width: 0;
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
 }
 .topbar {
   position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 14px 28px;
@@ -941,6 +955,10 @@ body.has-picks .tools, body.has-picks .hover-actions {
   margin-top: auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding-top: 16px; border-top: 1px solid var(--line);
 }
+.step .actions .btn {
+  height: 40px; border-radius: 999px; padding: 0 22px; font-size: 14px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 8px; box-sizing: border-box;
+}
 .step-hint { font-size: 13px; font-weight: 500; color: var(--mut); line-height: 1.4; }
 
 /* Analysis stages pill row */
@@ -1109,13 +1127,13 @@ body.has-picks .tools, body.has-picks .hover-actions {
 }
 .step.active .actions .btn.accent,
 .step.active .actions .btn.primary {
-  height: 42px; font-size: 14px; font-weight: 700;
-  padding: 0 24px;
-  border-radius: 12px;
+  height: 40px; font-size: 14px; font-weight: 700;
+  padding: 0 22px;
+  border-radius: 999px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--btn-fill) 85%, #fff), var(--btn-fill));
   border-color: var(--btn-fill);
   box-shadow: 0 4px 14px var(--btn-glow);
-  display: inline-flex; align-items: center; gap: 8px;
+  display: inline-flex; align-items: center; gap: 8px; box-sizing: border-box;
 }
 .step.active .actions .btn.accent:hover,
 .step.active .actions .btn.primary:hover {
