@@ -1521,8 +1521,8 @@ body.has-picks .pick { opacity: 1; }
 .bg-cyber-grid {
   background-size: 36px 36px;
   background-image: 
-    linear-gradient(to right, color-mix(in srgb, var(--primary, #2b9af6) 5%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--primary, #2b9af6) 5%, transparent) 1px, transparent 1px);
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
 }
 
 /* 1-to-1 Direct SVG Tether Line Draw & Pulse Animations */
@@ -1586,7 +1586,7 @@ body.has-picks .pick { opacity: 1; }
   justify-content: space-between;
   overflow: hidden;
   transition: opacity 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
-  background: var(--navy, #0b1a33);
+  background: transparent;
   font-family: var(--font-body);
 }
 .bio-overlay[hidden] {
@@ -1596,8 +1596,9 @@ body.has-picks .pick { opacity: 1; }
 .bio-backdrop {
   position: absolute;
   inset: 0;
-  background-color: rgba(11, 26, 51, 0.92);
-  backdrop-filter: blur(20px);
+  background: rgba(11, 19, 36, 0.65);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
   cursor: pointer;
   z-index: 1;
 }
@@ -1998,8 +1999,9 @@ body.has-picks .pick { opacity: 1; }
   bottom: -44px;
   padding: 5px 12px;
   border-radius: 12px;
-  background: rgba(11, 26, 51, 0.94);
-  backdrop-filter: blur(12px);
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid rgba(255, 255, 255, 0.15);
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
   white-space: nowrap;
