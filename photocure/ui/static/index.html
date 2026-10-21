@@ -381,18 +381,23 @@
           <div id="junkgrid-more" class="loadmore"></div>
         </section>
 
-        <!-- NEEDS A LOOK -->
+        <!-- NEEDS A LOOK / FINALIZE -->
         <section id="tab-uncertain" class="panel">
           <div class="banner-host"></div>
-          <div class="learn">
+          <div class="toolbar">
+            <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+              <input id="q-uncertain" type="search" placeholder="Search by file name or path" aria-label="Search finalize photos"></div>
+            <select id="filter-uncertain-status" aria-label="Filter status">
+              <option value="all">All undecided photos</option>
+              <option value="unreviewed">Needs choice</option>
+              <option value="chosen">Chosen by me</option>
+            </select>
             <button id="btn-learn" class="btn primary" type="button">Learn from my choices</button>
             <span id="learn-help" class="help">Fix a few photos, then let the app re-sort the rest using what you chose.</span>
             <span class="grow"></span>
             <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="uncertaincount" class="rowcount"></span>
           </div>
-          <div class="keys kbhint"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>u</kbd> undo</span><span><kbd>l</kbd> lock</span><span><kbd>Space</kbd> open</span></div>
-          <div id="triage-legend" class="keys"></div>
           <div id="uncertaingrid" class="grid"></div>
           <div id="uncertaingrid-more" class="loadmore"></div>
         </section>

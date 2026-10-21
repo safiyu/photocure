@@ -690,8 +690,24 @@
     });
     makeGrid("uncertain", {
       el: "#uncertaingrid", more: "#uncertaingrid-more", count: "#uncertaincount",
-      params: () => "category=uncertain",
-      matches: (it) => eff(it) === "uncertain",
+      params: () => {
+        const p = new URLSearchParams();
+        p.set("category", "uncertain");
+        const qu = val("q-uncertain");
+        if (qu) p.set("q", qu);
+        const status = val("filter-uncertain-status");
+        if (status === "chosen") p.set("manual", "true");
+        return p.toString();
+      },
+      matches: (it) => {
+        if (eff(it) !== "uncertain") return false;
+        const status = val("filter-uncertain-status");
+        if (status === "chosen" && !it.manual_bucket) return false;
+        if (status === "unreviewed" && it.manual_bucket) return false;
+        const qu = (val("q-uncertain") || "").toLowerCase().trim();
+        if (qu && !((it.filename || "").toLowerCase().includes(qu) || (it.relative_path || "").toLowerCase().includes(qu))) return false;
+        return true;
+      },
       empty: { icon: "check", title: "Nothing to finalize", text: "Every photo was sorted with confidence." },
     });
     makeGrid("highlights", {
@@ -4393,8 +4409,17 @@
       clearTimeout(qt);
       updateResetFiltersButton();
       qt = setTimeout(() => grids.cat.reset(), 250);
-    });
     $("#junkfilter").addEventListener("change", () => grids.junk.reset());
+    if ($("#filter-uncertain-status")) {
+      $("#filter-uncertain-status").addEventListener("change", () => grids.uncertain.reset());
+    }
+    if ($("#q-uncertain")) {
+      let qtu = null;
+      $("#q-uncertain").addEventListener("input", () => {
+        clearTimeout(qtu);
+        qtu = setTimeout(() => grids.uncertain.reset(), 250);
+      });
+    }
     $$("#tab-utility [data-ukind]").forEach((b) => b.addEventListener("click", () => {
       state.utilityKind = b.dataset.ukind;
       $$("#tab-utility [data-ukind]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
