@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.2.1" type="stable" date="2026-10-21">
+      <description>
+        <p>Compare all burst faces in one shot with matrix view, robust spatial tracking across camera pans, and direct per-row curation controls.</p>
+      </description>
+    </release>
     <release version="1.2.0" type="stable" date="2026-10-21">
       <description>
         <p>Redesigned face inspection overlay with frosted tinted blur, subtle entrance animations, improved high-resolution thumbnails, and refined burst curation.</p>
