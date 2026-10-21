@@ -159,6 +159,8 @@ Choose a folder and press **Scan**, then **Analyze Now**. **Run All** does both 
 
 Every photo, oldest first. Narrow it down by category, camera, rating, country, favourites, or a date range (quick buttons for this year, last 90 days and last 30 days). The size slider changes thumbnail size. Click a photo to open it large, rate it, mark it as a favourite, change its category or lock it so a re-analysis never changes it. Click the tick on photos to select several and move them together.
 
+**Clean export.** With photos selected, press **Clean export** to make copies that are safe to share. Location, camera serial and other hidden details are removed, files get neutral names, and you can add a simple web gallery. Photocure can also check the selection for license plates, payment cards, screens, house numbers and ID documents, then blur those areas or leave those photos out. This check is a helper, not a guarantee: it can miss small details, so look over what you share. Your originals are never changed.
+
 ### Search
 
 Describe what you want to find in your own words. It works from what Photocure saw in each photo, entirely on your computer.
@@ -168,7 +170,7 @@ Describe what you want to find in your own words. It works from what Photocure s
 Every burst of similar shots, with the best frame marked. Faces are checked for closed eyes. For group shots you get a clear verdict:
 
 - **Everyone's eyes open** in one frame: keep that one.
-- **No single frame is perfect:** it names the two frames that together cover everybody, so you can combine them in your photo editor.
+- **No single frame is perfect:** it names the two frames that together cover everybody. Press **Create fixed photo** and Photocure lines the frames up and blends the open eyes into the best frame, saving `IMG_xxxx_fixed.jpg` next to the original. If the heads moved too much it says so and leaves the photo alone. **Export layered PSD** gives you the aligned frames as layers with the mask already over the blinking face, for touching up by hand.
 - **Reject all blinks** sends spare frames with closed eyes to Junk review. Nothing is deleted, and you can restore them.
 
 ### Highlights
@@ -257,6 +259,15 @@ photocure geocode
 
 The lookup is done offline.
 
+**Ask an AI agent about your photos.** Photocure can run an MCP server so an agent such as Claude can search your library, look at the photos and do two jobs for you, for example "find the router label I photographed last month and read me the default password", "fix the blinks in my group shots" or "make a clean copy of the beach photos I can share". It runs on your computer. It can only add new files (a fixed photo, a layered file, a clean export folder): no tool can change, move or delete a photo you already have.
+
+```bash
+pip install "photocure[mcp]"
+claude mcp add photocure -- photocure mcp --db /full/path/to/photo_curator.db
+```
+
+Other agents take the same command in their MCP settings: `photocure mcp --db /full/path/to/photo_curator.db`. Use the full path to the database. The agent gets eight tools. Six only read: library overview, search by description, browse by date or category, photo details, view a photo, and list bursts. Two write new files: `create_composite` and `clean_export`.
+
 ## Command line
 
 You do not need these to use Photocure, but they are handy.
@@ -270,6 +281,7 @@ You do not need these to use Photocure, but they are handy.
 | `photocure highlights --year 2024 --top 50 --out DIR` | Write a year-in-review page, add `--copy` to copy the originals |
 | `photocure keywords` | Write Photocure keywords next to your photos (`--remove` to take them away) |
 | `photocure geocode` | Add place names to photos |
+| `photocure mcp --db FILE` | Run the agent (MCP) server over your library |
 | `photocure doctor` | Check that the AI model, graphics card and face detection are ready |
 | `photocure devices` | List the graphics cards and processors Photocure can use |
 | `photocure version` | Show the version |

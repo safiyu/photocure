@@ -10,7 +10,7 @@ from photocure.rules.decision_matrix import DecisionMatrix
 from photocure.rules.taxonomy import CategoryType
 from photocure.services import Planner
 
-from .world import build_world, get_img, set_bucket
+from .world import approve_delete, build_world, get_img, set_bucket
 
 
 def _files(root):
@@ -90,6 +90,7 @@ def test_failed_mutation_still_marks_ledger_failed(tmp_path, monkeypatch):
 def test_purge_trash_marks_ledger_with_relative_output_dir(tmp_path, monkeypatch):
     w = build_world(tmp_path, n=1)
     set_bucket(w, w.ids[0], "graphic")
+    approve_delete(w, w.ids[0])
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     rep = w.planner.execute_plan(p, trash=True)
     monkeypatch.chdir(tmp_path)

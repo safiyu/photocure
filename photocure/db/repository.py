@@ -300,6 +300,7 @@ class PhotoRepository:
         img = self.get_by_id(image_id)
         if img is not None:
             img.manual_bucket = bucket
+            img.delete_approved = False  # a re-sorted photo needs a fresh approval
             img.updated_at = utcnow()
             self.s.flush()
 

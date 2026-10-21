@@ -59,6 +59,7 @@ from sqlmodel import select
 
 from .. import __version__
 from ..auth import COOKIE_NAME, AuthManager, build_allowed_hosts, origin_allowed
+from ..clustering.group_shots import group_matrix_payload
 from ..config import CuratorConfig, default_db_path
 from ..db import models as M
 from ..engine.locks import LEDGER_WRITING as _LEDGER_WRITING
@@ -149,40 +150,6 @@ class EventClusterReq(BaseModel):
 
 class RenameReq(BaseModel):
     name: str
-
-
-def group_matrix_payload(members) -> dict:
-    """The group matrix of one burst's frames, in capture order, as plain JSON."""
-    from ..clustering.group_shots import FaceObs, score_group
-    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
-
-    def when(r):
-        t = r.taken_at
-        if t is not None and t.tzinfo is None:
-            t = t.replace(tzinfo=timezone.utc)
-        return t or epoch
-
-    ordered = sorted(members, key=lambda r: (when(r), r.id or 0))
-    frames = []
-    for r in ordered:
-        faces = []
-        for f in r.faces or []:
-            box = (f.x1, f.y1, f.x2, f.y2)
-            has_box = all(v is not None for v in box)
-            faces.append(FaceObs(box=tuple(float(v) for v in box) if has_box else None,
-                                 eye_status=f.eye_status, eye_closed=f.eye_closed_score,
-                                 sharpness=f.face_sharpness, person_id=f.person_id))
-        frames.append(faces)
-    tiebreak = [float(r.quality.sharpness_norm) if r.quality is not None else 0.0 for r in ordered]
-    m = score_group(frames, tiebreak=tiebreak)
-    return {
-        "status": m.status, "subject_count": m.subject_count,
-        "best_id": ordered[m.best].id if m.best is not None else None,
-        "partner_id": ordered[m.composite[1]].id if m.composite else None,
-        "frames": [{"id": ordered[f.index].id, "min_quality": round(f.min_quality, 3),
-                    "subjects": [{"state": x.state, "q": round(x.quality, 3)} for x in f.subjects]}
-                   for f in m.frames],
-    }
 
 
 def infer_progress_detail(done: int, total: int) -> str:
@@ -408,6 +375,7 @@ def _item(r: M.ImageRecord, cfg: CuratorConfig | None = None) -> dict:
         "taken_at": r.taken_at.isoformat() if r.taken_at else None,
         "taken_at_source": r.taken_at_source, "camera_model": r.camera_model,
         "locked": bool(r.locked), "rating": r.rating, "event_id": r.event_id,
+        "delete_approved": bool(r.delete_approved),
         "near_dup_of": r.near_dup_of,
         "top1": sem.top1_category if sem else None,
         "top1_score": round(sem.top1_score, 3) if sem else None,
@@ -486,6 +454,35 @@ class DupDismissReq(BaseModel):
 class MkdirReq(BaseModel):
     parent: str
     name: str
+
+
+class BestShotReq(BaseModel):
+    image_id: int
+
+
+class CompositeReq(BaseModel):
+    mode: Literal["fixed", "layered"] = "fixed"
+
+
+class CleanScanReq(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=5000)
+
+
+class CleanExportReq(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=5000)
+    output_dir: str
+    policy: Literal["blur", "skip", "include"] = "blur"
+    html: bool = True
+    rename: bool = True
+
+
+class ApproveDeleteReq(BaseModel):
+    approved: bool | None = None  # omitted: toggle
+
+
+class ApproveDeletesReq(BaseModel):
+    ids: list[int] | None = Field(default=None, max_length=5000)  # omitted: every proposed deletion
+    approved: bool = True
 
 
 # --------------------------------------------------------------- folder browser
@@ -1268,6 +1265,38 @@ def create_app(db_path: str | None = None) -> FastAPI:
         with get_session(dbp) as s:
             return {"ok": True, "item": _load_items(s, [image_id], app.state.cfg)[0]}
 
+    @app.post("/api/images/{image_id}/approve-delete", dependencies=auth)
+    def approve_delete(image_id: int, body: ApproveDeleteReq = ApproveDeleteReq()):
+        """Approve (or withdraw approval) for staging one proposed deletion in the trash."""
+        with get_session(dbp) as s:
+            rec = s.get(M.ImageRecord, image_id)
+            if rec is None:
+                raise HTTPException(404, "image not found")
+            if (rec.manual_bucket or rec.category) not in JUNK_VALUES:
+                raise HTTPException(400, "only photos proposed for deletion can be approved")
+            rec.delete_approved = (not rec.delete_approved) if body.approved is None else body.approved
+            rec.updated_at = datetime.now(timezone.utc)
+            s.flush()
+        with get_session(dbp) as s:
+            return {"ok": True, "item": _load_items(s, [image_id], app.state.cfg)[0]}
+
+    @app.post("/api/deletes/approve", dependencies=auth)
+    def approve_deletes(body: ApproveDeletesReq = ApproveDeletesReq()):
+        """Approve every photo currently proposed for deletion, or just the given ids."""
+        I = M.ImageRecord
+        with exclusive(), get_session(dbp) as s:
+            stmt = select(I).where(func.coalesce(I.manual_bucket, I.category).in_(JUNK_VALUES))
+            if body.ids is not None:
+                stmt = stmt.where(I.id.in_(body.ids))
+            changed = 0
+            for rec in s.exec(stmt).all():
+                if rec.delete_approved != body.approved:
+                    rec.delete_approved = body.approved
+                    changed += 1
+            total = s.exec(select(func.count()).select_from(I).where(
+                I.delete_approved == True)).one()  # noqa: E712
+            return {"ok": True, "changed": changed, "approved_total": int(total)}
+
     @app.get("/api/images/{image_id}/similar")
     def similar(image_id: int, k: int = Query(12, ge=1, le=100)):
         try:
@@ -1441,6 +1470,114 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 repo.set_manual_bucket(m.id, None)
                 ids.append(m.id)
             return {"ok": True, "restored": len(ids), "ids": ids}
+
+    app.state.pii = {}  # image id -> Finding from the last sensitive-detail scan
+
+    @app.post("/api/export/clean/scan", dependencies=auth, status_code=202)
+    def clean_scan(body: CleanScanReq):
+        """Look for plates, cards, screens, house numbers and ID documents in the selection."""
+        from ..clean_export import PiiScanner, PiiUnavailable
+        from ..quality.image_loader import load_image
+        c = run_cfg(None)
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+
+        def work(job: dict) -> dict:
+            with get_session(dbp) as s:
+                recs = [(r.id, r.filename, r.path, r.target_path, r.orientation) for r in s.exec(
+                    select(M.ImageRecord).where(M.ImageRecord.id.in_(body.ids))).all()]
+            try:
+                scanner = PiiScanner(c, backend=detect_for(c))
+            except PiiUnavailable as e:
+                return {"ok": False, "unavailable": str(e), "scanned": 0, "flagged": []}
+            progress_mgr.start("Privacy scan", "Looking for sensitive details", len(recs), "Scanning...")
+            flagged = []
+            try:
+                for n, (iid, name, path, target, orient) in enumerate(recs, 1):
+                    if progress_mgr.is_stopped():
+                        break
+                    app.state.pii[iid] = False  # scanned, nothing found, unless a finding replaces it
+                    src = next((x for x in (path, target) if x and os.path.exists(x)), None)
+                    if src is not None:
+                        try:
+                            bgr = load_image(src, max_side=1600, orientation=orient).bgr
+                            f = scanner.scan_image(iid, bgr)
+                        except Exception as e:
+                            jlog(job, f"could not scan {name}: {e}", "warn")
+                            f = None
+                        if f is not None:
+                            app.state.pii[iid] = f
+                            flagged.append({"id": iid, "filename": name, "labels": f.labels,
+                                            "score": round(f.score, 3), "localized": f.localized})
+                    progress_mgr.update(n, len(recs), name, detail=f"{n} / {len(recs)}")
+            finally:
+                scanner.release()
+            progress_mgr.finish(f"Scan complete: {len(flagged)} photos flagged")
+            return {"ok": True, "unavailable": "", "scanned": len(recs), "flagged": flagged}
+
+        return {"ok": True, "job_id": spawn("pii-scan", work)["id"]}
+
+    @app.post("/api/export/clean", dependencies=auth, status_code=202)
+    def clean_export(body: CleanExportReq):
+        """Write metadata-free copies to a new folder, optionally blurring or leaving out flagged photos."""
+        from ..clean_export import ExportItem, export_bundle
+        root = validate_output_dir(body.output_dir, dbp, False)
+        findings = {i: app.state.pii[i] for i in body.ids if app.state.pii.get(i)}
+        if body.policy != "include" and any(i not in app.state.pii for i in body.ids):
+            raise HTTPException(409, "scan these photos for sensitive details first, "
+                                     "or choose to export without that check")
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+
+        def work(job: dict) -> dict:
+            with get_session(dbp) as s:
+                items = [ExportItem(
+                    r.id, next((x for x in (r.path, r.target_path) if x and os.path.exists(x)), r.path),
+                    r.orientation, r.extension, r.taken_at.isoformat() if r.taken_at else None)
+                    for r in s.exec(select(M.ImageRecord).where(M.ImageRecord.id.in_(body.ids))).all()]
+            progress_mgr.start("Clean export", "Writing clean copies", len(items), "Exporting...")
+
+            def on_prog(done, total, name):
+                progress_mgr.update(done, total, name, detail=f"{done} / {total}")
+
+            res = export_bundle(items, root, findings=findings, policy=body.policy, html=body.html,
+                                rename=body.rename, on_progress=on_prog,
+                                cancel_check=progress_mgr.is_stopped)
+            progress_mgr.finish(f"Exported {res.exported} clean photos")
+            jlog(job, f"exported {res.exported} photos to {res.folder}")
+            return {"ok": not res.failures, "folder": str(res.folder), "exported": res.exported,
+                    "skipped_flagged": res.skipped_flagged, "blurred": res.blurred,
+                    "flagged": res.flagged, "failures": res.failures[:20]}
+
+        return {"ok": True, "job_id": spawn("clean-export", work)["id"]}
+
+    @app.post("/api/bursts/{burst_id}/composite", dependencies=auth)
+    def composite_burst(burst_id: int, body: CompositeReq = CompositeReq()):
+        """Swap open eyes from the partner frame into the best frame, saved next to the original."""
+        from ..burst_actions import ActionError, composite_burst as run
+        with exclusive():
+            try:
+                return run(dbp, burst_id, body.mode)
+            except ActionError as e:
+                raise HTTPException(e.status, str(e)) from None
+
+    @app.post("/api/bursts/{burst_id}/best-shot", dependencies=auth)
+    def set_best_shot(burst_id: int, body: BestShotReq):
+        """Pick which frame in a burst is the best shot. The rest become alternates."""
+        with get_session(dbp) as s:
+            bg = s.get(M.BurstGroup, burst_id)
+            if bg is None:
+                raise HTTPException(404, "burst not found")
+            members = s.exec(select(M.ImageRecord).where(
+                M.ImageRecord.burst_id == burst_id)).all()
+            if not any(m.id == body.image_id for m in members):
+                raise HTTPException(400, "image is not part of this burst")
+            for m in members:
+                m.is_best_shot = (m.id == body.image_id)
+                m.is_alternate = (m.id != body.image_id)
+            bg.best_shot_id = body.image_id
+            s.flush()
+            return {"ok": True, "burst_id": burst_id, "best_shot_id": body.image_id}
 
     @app.get("/api/overview")
     def overview():
@@ -2025,6 +2162,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     "executed": rep.executed, "collisions": rep.collisions,
                     "backup_warning": backup_warning,
                     "skipped_collisions": getattr(rep, "skipped_collisions", 0),
+                    "unapproved_junk": getattr(rep, "unapproved_junk", 0),
                     "copy_fallbacks": getattr(rep, "copy_fallbacks", 0),
                     "failures": rep.failures, "errors": list(rep.errors)[:50]}
 

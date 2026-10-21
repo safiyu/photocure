@@ -43,6 +43,9 @@ from .config import (
     auto_scan_workers,
     resolve_workers,
 )
+from sqlmodel import col, select
+
+from .db.models import ImageRecord
 from .db.session import get_session, init_db
 from .db.repository import PhotoRepository
 from .inference.backends import detect_backend, ml_install_cmd, pip_install_cmd, reset_backend_cache
@@ -573,7 +576,10 @@ def apply(
     only_category: list[str] | None = typer.Option(
         None, "--only-category", help="Apply only these categories (repeatable)."),
     trash: bool = typer.Option(False, "--trash",
-                               help="Stage junk buckets in <root>/.trash/<txn>/."),
+                               help="Stage approved junk in <root>/.trash/<txn>/. "
+                                    "Unapproved junk stays in the junk review folder."),
+    approve_deletes: bool = typer.Option(False, "--approve-deletes",
+                                         help="With --trash, approve every junk photo in the plan first."),
     force: bool = typer.Option(False, "--force",
                                help="Apply even if the plan is stale or already applied."),
     yes: bool = typer.Option(False, "--yes", "-y",
@@ -614,6 +620,12 @@ def apply(
     if not yes and not typer.confirm("Proceed?"):
         console.print("[yellow]Aborted.[/yellow]")
         return
+    if trash and approve_deletes:
+        junk_ids = [a.image_id for a in p.actions
+                    if a.image_id and getattr(a.category, "is_junk", False)]
+        with get_session(cfg.db_path) as s:
+            for rec in s.exec(select(ImageRecord).where(col(ImageRecord.id).in_(junk_ids))).all():
+                rec.delete_approved = True
     try:
         rep = planner.execute_plan(p, only_category=only_category, trash=trash,
                                    force=force, operation=operation)
@@ -627,8 +639,13 @@ def apply(
     t.add_row("Skipped (filtered)", str(rep.skipped))
     t.add_row("Collisions (renamed)", str(rep.collisions))
     t.add_row("Failures", str(rep.failures))
+    if trash:
+        t.add_row("Junk kept (not approved)", str(rep.unapproved_junk))
     t.add_row("Duration", f"{rep.duration_s:.2f}s")
     console.print(t)
+    if trash and rep.unapproved_junk and not approve_deletes:
+        console.print("[yellow]Junk that is not approved stays in the review folder. "
+                      "Approve it in the app, or pass --approve-deletes.[/yellow]")
     if rep.errors:
         console.print("[red]Errors:[/red]\n  " + "\n  ".join(rep.errors[:20]))
     console.print(f"[green]Done.[/green] To undo: "
@@ -1088,6 +1105,23 @@ def start(
 ):
     """Start the web review dashboard and open the browser (alias for 'serve')."""
     serve(db=db, host=host, port=port, reload=reload, open_browser=open_browser, token=token)
+
+
+@app.command("mcp")
+def mcp_cmd(
+    db: Path = typer.Option(DEFAULT_DB, "--db", help="Library database. Use an absolute path."),
+):
+    """Run an MCP server on stdio so an AI agent can search your photos and make clean copies."""
+    try:
+        from .mcp_server import run_stdio
+    except ImportError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1) from None
+    try:
+        run_stdio(db)
+    except ImportError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(1) from None
 
 
 @app.command()

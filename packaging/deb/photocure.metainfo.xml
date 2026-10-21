@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.1.0" type="stable" date="2026-10-21">
+      <description>
+        <p>Choose the best shot in a burst, approve deletions photo by photo or all at once before analyzing, and the GPU is freed as soon as analysis finishes.</p>
+      </description>
+    </release>
     <release version="1.0.0" type="stable" date="2026-10-18">
       <description>
         <p>Redesigned interface in blue, pink and amber, a simpler import flow where Analyze also groups and sorts, and a clearer duplicates page.</p>

@@ -443,6 +443,7 @@
     if (it.is_favorite) add("fav", "\u2665 Favourite");
     if (num(it.rating) > 0) add("", "\u2605" + num(it.rating));
     if (it.is_best_shot) add("best", "Best shot");
+    if (it.delete_approved) add("warn", "Approved to delete");
     if (it.is_duplicate) add("warn", "Duplicate");
     if (it.near_dup_of != null) add("warn", "Near duplicate");
     if (it.is_alternate) add("", "Alternate");
@@ -506,6 +507,11 @@
       el("div", { class: "fn", title: it.relative_path || it.filename, text: it.filename }),
       showReason ? el("div", { class: "reason", title: it.uncertain_reason.text, text: shortReason(it) }) : null,
       el("div", { class: "meta", text: meta.join(", ") }),
+      state.junk.has(rawCat)
+        ? el("button", { class: "mini", type: "button", "data-approve-delete": id, tabindex: -1,
+            "aria-pressed": String(!!it.delete_approved),
+            text: it.delete_approved ? "Approved to delete (undo)" : "Approve delete" })
+        : null,
       el("div", { class: "catline", style: catStyle(rawCat) },
         el("button", { class: "catpick", type: "button", "data-catpick": id, title: "Change category",
           "aria-haspopup": "listbox", "aria-label": `Category ${catLabel(rawCat)}, change`, tabindex: -1 },
@@ -992,6 +998,79 @@
     }
     toast(`Locked ${fmtN(ids.length)} photos`, "ok");
     clearPicks();
+  }
+
+  // ------------------------------------------------------------ clean export
+  const PII_WORDS = { license_plate: "license plates", payment_card: "payment cards",
+    screen: "screens", house_number: "house numbers", id_document: "ID documents" };
+  const ce = { scanned: false, unavailable: false };
+
+  function openCleanExport() {
+    const n = state.picks.size;
+    if (!n) return;
+    ce.scanned = false;
+    ce.unavailable = false;
+    $("#ce-title").textContent = `Clean export of ${fmtN(n)} photo${n === 1 ? "" : "s"}`;
+    $("#ce-flagged").replaceChildren();
+    $("#ce-status").textContent = "";
+    $("#ce-policy").value = "blur";
+    openOverlay($("#cleanexport"));
+    $("#ce-dest").focus();
+  }
+
+  async function ceScan() {
+    const btn = $("#ce-scan"), out = $("#ce-scan-result"), list = $("#ce-flagged");
+    btn.disabled = true;
+    out.textContent = "Checking...";
+    list.replaceChildren();
+    try {
+      const { job_id } = await post("/api/export/clean/scan", { ids: Array.from(state.picks) });
+      const r = await followJob(job_id, "Privacy scan");
+      if (r.unavailable) {
+        ce.unavailable = true;
+        $("#ce-policy").value = "include";
+        out.textContent = r.unavailable + " You can still export without this check.";
+        return;
+      }
+      ce.scanned = true;
+      const counts = {};
+      r.flagged.forEach((f) => f.labels.forEach((l) => { counts[l] = (counts[l] || 0) + 1; }));
+      const kinds = Object.entries(counts).map(([l, n]) => `${fmtN(n)} with ${PII_WORDS[l] || l}`).join(", ");
+      out.textContent = r.flagged.length
+        ? `${fmtN(r.flagged.length)} of ${fmtN(r.scanned)} photos may show sensitive details: ${kinds}.`
+        : `Nothing sensitive found in ${fmtN(r.scanned)} photos. Small details can still be missed.`;
+      r.flagged.slice(0, 20).forEach((f) => list.append(el("li", {
+        text: `${f.filename}: ${f.labels.map((l) => PII_WORDS[l] || l).join(", ")}` })));
+    } catch (e) {
+      out.textContent = "The check failed: " + e.message;
+    } finally { btn.disabled = false; }
+  }
+
+  async function ceExport() {
+    const dest = $("#ce-dest").value.trim();
+    const policy = $("#ce-policy").value;
+    if (!dest) { toast("Choose a destination folder first", "err"); return; }
+    if (policy !== "include" && !ce.scanned) {
+      toast("Check for sensitive details first, or choose to export photos as they are", "err");
+      return;
+    }
+    const go = $("#ce-go");
+    go.disabled = true;
+    $("#ce-status").textContent = "Exporting...";
+    try {
+      const { job_id } = await post("/api/export/clean", { ids: Array.from(state.picks), output_dir: dest,
+        policy, html: $("#ce-html").checked, rename: $("#ce-rename").checked });
+      const r = await followJob(job_id, "Clean export");
+      const bits = [`${fmtN(r.exported)} exported`];
+      if (r.blurred) bits.push(`${fmtN(r.blurred)} blurred`);
+      if (r.skipped_flagged) bits.push(`${fmtN(r.skipped_flagged)} left out`);
+      toast(`Clean export done: ${bits.join(", ")}`, "ok");
+      libLog(`Clean export saved to ${r.folder} (${bits.join(", ")})`, r.failures.length ? "warn" : "ok");
+      closeOverlay($("#cleanexport"));
+    } catch (e) {
+      toast(e.message, "err");
+      $("#ce-status").textContent = "";
+    } finally { go.disabled = false; }
   }
 
   // --------------------------------------------------- quick category picker
@@ -1566,7 +1645,7 @@
   function bindDelegates() {
     document.addEventListener("click", async (ev) => {
       const t = ev.target.closest && ev.target.closest(
-        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-similar],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
+        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-similar],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
       if (!t) return;
       try {
         if (t.dataset.pick) await togglePick(num(t.dataset.pick), ev.shiftKey);
@@ -1577,6 +1656,7 @@
           state.undo.push({ id, prev });
           toast("Back to the AI choice", "ok");
         } else if (t.dataset.lock) await toggleLock(num(t.dataset.lock));
+        else if (t.dataset.approveDelete) await toggleApproveDelete(num(t.dataset.approveDelete));
         else if (t.dataset.similar) {
           closeLightbox();
           await showSimilar(num(t.dataset.similar));
@@ -1750,6 +1830,11 @@
     $("#lb-lock").disabled = !full;
     $("#lb-clear").disabled = !full || !it.manual_bucket;
     $("#lb-lock span").textContent = it.locked ? "Unlock" : "Lock";
+    const ap = $("#lb-approve");
+    ap.hidden = !state.junk.has(eff(it));
+    ap.disabled = !full;
+    ap.setAttribute("aria-pressed", String(!!it.delete_approved));
+    ap.textContent = it.delete_approved ? "Approved to delete (undo)" : "Approve delete";
     $("#lb-prev").disabled = lb.i === 0;
     $("#lb-next").disabled = lb.i >= lbCount() - 1;
     $("#lb-count").textContent = `${fmtN(lb.i + 1)} of ${fmtN(lbCount())}`;
@@ -1829,6 +1914,7 @@
       } catch (err) { toast(err.message, "err"); }
     };
     $("#lb-lock").onclick = () => toggleLock(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
+    $("#lb-approve").onclick = () => toggleApproveDelete(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
     $$("#lb-rate .star").forEach((b) => {
       b.onclick = () => {
         const id = lbIdAt(lb.i);
@@ -2150,6 +2236,23 @@
     if (it) toast(un ? "No longer rejected" : "Rejected. Nothing was deleted.", "ok");
   }
 
+  async function toggleApproveDelete(id) {
+    const r = await post(`/api/images/${num(id)}/approve-delete`, {});
+    itemUpdated(r.item);
+    toast(r.item.delete_approved ? "Approved for deletion. It is staged when you apply with the trash option."
+      : "Approval withdrawn. This photo will not be deleted", "ok");
+  }
+
+  // Runs after sorting when "Approve all proposed deletions" was ticked before analysing.
+  async function approveProposedDeletes() {
+    if (!$("#approve-all-deletes").checked) return;
+    try {
+      const r = await post("/api/deletes/approve", {});
+      libLog(`Approved ${fmtN(r.changed)} proposed deletions`, "ok");
+      resetVisibleGrids();
+    } catch (e) { libLog(`Could not approve deletions: ${e.message}`, "warn"); }
+  }
+
   async function toggleFavorite(id) {
     const r = await post(`/api/images/${num(id)}/favorite`, {});
     itemUpdated(r.item);
@@ -2250,7 +2353,7 @@
       return { tone: "ok", text: `Everyone's eyes open in ${best}. This is the frame to keep.` };
     }
     if (group.status === "composite") {
-      return { tone: "warn", text: `No single frame is perfect. Keep ${best} and ${nameOf(group.partner_id)}: between them everyone looks good, so you can combine them into one photo.` };
+      return { tone: "warn", text: `No single frame is perfect. Keep ${best} and ${nameOf(group.partner_id)}: between them everyone looks good, and Photocure can combine them into one photo for you.` };
     }
     return { tone: "warn", text: `No frame has everyone looking good. ${best} is the closest.` };
   }
@@ -2299,7 +2402,10 @@
             <div class="meta">${num(m.width)}×${num(m.height)}${m.taken_at ? ", " + esc(String(m.taken_at).slice(11, 19)) : ""}</div>
             <div class="meta">${esc(bits.join(", "))}</div>
             ${gmDetail(m)}
-            ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}">Inspect faces</button>` : ""}
+            <div class="btn-row">
+              ${m.is_best_shot ? "" : `<button class="mini" data-makebest="${num(m.id)}">Make best shot</button>`}
+              ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}">Inspect faces</button>` : ""}
+            </div>
           </figcaption>
         </figure>`;
       }).join("") + `</div><div id="facepanel" class="facepanel"></div>`;
@@ -2312,11 +2418,37 @@
       b.onclick = fn;
       bar.appendChild(b);
     };
+    if (group && group.status === "composite") {
+      addBtn("Create fixed photo", () => makeComposite(id, "fixed"));
+      addBtn("Export layered PSD", () => makeComposite(id, "layered"));
+    }
     if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
     if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
     $$("[data-faces]", $("#burstdetail")).forEach((b) => {
       b.onclick = () => showFaces(num(b.dataset.faces), $("#facepanel")).catch((e) => toast(e.message, "err"));
     });
+    $$("[data-makebest]", $("#burstdetail")).forEach((b) => {
+      b.onclick = () => makeBestShot(id, num(b.dataset.makebest));
+    });
+  }
+
+  async function makeComposite(burstId, mode) {
+    toast(mode === "fixed" ? "Combining the frames..." : "Building the layered file...", "ok");
+    try {
+      const r = await post(`/api/bursts/${num(burstId)}/composite`, { mode });
+      const note = r.skipped && r.skipped.length ? ` (${fmtN(r.skipped.length)} face${r.skipped.length === 1 ? "" : "s"} left as they were)` : "";
+      toast(`Saved ${r.path}${note}`, "ok");
+      libLog(`Saved ${r.path}`, "ok");
+    } catch (e) { toast(e.message, "err"); }
+  }
+
+  async function makeBestShot(burstId, imageId) {
+    try {
+      await post(`/api/bursts/${num(burstId)}/best-shot`, { image_id: num(imageId) });
+      toast("Best shot updated", "ok");
+      await showBurst(burstId);
+      renderBursts().catch(() => {});
+    } catch (e) { toast(e.message, "err"); }
   }
 
   // ------------------------------------------------------------------ events
@@ -2466,6 +2598,7 @@
       const res = await followJob(r.job_id, "Apply");
       if (res && res.ok) {
         logLine(`Applied ${fmtN(res.executed)} files (change ${res.transaction_id})`, "ok");
+        if (res.unapproved_junk) logLine(`${fmtN(res.unapproved_junk)} junk photos were not approved for deletion and stay in the junk review folder`, "warn");
         toast(`Organized ${fmtN(res.executed)} photos. You can undo this from this page.`, "ok");
         if (res.backup_warning) toast(res.backup_warning, "err");
         if (num(res.copy_fallbacks) > 0) {
@@ -3442,6 +3575,14 @@
     updateLearn();
     $("#bulk-clear").onclick = clearPicks;
     $("#bulk-lock").onclick = () => bulkLock();
+    $("#bulk-clean").onclick = openCleanExport;
+    $("#ce-scan").onclick = ceScan;
+    $("#ce-go").onclick = ceExport;
+    $("#ce-close").onclick = $("#ce-cancel").onclick = () => closeOverlay($("#cleanexport"));
+    $("#ce-browse").onclick = () => openPicker({
+      title: "Choose where the clean copies go", mode: "output", initial: $("#ce-dest").value.trim(),
+      okLabel: "Use this folder", onPick: (p) => { $("#ce-dest").value = p; },
+    });
     $("#bulk-cat").onchange = (e) => { if (e.target.value) bulkReassign(e.target.value); e.target.selectedIndex = 0; };
 
     const scanInput = $("#scan-path");
@@ -3531,6 +3672,7 @@
         markGrouped();
         const sorted = await afterTask(true);
         libLog(sorted ? "Photos sorted into categories" : "Could not sort photos into categories", sorted ? "ok" : "warn");
+        if (sorted) await approveProposedDeletes();
       }
     };
     $("#btn-ingest-all").onclick = async () => {
@@ -3541,7 +3683,7 @@
         libLog(`Import finished: ${fmtN(r.scan.new)} new, ${fmtN(r.infer.processed)} analyzed, ${fmtN(r.cluster.burst_groups)} burst groups`, "ok");
         toast("Import finished", "ok");
         markGrouped();
-        await afterTask(true);
+        if (await afterTask(true)) await approveProposedDeletes();
       }
     };
 

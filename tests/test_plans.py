@@ -13,7 +13,7 @@ from photocure.db.session import SCHEMA_VERSION, close_engine, get_session, init
 from photocure.rules.organizer import OrganizeMode
 from photocure.services import PlanDriftError
 
-from .world import build_world, get_img, set_bucket
+from .world import approve_delete, build_world, get_img, set_bucket
 
 
 def _src(w, i):
@@ -177,6 +177,7 @@ def test_only_category_filter(tmp_path):
 def test_trash_stages_junk_and_purge_removes_it(tmp_path):
     w = build_world(tmp_path, n=3)
     set_bucket(w, w.ids[0], "graphic")
+    approve_delete(w, w.ids[0])
     set_bucket(w, w.ids[1], "food")
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     rep = w.planner.execute_plan(p, trash=True)
@@ -190,9 +191,33 @@ def test_trash_stages_junk_and_purge_removes_it(tmp_path):
     assert not (w.out / ".trash" / rep.transaction_id).exists()
 
 
+def test_unapproved_junk_is_not_staged_in_trash(tmp_path):
+    w = build_world(tmp_path, n=2)
+    set_bucket(w, w.ids[0], "graphic")
+    set_bucket(w, w.ids[1], "graphic")
+    approve_delete(w, w.ids[1])
+    p = w.planner.build_plan(organize_root=w.out, operation="move")
+    rep = w.planner.execute_plan(p, trash=True)
+    trash_dir = w.out / ".trash" / rep.transaction_id
+    assert rep.unapproved_junk == 1
+    assert (trash_dir / "Junk_Review" / "Graphics" / _src(w, 1).name).exists()
+    assert not list(trash_dir.rglob(_src(w, 0).name))
+    assert any((w.out / "Junk_Review" / "Graphics").rglob(_src(w, 0).name))
+
+
+def test_reassigning_clears_delete_approval(tmp_path):
+    w = build_world(tmp_path, n=1)
+    set_bucket(w, w.ids[0], "graphic")
+    approve_delete(w, w.ids[0])
+    assert get_img(w, w.ids[0]).delete_approved
+    set_bucket(w, w.ids[0], "food")
+    assert not get_img(w, w.ids[0]).delete_approved
+
+
 def test_purge_trash_respects_retention_and_marks_ledger(tmp_path):
     w = build_world(tmp_path, n=1)
     set_bucket(w, w.ids[0], "graphic")
+    approve_delete(w, w.ids[0])
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     rep = w.planner.execute_plan(p, trash=True)
     kept = w.planner.purge_trash(w.out, older_than_days=30)

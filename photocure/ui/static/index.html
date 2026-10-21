@@ -14,7 +14,7 @@
   </script>
   <link rel="icon" type="image/png" href="/static/favicon.png">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <link rel="stylesheet" href="/static/style.css?v=1.0.0">
+  <link rel="stylesheet" href="/static/style.css?v=1.1.0">
 </head>
 <body>
   <!-- icon sprite -->
@@ -105,7 +105,7 @@
           </div>
           <button class="icon-btn help-btn" id="btn-help" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg class="ic" aria-hidden="true"><use href="#i-help"/></svg></button>
         </div>
-        <div class="sidebar-footer"><span class="app-credit">v <button id="sidebar-version" class="sidebar-version-badge" type="button" data-goto="settings" data-anchor="sect-about" title="Click to view About Photocure">1.0.0</button> by Safiyu</span></div>
+        <div class="sidebar-footer"><span class="app-credit">v <button id="sidebar-version" class="sidebar-version-badge" type="button" data-goto="settings" data-anchor="sect-about" title="Click to view About Photocure">1.1.0</button> by Safiyu</span></div>
       </div>
     </aside>
 
@@ -203,6 +203,10 @@
                   <svg class="ic sm chevron" aria-hidden="true"><use href="#i-down"/></svg>
                 </div>
                 <a class="link" href="#settings" data-goto="settings">Devices and workers in Settings</a>
+              </div>
+              <div class="field">
+                <label class="toggle" style="align-self:flex-start"><input type="checkbox" id="approve-all-deletes">Approve all proposed deletions</label>
+                <p class="help">Off: nothing is deleted until you approve it photo by photo in Junk review. Also applies to Run All.</p>
               </div>
               <div class="actions">
                 <button id="btn-infer" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Analyze Now</button>
@@ -468,8 +472,8 @@
               </div>
               <div class="field">
                 <span class="lbl">Junk handling</span>
-                <label class="toggle" style="align-self:flex-start"><input type="checkbox" id="trash">Stage junk in a trash folder</label>
-                <p class="help">Staged files can be restored or purged later.</p>
+                <label class="toggle" style="align-self:flex-start"><input type="checkbox" id="trash">Stage approved junk in a trash folder</label>
+                <p class="help">Only junk you approved for deletion is staged. The rest stays in the junk review folder. Staged files can be restored or purged later.</p>
               </div>
             </div>
             <div class="btn-row">
@@ -611,6 +615,7 @@
     <b id="bulk-count">0 selected</b>
     <select id="bulk-cat" aria-label="Move selected to category"></select>
     <button class="btn sm ghost" id="bulk-lock">Lock</button>
+    <button class="btn sm ghost" id="bulk-clean" title="Make copies without location or other hidden details">Clean export</button>
     <button class="btn sm ghost" id="bulk-clear">Clear</button>
   </div>
 
@@ -652,6 +657,7 @@
         <button class="btn sm secondary" id="lb-lock"><svg class="ic sm" aria-hidden="true"><use href="#i-lock"/></svg><span>Lock</span></button>
         <button class="btn sm secondary" id="lb-similar"><svg class="ic sm" aria-hidden="true"><use href="#i-copy"/></svg>Find similar</button>
         <button class="btn sm secondary" id="lb-clear">Back to AI choice</button>
+        <button class="btn sm secondary" id="lb-approve" aria-pressed="false" hidden>Approve delete</button>
       </div>
       <div class="lb-count" id="lb-count"></div>
       <div class="keys"><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> browse</span><span><kbd>1</kbd>-<kbd>5</kbd> rate</span><span><kbd>0</kbd> clear</span><span><kbd>x</kbd> reject</span><span><kbd>f</kbd> favourite</span><span><kbd>l</kbd> lock</span><span><kbd>Esc</kbd> close</span></div>
@@ -685,6 +691,47 @@
         <div class="grow" id="picker-info"></div>
         <button class="btn" id="picker-cancel">Cancel</button>
         <button class="btn primary" id="picker-ok">Use this folder</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- clean export -->
+  <div id="cleanexport" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="ce-title">
+      <header>
+        <h2 id="ce-title">Clean export</h2>
+        <button class="icon-btn" id="ce-close" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="modal-body">
+        <p class="help">Makes copies of the selected photos without location, camera or other hidden details, ready to share. Your originals are never changed.</p>
+        <div class="field wide">
+          <label for="ce-dest">Destination folder</label>
+          <div class="with-btn">
+            <input id="ce-dest" type="text" placeholder="Choose where the clean copies go" autocomplete="off" spellcheck="false">
+            <button class="btn" id="ce-browse" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+          </div>
+        </div>
+        <div class="field wide">
+          <span class="lbl">Sensitive details</span>
+          <div><button class="btn secondary" id="ce-scan" type="button">Check for sensitive details</button></div>
+          <p class="help" id="ce-scan-result" role="status">Not checked yet. This looks for license plates, payment cards, screens, house numbers and ID documents. It can miss small ones, so look over anything you share.</p>
+          <ul id="ce-flagged" class="help"></ul>
+        </div>
+        <div class="field">
+          <label for="ce-policy">Photos with sensitive details</label>
+          <select id="ce-policy">
+            <option value="blur">Blur the sensitive areas</option>
+            <option value="skip">Leave them out</option>
+            <option value="include">Export them as they are</option>
+          </select>
+        </div>
+        <label class="toggle"><input type="checkbox" id="ce-html" checked>Add a web gallery (index.html)</label>
+        <label class="toggle"><input type="checkbox" id="ce-rename" checked>Use neutral file names (photo-0001.jpg)</label>
+      </div>
+      <footer>
+        <div class="grow" id="ce-status"></div>
+        <button class="btn" id="ce-cancel">Cancel</button>
+        <button class="btn primary" id="ce-go">Export</button>
       </footer>
     </div>
   </div>
@@ -765,6 +812,6 @@
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
   <script type="module" src="/static/virtual_grid.mjs"></script>
-  <script src="/static/app.js?v=1.0.0"></script>
+  <script src="/static/app.js?v=1.1.0"></script>
 </body>
 </html>

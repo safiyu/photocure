@@ -432,6 +432,38 @@ def test_burst_endpoints_404_and_listing(env):
         assert d["burst"] == item["name"]
 
 
+def test_burst_set_best_shot(env):
+    # The env library's images are deliberately dissimilar, so seed a burst directly.
+    from sqlmodel import select as sselect
+    with get_session(env.db) as s:
+        recs = list(s.exec(sselect(M.ImageRecord).order_by(M.ImageRecord.id).limit(3)).all())
+        bg = M.BurstGroup(name="Burst_bs_test", image_count=len(recs), best_shot_id=recs[0].id)
+        s.add(bg)
+        s.flush()
+        for i, r in enumerate(recs):
+            r.burst_id = bg.id
+            r.is_best_shot = (i == 0)
+            r.is_alternate = (i != 0)
+        s.commit()
+        bid = bg.id
+        member_ids = [r.id for r in recs]
+    original_best, other = member_ids[0], member_ids[1]
+    assert env.client.post("/api/bursts/99999/best-shot",
+                           json={"image_id": other}).status_code == 404
+    foreign = max(member_ids) + 10000
+    assert env.client.post(f"/api/bursts/{bid}/best-shot",
+                           json={"image_id": foreign}).status_code == 400
+    r = env.client.post(f"/api/bursts/{bid}/best-shot", json={"image_id": other})
+    assert r.status_code == 200 and r.json()["best_shot_id"] == other
+    detail = env.client.get(f"/api/burst/{bid}").json()
+    best_now = [m["id"] for m in detail["members"] if m["is_best_shot"]]
+    alts_now = [m["id"] for m in detail["members"] if m["is_alternate"]]
+    assert best_now == [other]
+    assert original_best in alts_now
+    listed = env.client.get("/api/bursts").json()["items"]
+    assert next(b for b in listed if b["id"] == bid)["best_shot_id"] == other
+
+
 def test_ingest_single_call(env, tmp_path):
     lib2 = tmp_path / "lib2"
     make_image(lib2 / "z.jpg", rng_seed=9, dark=True)
@@ -531,3 +563,76 @@ def test_cancellation_during_infer(env, tmp_path):
     with pytest.raises(InterruptedError):
         pipeline.run(db_path=env.db, cancel_check=lambda: True)
 
+
+
+# --------------------------------------------------------- delete approval
+def test_approve_delete_endpoints(env):
+    from sqlmodel import select as sselect
+    with get_session(env.db) as s:
+        recs = list(s.exec(sselect(M.ImageRecord).order_by(M.ImageRecord.id).limit(3)).all())
+        recs[0].manual_bucket = "graphic"
+        recs[1].manual_bucket = "graphic"
+        recs[2].manual_bucket = "food"
+        s.commit()
+        junk_a, junk_b, keeper = recs[0].id, recs[1].id, recs[2].id
+    assert env.client.post("/api/images/99999/approve-delete", json={}).status_code == 404
+    assert env.client.post(f"/api/images/{keeper}/approve-delete", json={}).status_code == 400
+    r = env.client.post(f"/api/images/{junk_a}/approve-delete", json={})
+    assert r.status_code == 200 and r.json()["item"]["delete_approved"] is True
+    r = env.client.post(f"/api/images/{junk_a}/approve-delete", json={})
+    assert r.json()["item"]["delete_approved"] is False
+    r = env.client.post("/api/deletes/approve", json={}).json()
+    assert r["changed"] == 2 and r["approved_total"] == 2
+    items = {i["id"]: i for i in env.client.get("/api/images?limit=50").json()["items"]}
+    assert items[junk_a]["delete_approved"] and items[junk_b]["delete_approved"]
+    assert not items[keeper]["delete_approved"]
+    r = env.client.post("/api/deletes/approve", json={"ids": [junk_b], "approved": False}).json()
+    assert r["changed"] == 1 and r["approved_total"] == 1
+
+
+# ------------------------------------------------- composite and clean export
+def test_composite_endpoint_rejects_missing_and_non_composite_bursts(env):
+    assert env.client.post("/api/bursts/99999/composite", json={}).status_code == 404
+    with get_session(env.db) as s:
+        from sqlmodel import select as sselect
+        recs = list(s.exec(sselect(M.ImageRecord).order_by(M.ImageRecord.id).limit(2)).all())
+        bg = M.BurstGroup(name="Burst_nc", image_count=2, best_shot_id=recs[0].id)
+        s.add(bg)
+        s.flush()
+        for r in recs:
+            r.burst_id = bg.id
+        s.commit()
+        bid = bg.id
+    r = env.client.post(f"/api/bursts/{bid}/composite", json={"mode": "fixed"})
+    assert r.status_code == 400 and "combined" in r.json()["detail"]
+
+
+def test_clean_export_scan_unavailable_then_include_export(env, monkeypatch):
+    from photocure import clean_export as ce
+    ids = [i["id"] for i in env.client.get("/api/images?limit=50").json()["items"]][:2]
+
+    def boom(*a, **k):
+        raise ce.PiiUnavailable("needs the AI model")
+    monkeypatch.setattr(ce, "PiiScanner", boom)
+    job = env.client.post("/api/export/clean/scan", json={"ids": ids}).json()["job_id"]
+    res = wait_job(env.client, job)["result"]
+    assert res["unavailable"] and res["flagged"] == []
+    # blur or skip need a scan first; include does not
+    body = {"ids": ids, "output_dir": str(env.tmp / "share"), "policy": "blur"}
+    assert env.client.post("/api/export/clean", json=body).status_code == 409
+    body["policy"] = "include"
+    job = env.client.post("/api/export/clean", json=body).json()["job_id"]
+    out = wait_job(env.client, job)["result"]
+    assert out["exported"] == 2 and not out["failures"]
+    folder = Path(out["folder"])
+    files = sorted((folder / "images").glob("*.jpg"))
+    assert [f.name for f in files] == ["photo-0001.jpg", "photo-0002.jpg"]
+    assert (folder / "index.html").exists() and (folder / "manifest.json").exists()
+    assert all(ce.verify_clean(f) == [] for f in files)
+
+
+def test_clean_export_refuses_library_folder(env):
+    ids = [i["id"] for i in env.client.get("/api/images?limit=50").json()["items"]][:1]
+    r = env.client.post("/api/export/clean", json={"ids": ids, "output_dir": str(env.lib / "x"),
+                                                   "policy": "include"})
+    assert r.status_code == 400

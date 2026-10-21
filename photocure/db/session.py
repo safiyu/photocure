@@ -54,7 +54,7 @@ def get_engine(db_path: Path | str = "photocure.db", echo: bool = False):
     return engine
 
 
-SCHEMA_VERSION = 8  # 8: aesthetic_model, preference, preference_models; 7: file_mtime; 6: geo/favourite columns and indexes; 5: blink/face columns; 4: xmp_written_*
+SCHEMA_VERSION = 9  # 9: delete_approved; 8: aesthetic_model, preference, preference_models; 7: file_mtime; 6: geo/favourite columns and indexes; 5: blink/face columns; 4: xmp_written_*
 
 
 def _sql_type(col) -> str:

@@ -94,6 +94,8 @@ class ImageRecord(SQLModel, table=True):
     rating: int | None = Field(default=None, index=True)
     # Human-locked rows are never re-routed by automatic passes.
     locked: bool = Field(default=False)
+    # Junk is only staged for deletion (trash) when the user approved it, one by one or in bulk.
+    delete_approved: bool = Field(default=False)
     event_id: int | None = Field(default=None, index=True)
 
     # Blink flags (set by photocure.clustering.blinks); faces_schema_version tells which
