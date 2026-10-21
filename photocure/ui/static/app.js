@@ -2835,7 +2835,7 @@
       </header>
 
       <!-- CENTER STAGE -->
-      <div id="overlay-stage" class="bio-stage">
+      <div id="overlay-stage" class="bio-stage${overlayLayout === 'matrix' ? ' matrix-mode' : ''}">
         ${overlayLayout === 'matrix' ? renderFaceMatrixView() : `
         <!-- SOURCE PHOTO BOX -->
         <div 

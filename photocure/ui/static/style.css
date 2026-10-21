@@ -2115,6 +2115,10 @@ body.has-picks .pick { opacity: 1; }
 }
 
 /* Matrix Burst Face Comparison Layout */
+.bio-stage.matrix-mode {
+  pointer-events: auto;
+}
+
 .bio-stage-matrix {
   position: absolute;
   inset: 72px 20px 16px 20px;
@@ -2127,6 +2131,8 @@ body.has-picks .pick { opacity: 1; }
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
   overflow: hidden;
   z-index: 20;
+  pointer-events: auto;
+  cursor: default;
   animation: matrix-fade-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 @keyframes matrix-fade-in {
@@ -2138,6 +2144,30 @@ body.has-picks .pick { opacity: 1; }
   flex: 1 1 auto;
   overflow: auto;
   position: relative;
+  pointer-events: auto;
+  cursor: default;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.35) rgba(15, 23, 42, 0.6);
+}
+
+.bio-matrix-scroll-pane::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.bio-matrix-scroll-pane::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.7);
+  border-radius: 8px;
+}
+
+.bio-matrix-scroll-pane::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  border: 2px solid rgba(15, 23, 42, 0.7);
+}
+
+.bio-matrix-scroll-pane::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.55);
 }
 
 .bio-matrix-table {
