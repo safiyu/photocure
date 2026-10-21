@@ -2827,12 +2827,12 @@
           </div>
           <div>
             <div style="display:flex; align-items:center; gap:8px;">
-              <span style="font-size:13px; font-weight:700; color:#fff;">${esc(activeFace.name)}</span>
-              <span style="font-size:10px; font-family:var(--font-mono, monospace); font-weight:700; padding:1px 6px; border-radius:4px; background:${activeFace.statusBg}; color:#fff;">
+              <span style="font-size:13px; font-weight:700; color:#fff; font-family:var(--font-body);">${esc(activeFace.name)}</span>
+              <span style="font-size:10px; font-family:var(--font-mono); font-weight:700; padding:1px 6px; border-radius:4px; background:${activeFace.statusBg}; color:#fff;">
                 ${esc(activeFace.statusLabel)}
               </span>
             </div>
-            <div style="font-size:11px; font-family:var(--font-mono, monospace); color:#94a3b8; margin-top:1px;">
+            <div style="font-size:11px; font-family:var(--font-body); color:var(--blue-100, #cfeafe); opacity:0.85; margin-top:1px;">
               ${esc(activeFace.eyeStatusText)}${activeFace.sharpness ? ` • Sharpness ${num(activeFace.sharpness).toFixed(1)}` : ''}
             </div>
           </div>
