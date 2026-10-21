@@ -1156,6 +1156,15 @@ body.has-picks .pick { opacity: 1; }
 .stop-btn:disabled, .stop-btn.busy { opacity: .5; cursor: not-allowed; pointer-events: none; }
 .mini { background: var(--sheet); border: 1px solid var(--line); border-radius: 6px; padding: 3px 9px; font-size: 12px; }
 .mini:hover { border-color: var(--faint); }
+.mini[disabled] { opacity: .7; cursor: default; }
+.mini.is-best { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); background: color-mix(in srgb, var(--ok) 10%, var(--sheet)); }
+.mini.danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 35%, var(--line)); }
+.mini.danger:hover { background: color-mix(in srgb, var(--err) 12%, var(--sheet)); border-color: var(--err); }
+.mini.danger.on { background: var(--err); border-color: var(--err); color: #fff; }
+.mini.danger.on:hover { background: color-mix(in srgb, var(--err) 85%, #000); }
+.mini.danger.warn-best { border-style: dashed; }
+.card-actions { gap: 6px; justify-content: flex-start; margin-top: 6px; }
+.card-actions .mini { flex: 1 1 auto; min-width: 0; text-align: center; white-space: nowrap; }
 
 /* C8: AI inference equalizer spectrum visualizer (24 bars).
    Resting state is static (normalized heights); the wave only animates while a
@@ -1467,6 +1476,10 @@ body.has-picks .pick { opacity: 1; }
 
 /* Face inspection (C3) */
 .facepanel { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+.facepanel-inline { margin: 0 0 10px; padding: 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--well); gap: 8px; }
+.facepanel-inline[hidden] { display: none; }
+.facepanel-inline .facechip { width: 96px; }
+.facepanel-inline .facechip img { height: 96px; }
 .facechip { margin: 0; width: 148px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--sheet); overflow: hidden; }
 .facechip.blink { border-color: var(--warn); }
 .facechip img { display: block; width: 100%; height: 148px; object-fit: cover; background: var(--well); }

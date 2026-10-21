@@ -2404,6 +2404,7 @@
         if (m.face_confidence != null) bits.push("face " + num(m.face_confidence).toFixed(2));
         if (m.eye_closed != null) bits.push("eyes closed " + num(m.eye_closed).toFixed(2));
         return `<figure class="card${m.is_best_shot ? " best" : ""}${m.delete_approved ? " marked" : ""}" data-id="${num(m.id)}" tabindex="0">
+          <div class="facepanel facepanel-inline" data-face-host="${num(m.id)}" hidden></div>
           <div class="thumb">
             <img loading="lazy" src="${thumbUrl(m.id)}" alt="${esc(m.filename)}" onerror="this.style.opacity=.15">
             <div class="flags">${m.is_best_shot ? '<span class="badge best">Best shot</span>' : '<span class="badge">Alternate</span>'}${m.has_blinks ? '<span class="badge warn">Blink</span>' : ""}${m.manual_bucket === "junk_blinks" ? '<span class="badge">In Junk review</span>' : ""}${m.delete_approved ? '<span class="badge warn">Marked for delete</span>' : ""}${gmBadge(m)}</div>
@@ -2413,14 +2414,16 @@
             <div class="meta">${num(m.width)}×${num(m.height)}${m.taken_at ? ", " + esc(String(m.taken_at).slice(11, 19)) : ""}</div>
             <div class="meta">${esc(bits.join(", "))}</div>
             ${gmDetail(m)}
-            <div class="btn-row">
-              ${m.is_best_shot ? "" : `<button class="mini" data-makebest="${num(m.id)}">Make best shot</button>
-              <button class="mini" data-markdelete="${num(m.id)}" aria-pressed="${m.delete_approved ? "true" : "false"}">${m.delete_approved ? "Marked for delete (undo)" : "Mark for delete"}</button>`}
-              ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}">Inspect faces</button>` : ""}
+            <div class="btn-row card-actions">
+              ${m.is_best_shot
+                ? `<button class="mini is-best" disabled title="This is the best shot">Best shot</button>`
+                : `<button class="mini" data-makebest="${num(m.id)}" title="Set as best shot">Set best</button>`}
+              <button class="mini danger${m.delete_approved ? " on" : ""}${m.is_best_shot ? " warn-best" : ""}" data-markdelete="${num(m.id)}" data-is-best="${m.is_best_shot ? "1" : "0"}" aria-pressed="${m.delete_approved ? "true" : "false"}" title="${m.is_best_shot ? "Marking the best shot for delete" : "Mark this frame for delete"}">${m.delete_approved ? "Delete marked" : "Mark delete"}</button>
+              ${m.face_count ? `<button class="mini" data-faces="${num(m.id)}" title="Inspect face crops">Faces</button>` : ""}
             </div>
           </figcaption>
         </figure>`;
-      }).join("") + `</div><div id="facepanel" class="facepanel"></div>`;
+      }).join("") + `</div>`;
     const bar = $("#blinkbar");
     const addBtn = (label, fn) => {
       const b = document.createElement("button");
@@ -2442,13 +2445,36 @@
     if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
     if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
     $$("[data-faces]", $("#burstdetail")).forEach((b) => {
-      b.onclick = () => showFaces(num(b.dataset.faces), $("#facepanel")).catch((e) => toast(e.message, "err"));
+      b.onclick = () => {
+        const id = num(b.dataset.faces);
+        const panel = $(`[data-face-host="${id}"]`, $("#burstdetail"));
+        if (!panel) return;
+        if (!panel.hidden && panel.childElementCount) {
+          panel.hidden = true;
+          panel.replaceChildren();
+          b.textContent = "Faces";
+          return;
+        }
+        panel.hidden = false;
+        b.textContent = "Hide";
+        showFaces(id, panel).catch((e) => toast(e.message, "err"));
+      };
     });
     $$("[data-makebest]", $("#burstdetail")).forEach((b) => {
       b.onclick = () => makeBestShot(id, num(b.dataset.makebest));
     });
     $$("[data-markdelete]", $("#burstdetail")).forEach((b) => {
-      b.onclick = () => markBurstDeletes(id, [num(b.dataset.markdelete)], b.getAttribute("aria-pressed") !== "true");
+      b.onclick = async () => {
+        const approve = b.getAttribute("aria-pressed") !== "true";
+        if (approve && b.dataset.isBest === "1") {
+          const ok = await showConfirmDialog({
+            title: "Mark the best shot for delete?",
+            message: "This is the current best shot of the burst. If you still want to delete it, consider promoting another frame to best first.",
+            confirmText: "Mark delete", variant: "warning" });
+          if (!ok) return;
+        }
+        markBurstDeletes(id, [num(b.dataset.markdelete)], approve);
+      };
     });
   }
 
