@@ -3155,20 +3155,7 @@
         const sharpText = m.sharpness_norm != null ? sharp.toFixed(2) : "1.00";
         const faceText = m.face_confidence != null ? face.toFixed(2) : (m.face_count ? "0.90" : "—");
 
-        let eyesMeter;
-        if (m.eye_closed != null) {
-          const isWarn = m.eye_closed > 0.2;
-          eyesMeter = burstMeter(
-            isWarn ? "Blink" : "Eyes",
-            m.eye_closed > 0.2 ? Math.min(1, m.eye_closed * 2.5) : 1,
-            isWarn ? num(m.eye_closed).toFixed(2) : "open",
-            isWarn ? "warn" : "ok"
-          );
-        } else if (m.has_blinks) {
-          eyesMeter = burstMeter("Blink", 0.75, "blink", "warn");
-        } else {
-          eyesMeter = burstMeter("Eyes", 1, "open", "ok");
-        }
+
 
         const dim = m.width && m.height ? `${num(m.width)}×${num(m.height)}` : "";
         const time = m.taken_at ? String(m.taken_at).slice(11, 19) : "";
