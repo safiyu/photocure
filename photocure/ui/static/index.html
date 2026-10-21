@@ -19,7 +19,8 @@
 <body>
   <!-- icon sprite -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-    <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v3h16v-3"/></symbol>
+    <symbol id="i-pipeline" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4m-2-2 2 2-2 2"/><rect x="13" y="13" width="8" height="8" rx="2"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24"><use href="#i-pipeline"/></symbol>
     <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/></symbol>
     <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5"/></symbol>
     <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></symbol>
@@ -51,6 +52,7 @@
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19zM12 10v4M12 17h.01"/></symbol>
     <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2 12h4l2.5-7 4 14 2.5-7H22"/></symbol>
     <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 13 6 5h12l2 8M4 13v6h16v-6M4 13h5l1 2h4l1-2h5"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
   </svg>
 
@@ -67,7 +69,7 @@
         <span id="nav-indicator" class="nav-indicator" aria-hidden="true"></span>
         <div class="navgroup">
           <h2>Get started</h2>
-          <button class="tab navitem active" data-tab="library"><svg class="ic" aria-hidden="true"><use href="#i-import"/></svg><span>Pipeline</span><em class="count"></em></button>
+          <button class="tab navitem active" data-tab="library"><svg class="ic" aria-hidden="true"><use href="#i-pipeline"/></svg><span>Pipeline</span><em class="count"></em></button>
         </div>
         <div class="navgroup" style="margin-top:18px">
           <h2>Browse</h2>
@@ -376,23 +378,27 @@
             <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="junkcount" class="rowcount"></span>
           </div>
-          <div class="keys kbhint"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>1</kbd>-<kbd>9</kbd> set category</span><span><kbd>u</kbd> undo</span><span><kbd>l</kbd> lock</span><span><kbd>Space</kbd> open</span></div>
           <div id="junkgrid" class="grid"></div>
           <div id="junkgrid-more" class="loadmore"></div>
         </section>
 
-        <!-- NEEDS A LOOK -->
+        <!-- NEEDS A LOOK / FINALIZE -->
         <section id="tab-uncertain" class="panel">
           <div class="banner-host"></div>
-          <div class="learn">
+          <div class="toolbar">
+            <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+              <input id="q-uncertain" type="search" placeholder="Search by file name or path" aria-label="Search finalize photos"></div>
+            <select id="filter-uncertain-status" aria-label="Filter status">
+              <option value="all">All undecided photos</option>
+              <option value="unreviewed">Needs choice</option>
+              <option value="chosen">Chosen by me</option>
+            </select>
             <button id="btn-learn" class="btn primary" type="button">Learn from my choices</button>
             <span id="learn-help" class="help">Fix a few photos, then let the app re-sort the rest using what you chose.</span>
             <span class="grow"></span>
             <label class="density">Size <input type="range" class="density-slider" min="130" max="340" step="10" value="200" aria-label="Thumbnail size"></label>
             <span id="uncertaincount" class="rowcount"></span>
           </div>
-          <div class="keys kbhint"><span><kbd>j</kbd> <kbd>k</kbd> move</span><span><kbd>u</kbd> undo</span><span><kbd>l</kbd> lock</span><span><kbd>Space</kbd> open</span></div>
-          <div id="triage-legend" class="keys"></div>
           <div id="uncertaingrid" class="grid"></div>
           <div id="uncertaingrid-more" class="loadmore"></div>
         </section>

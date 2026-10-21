@@ -443,7 +443,7 @@
     if (it.is_favorite) add("fav", "\u2665 Favourite");
     if (num(it.rating) > 0) add("", "\u2605" + num(it.rating));
     if (it.is_best_shot) add("best", "Best shot");
-    if (it.delete_approved) add("warn", "Marked for delete");
+
     if (it.is_duplicate) add("warn", "Duplicate");
     if (it.near_dup_of != null) add("warn", "Near duplicate");
     if (it.is_alternate) add("", "Alternate");
@@ -496,16 +496,7 @@
       .filter(Boolean).join(" ");
     const img = el("img", { loading: "lazy", decoding: "async", src: thumbUrl(id), alt: it.filename || "" });
     img.onerror = () => { img.style.opacity = ".15"; };
-    const lockTitle = (it.locked ? "Unlock" : "Lock") + " (l)";
-    const thumb = el("div", { class: "thumb photo" }, img,
-      el("div", { class: "tools hover-actions" },
-        el("button", { class: "check pick", "data-pick": id, "aria-label": "Select " + (it.filename || ""),
-          "aria-pressed": String(picked), tabindex: -1, html: icon("check") }),
-        el("button", { "data-approve-delete": id, class: "del", "aria-pressed": String(!!it.delete_approved),
-          title: it.delete_approved ? "Marked for delete. Click to undo" : "Mark for delete: leave out of the result",
-          "aria-label": it.delete_approved ? "Clear delete mark" : "Mark for delete", tabindex: -1, html: icon("trash", "sm") }),
-        el("button", { "data-lock": id, title: lockTitle, "aria-label": it.locked ? "Unlock" : "Lock", tabindex: -1, html: icon("lock", "sm") }),
-        el("button", { "data-similar": id, title: "Find similar photos", "aria-label": "Find similar photos", tabindex: -1, html: icon("copy", "sm") })));
+    const thumb = el("div", { class: "thumb photo", title: "View photo" }, img);
     const showReason = it.uncertain_reason && !it.manual_bucket;
     const flags = flagList(it).slice(0, 3);
     const badgesEl = flags.length ? el("div", { class: "flags tags" },
@@ -522,8 +513,48 @@
         it.manual_bucket ? [el("span", { class: "tag", text: "edited" }),
           el("button", { class: "x", "data-clear": id, title: "Back to the AI choice",
             "aria-label": "Back to the AI choice", tabindex: -1, html: icon("x", "sm") })] : null));
-    return el("figure", { class: cls, "data-id": id, tabindex: -1, role: "gridcell" }, thumb, cap);
+
+    const actions = el("div", { class: "actions" },
+      el("button", {
+        type: "button",
+        class: "btn btn-del" + (it.delete_approved ? " is-del" : ""),
+        "data-approve-delete": id,
+        "aria-pressed": String(!!it.delete_approved),
+        title: it.delete_approved ? "Marked for delete (click to unmark)" : "Mark for delete",
+        "aria-label": it.delete_approved ? "Clear delete mark" : "Mark for delete",
+        tabindex: -1,
+      }, el("span", { class: "btn-ic", html: icon("trash", "sm") }), el("span", { class: "btn-lbl", text: it.delete_approved ? "Marked" : "Delete" })),
+      el("button", {
+        type: "button",
+        class: "btn btn-lock" + (it.locked ? " is-locked" : ""),
+        "data-lock": id,
+        title: (it.locked ? "Unlock" : "Keep") + " (l)",
+        "aria-label": it.locked ? "Unlock" : "Keep",
+        tabindex: -1,
+      }, el("span", { class: "btn-ic", html: icon("heart", "sm") }), el("span", { class: "btn-lbl", text: it.locked ? "Kept" : "Keep" })),
+      el("button", {
+        type: "button",
+        class: "btn btn-pick" + (picked ? " is-picked" : ""),
+        "data-pick": id,
+        "aria-pressed": String(picked),
+        title: picked ? "Deselect" : "Select",
+        "aria-label": "Select " + (it.filename || ""),
+        tabindex: -1,
+      }, el("span", { class: "btn-ic", html: icon("check", "sm") }), el("span", { class: "btn-lbl", text: picked ? "Selected" : "Select" })),
+      el("button", {
+        type: "button",
+        class: "btn btn-similar",
+        "data-similar": id,
+        title: "Find similar photos",
+        "aria-label": "Find similar photos",
+        tabindex: -1,
+      }, el("span", { class: "btn-ic", html: icon("copy", "sm") }), el("span", { class: "btn-lbl", text: "Similar" }))
+    );
+
+    return el("figure", { class: cls, "data-id": id, tabindex: -1, role: "gridcell" }, thumb, cap, actions);
   }
+
+  const junkCardNode = cardNode;
 
   function emptyHTML(e) {
     return `<div class="empty">${icon(e.icon || "image")}<h3>${esc(e.title)}</h3><p>${esc(e.text || "")}</p>` +
@@ -564,8 +595,8 @@
     g.vg = new window.PCUR_GRID.VirtualGrid({
       host,
       pageSize: PAGE,
-      renderCard: cardNode,
-      captionH: 125,
+      renderCard: cfg.renderCard || cardNode,
+      captionH: cfg.captionH || 145,
       renderSkeleton: () => el("div", { class: "skel" }),
       async fetchPage(offset, limit) {
         const qs = cfg.params();
@@ -669,6 +700,8 @@
     });
     makeGrid("junk", {
       el: "#junkgrid", more: "#junkgrid-more", count: "#junkcount",
+      renderCard: junkCardNode,
+      captionH: 145,
       params() {
         const c = val("junkfilter");
         return c ? "category=" + encodeURIComponent(c) : "group=junk";
@@ -690,8 +723,24 @@
     });
     makeGrid("uncertain", {
       el: "#uncertaingrid", more: "#uncertaingrid-more", count: "#uncertaincount",
-      params: () => "category=uncertain",
-      matches: (it) => eff(it) === "uncertain",
+      params: () => {
+        const p = new URLSearchParams();
+        p.set("category", "uncertain");
+        const qu = val("q-uncertain");
+        if (qu) p.set("q", qu);
+        const status = val("filter-uncertain-status");
+        if (status === "chosen") p.set("manual", "true");
+        return p.toString();
+      },
+      matches: (it) => {
+        if (eff(it) !== "uncertain") return false;
+        const status = val("filter-uncertain-status");
+        if (status === "chosen" && !it.manual_bucket) return false;
+        if (status === "unreviewed" && it.manual_bucket) return false;
+        const qu = (val("q-uncertain") || "").toLowerCase().trim();
+        if (qu && !((it.filename || "").toLowerCase().includes(qu) || (it.relative_path || "").toLowerCase().includes(qu))) return false;
+        return true;
+      },
       empty: { icon: "check", title: "Nothing to finalize", text: "Every photo was sorted with confidence." },
     });
     makeGrid("highlights", {
@@ -940,8 +989,13 @@
     $$(".card").forEach((c) => {
       const on = state.picks.has(num(c.dataset.id));
       c.classList.toggle("picked", on);
-      const b = $(".pick", c);
-      if (b) b.setAttribute("aria-pressed", String(on));
+      const b = $(".pick, .btn-pick", c);
+      if (b) {
+        b.setAttribute("aria-pressed", String(on));
+        b.classList.toggle("is-picked", on);
+        const lbl = $(".btn-lbl", b);
+        if (lbl) lbl.textContent = on ? "Selected" : "Select";
+      }
     });
     const n = state.picks.size;
     document.body.classList.toggle("has-picks", n > 0);
@@ -4395,6 +4449,16 @@
       qt = setTimeout(() => grids.cat.reset(), 250);
     });
     $("#junkfilter").addEventListener("change", () => grids.junk.reset());
+    if ($("#filter-uncertain-status")) {
+      $("#filter-uncertain-status").addEventListener("change", () => grids.uncertain.reset());
+    }
+    if ($("#q-uncertain")) {
+      let qtu = null;
+      $("#q-uncertain").addEventListener("input", () => {
+        clearTimeout(qtu);
+        qtu = setTimeout(() => grids.uncertain.reset(), 250);
+      });
+    }
     $$("#tab-utility [data-ukind]").forEach((b) => b.addEventListener("click", () => {
       state.utilityKind = b.dataset.ukind;
       $$("#tab-utility [data-ukind]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
