@@ -542,17 +542,17 @@ input:hover, select:hover { border-color: var(--faint); }
   scrollbar-width: none;
 }
 .toolbar::-webkit-scrollbar { display: none; }
-.toolbar .search, .field {
+.toolbar .search {
   height: 38px; border-radius: 12px; border: 1px solid var(--line); background: var(--sheet);
   display: flex; align-items: center; gap: 8px; padding: 0 12px; width: 220px; flex: 0 1 220px; min-width: 130px; position: relative;
   transition: border-color .15s ease, box-shadow .15s ease; flex-shrink: 0;
 }
-.toolbar .search:focus-within, .field:focus-within {
+.toolbar .search:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
-.toolbar .search .ic, .field svg { position: static; width: 16px; height: 16px; color: var(--mut); flex: none; pointer-events: none; }
-.toolbar .search input, .field input {
+.toolbar .search .ic { position: static; width: 16px; height: 16px; color: var(--mut); flex: none; pointer-events: none; }
+.toolbar .search input {
   border: 0; outline: 0; flex: 1; font-size: 13px; font-weight: 500; background: none; min-width: 0; color: var(--ink); padding: 0; height: 100%;
 }
 .toolbar select {
@@ -848,14 +848,13 @@ body.has-picks .tools, body.has-picks .hover-actions {
 /* C9: danger-sect heading keeps the sect-shape accent bar but swaps colour so it does not fight the crimson border. */
 .sect.danger > h2 { border-left-color: var(--err); }
 
-.steps { list-style: none; margin: 0 0 36px; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-/* C10: asymmetric elliptical radii give each step card a soft, organic outline. */
+.steps { list-style: none; margin: 0 0 36px; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
 .step {
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--line);
-  border-radius: 18px 22px 20px 22px / 20px 18px 22px 20px;
-  padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;
+  border-radius: 20px;
+  padding: 22px 24px; display: flex; flex-direction: column; gap: 16px;
   box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.03);
 }
 .step-head { display: flex; align-items: center; gap: 12px; }
@@ -1025,22 +1024,24 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .step.active {
   background: linear-gradient(145deg, rgba(253, 242, 248, 0.94) 0%, rgba(255, 255, 255, 0.96) 46%, rgba(240, 249, 255, 0.94) 100%);
   border: 1.5px solid var(--primary); box-shadow: var(--glow), 0 0 35px color-mix(in srgb, var(--accent) 22%, transparent);
-  border-radius: 20px 24px 22px 24px / 22px 20px 24px 22px;
+  border-radius: 20px;
   transform: translateY(-2px); z-index: 3;
 }
 .step.active .actions .btn.accent,
 .step.active .actions .btn.primary {
-  flex: 1; height: 48px; font-size: 15px;
-  border-radius: 55% 55% 16px 16px / 70% 70% 16px 16px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--btn-fill) 76%, #fff), var(--btn-fill));
+  height: 42px; font-size: 14px; font-weight: 700;
+  padding: 0 24px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--btn-fill) 85%, #fff), var(--btn-fill));
   border-color: var(--btn-fill);
-  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.28), 0 4px 14px var(--btn-glow);
+  box-shadow: 0 4px 14px var(--btn-glow);
+  display: inline-flex; align-items: center; gap: 8px;
 }
 .step.active .actions .btn.accent:hover,
 .step.active .actions .btn.primary:hover {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--btn-hover) 76%, #fff), var(--btn-hover));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--btn-hover) 85%, #fff), var(--btn-hover));
   border-color: var(--btn-hover);
-  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.35), 0 6px 18px var(--btn-glow);
+  box-shadow: 0 6px 18px var(--btn-glow);
 }
 .step.active .step-num {
   background: var(--primary);
@@ -1055,20 +1056,18 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .step.locked .step-num { color: var(--faint); }
 .step.locked .state { color: var(--faint); }
 
-/* C9: animated chevron connectors between step cards. Overlay the gap on desktop; rotate 90deg when stacked. */
+/* Chevron connector between step cards */
 .step { position: relative; }
 .step-flow {
-  position: absolute; right: -8px; top: 50%; transform: translate(50%, -50%);
-  display: flex; gap: 2px; z-index: 4; pointer-events: none; color: var(--faint);
+  position: absolute; right: -14px; top: 50%; transform: translate(50%, -50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--sheet); border: 1px solid var(--line);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  z-index: 5; pointer-events: none; color: var(--mut);
 }
-.step-flow .chev { width: 16px; height: 16px; flex: none; opacity: .55; }
-.step-flow .chev:nth-child(1) { animation: chev-flow 1.4s ease-in-out infinite; }
-.step-flow .chev:nth-child(2) { animation: chev-flow 1.4s ease-in-out .35s infinite; }
-.step-flow .chev:nth-child(3) { animation: chev-flow 1.4s ease-in-out .7s infinite; }
-@keyframes chev-flow {
-  0%, 100% { opacity: .25; transform: translateX(-3px); }
-  50% { opacity: 1; transform: translateX(2px); }
-}
+.step-flow .chev { width: 14px; height: 14px; flex: none; opacity: .75; }
+.step-flow .chev:nth-child(n+2) { display: none; }
 .step.done .step-flow { color: var(--ok); }
 .step:has(+ .step.active) .step-flow { color: var(--link); }
 
