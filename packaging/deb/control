@@ -1,10 +1,10 @@
 Package: photocure
-Version: 1.0.0
+Version: 1.1.0
 Section: graphics
 Priority: optional
 Architecture: amd64
 Maintainer: Safiyu Vattaparambil <dheensafiyu@gmail.com>
-Depends: python3 (>= 3.10), python3-venv, python3-pip, ca-certificates
+Depends: python3 (>= 3.11), python3-venv, python3-pip, ca-certificates
 Description: Intelligent offline photo library curation engine
  Photocure is a local, GPU-accelerated photo library curation engine.
  It scores image quality, detects faces, classifies photos with OpenCLIP,

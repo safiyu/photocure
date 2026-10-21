@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from math import ceil
 
 from .blinks import Box, iou, track_faces
@@ -144,3 +145,36 @@ def score_group(frames: Sequence[Sequence[FaceObs]], *, perfect_at: float = 0.8,
         partner = max(partners)[2]
         return GroupMatrix("composite", len(core), tuple(scores), best, (best, partner))
     return GroupMatrix("best_effort", len(core), tuple(scores), best, None)
+
+
+def group_matrix_payload(members) -> dict:
+    """The group matrix of one burst's frames, in capture order, as plain JSON."""
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+    def when(r):
+        t = r.taken_at
+        if t is not None and t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        return t or epoch
+
+    ordered = sorted(members, key=lambda r: (when(r), r.id or 0))
+    frames = []
+    for r in ordered:
+        faces = []
+        for f in r.faces or []:
+            box = (f.x1, f.y1, f.x2, f.y2)
+            has_box = all(v is not None for v in box)
+            faces.append(FaceObs(box=tuple(float(v) for v in box) if has_box else None,
+                                 eye_status=f.eye_status, eye_closed=f.eye_closed_score,
+                                 sharpness=f.face_sharpness, person_id=f.person_id))
+        frames.append(faces)
+    tiebreak = [float(r.quality.sharpness_norm) if r.quality is not None else 0.0 for r in ordered]
+    m = score_group(frames, tiebreak=tiebreak)
+    return {
+        "status": m.status, "subject_count": m.subject_count,
+        "best_id": ordered[m.best].id if m.best is not None else None,
+        "partner_id": ordered[m.composite[1]].id if m.composite else None,
+        "frames": [{"id": ordered[f.index].id, "min_quality": round(f.min_quality, 3),
+                    "subjects": [{"state": x.state, "q": round(x.quality, 3)} for x in f.subjects]}
+                   for f in m.frames],
+    }

@@ -149,7 +149,7 @@ def test_cli_trash_verify_repair_and_purge(tmp_path):
     w = _world_cli(tmp_path, n=2)
     set_bucket(w, w.ids[0], "graphic")
     r = runner.invoke(app, ["apply", "--db", str(w.db), "-o", str(w.out),
-                            "--trash", "-y"])
+                            "--trash", "--approve-deletes", "-y"])
     assert r.exit_code == 0 and (w.out / ".trash").is_dir()
     assert runner.invoke(app, ["verify-txn", "--db", str(w.db)]).exit_code == 0
     assert "Repaired 0" in runner.invoke(app, ["repair", "--db", str(w.db)]).stdout

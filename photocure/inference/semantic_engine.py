@@ -151,9 +151,14 @@ class SemanticEngine:
         return feats.float().cpu().numpy()
 
     def release(self) -> None:
+        import gc
         self._model = None
         self._text_features = None
         self._autocast = None
+        self._preprocess = None
+        self._tokenize = None
+        self._device = None
+        gc.collect()
         empty_cuda_cache(self.bs)
 
     # --------------------------------------------------------------- helpers

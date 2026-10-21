@@ -1,4 +1,4 @@
-"""The version is 1.0.0 and every place that states it agrees."""
+"""The version is 1.1.0 and every place that states it agrees."""
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 from photocure import __version__
 
 ROOT = Path(__file__).parent.parent
-EXPECTED = "1.0.0"
+EXPECTED = "1.1.0"
 
 
 def _read(rel: str) -> str:

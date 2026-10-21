@@ -58,6 +58,11 @@ def set_bucket(world: World, image_id: int, bucket: str | None) -> None:
         PhotoRepository(s).set_manual_bucket(image_id, bucket)
 
 
+def approve_delete(world: World, image_id: int) -> None:
+    with get_session(world.db) as s:
+        PhotoRepository(s).get_by_id(image_id).delete_approved = True
+
+
 def get_img(world: World, image_id: int):
     with get_session(world.db) as s:
         r = PhotoRepository(s).get_by_id(image_id)
