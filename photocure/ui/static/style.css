@@ -828,6 +828,126 @@ body.has-picks .tools, body.has-picks .hover-actions {
 
 .loadmore { display: flex; justify-content: center; padding: 22px; min-height: 8px; }
 
+/* ----------------------------------------------------------------- junk cards */
+#junkgrid {
+  --vg-caption-h: 155px;
+}
+#junkgrid .card {
+  display: flex;
+  flex-direction: column;
+}
+#junkgrid .card .thumb {
+  flex: none;
+}
+#junkgrid .card .caption {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding: 8px 4px 4px;
+}
+#junkgrid .card .actions {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  box-sizing: border-box;
+  flex: none;
+}
+#junkgrid .card .actions .btn {
+  height: 34px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1.5px solid var(--line);
+  background: var(--sheet);
+  color: var(--ink);
+  cursor: pointer;
+  transition: all .18s ease;
+  padding: 0 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+#junkgrid .card .actions .btn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+#junkgrid .card .actions .btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#junkgrid .card .actions .btn:hover {
+  background: var(--well);
+  border-color: var(--primary);
+}
+
+/* Delete button matching burst card .btn-del */
+#junkgrid .card .actions .btn-del {
+  border-color: var(--err);
+  background: color-mix(in srgb, var(--err) 12%, var(--sheet));
+  color: var(--err);
+}
+:root[data-theme="dark"] #junkgrid .card .actions .btn-del {
+  border-color: color-mix(in srgb, var(--err) 40%, transparent);
+  background: color-mix(in srgb, var(--err) 16%, var(--well));
+  color: color-mix(in srgb, var(--err) 85%, #fff);
+}
+#junkgrid .card .actions .btn-del svg {
+  stroke: currentColor;
+}
+#junkgrid .card .actions .btn-del:hover {
+  background: var(--err);
+  color: #fff;
+  border-color: var(--err);
+}
+#junkgrid .card .actions .btn-del.is-del {
+  background: var(--err);
+  color: #fff;
+  border-color: var(--err);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--err) 40%, transparent);
+}
+
+/* Lock / Keep button */
+#junkgrid .card .actions .btn-lock:hover {
+  border-color: var(--commit);
+  background: var(--well);
+}
+#junkgrid .card .actions .btn-lock.is-locked {
+  background: color-mix(in srgb, var(--commit) 16%, var(--sheet));
+  border-color: var(--commit);
+  color: var(--commit);
+}
+
+/* Pick / Select button */
+#junkgrid .card .actions .btn-pick:hover {
+  border-color: var(--blue, var(--primary));
+  background: var(--well);
+}
+#junkgrid .card .actions .btn-pick.is-picked {
+  background: var(--blue, var(--primary));
+  border-color: var(--blue, var(--primary));
+  color: #fff;
+}
+
+/* Similar button (compact icon button) */
+#junkgrid .card .actions .btn-similar {
+  flex: 0 0 34px;
+  padding: 0;
+}
+#junkgrid .card .actions .btn-similar:hover {
+  border-color: var(--primary);
+  background: var(--well);
+}
+
 /* ----------------------------------------------------------------- empty states */
 .empty {
   grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
