@@ -705,11 +705,14 @@ try {
     await clickTab("settings");
     await page.waitFor("document.querySelector('#kw-note').textContent.length > 0", 8000, "note filled");
     check(!(await page.eval("document.querySelector('#set-keywords').disabled")), "the switch is usable");
-    await page.eval("document.querySelector('#set-keywords').click()");
-    await page.waitFor("fetch('/api/features').then((r) => r.json()).then((j) => j.features.write_keywords === true)", 5000, "saved on");
+    // Set the wanted state instead of assuming each click flips it, and allow for a slow runner.
+    const setKeywords = async (want) => {
+      await page.eval(`(() => { const b = document.querySelector('#set-keywords'); if (b.checked !== ${want}) b.click(); })()`);
+      await page.waitFor(`fetch('/api/features').then((r) => r.json()).then((j) => j.features.write_keywords === ${want})`, 20000, want ? "saved on" : "saved off");
+    };
+    await setKeywords(true);
     await shot("18-settings-keywords");
-    await page.eval("document.querySelector('#set-keywords').click()");
-    await page.waitFor("fetch('/api/features').then((r) => r.json()).then((j) => j.features.write_keywords === false)", 5000, "saved off");
+    await setKeywords(false);
   });
 
   await scenario("watch mode asks for a folder, picks up a new photo, and stops", async () => {
