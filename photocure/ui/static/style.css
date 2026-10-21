@@ -695,16 +695,17 @@ kbd {
   box-shadow: 0 14px 28px rgba(15, 23, 42, .14);
 }
 .card.best {
-  border: 2.5px solid transparent;
-  background: linear-gradient(var(--sheet), var(--sheet)) padding-box, var(--aurora) border-box;
-  box-shadow: 0 0 26px color-mix(in srgb, var(--primary) 32%, transparent), 0 6px 18px rgba(60, 70, 140, .1);
+  border: 2.5px solid var(--ok);
+  background: var(--sheet);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--ok) 32%, transparent), 0 6px 18px rgba(16, 185, 129, .12);
 }
 .card.best:hover {
-  box-shadow: 0 0 32px color-mix(in srgb, var(--primary) 42%, transparent), 0 14px 28px rgba(60, 70, 140, .18);
+  box-shadow: 0 0 32px color-mix(in srgb, var(--ok) 45%, transparent), 0 14px 28px rgba(16, 185, 129, .2);
 }
 .card:focus-visible, .card.sel, .card.picked {
-  outline: 3px solid var(--pink, var(--accent));
+  outline: 3px solid var(--blue, var(--primary));
   outline-offset: 2px;
+  box-shadow: 0 0 20px color-mix(in srgb, var(--blue, var(--primary)) 30%, transparent);
 }
 .card:focus-visible .thumb, .card.sel .thumb, .card.picked .thumb { outline: none; }
 .card.rejected .thumb img { opacity: .4; filter: grayscale(.7); }
@@ -766,12 +767,15 @@ body.has-picks .tools, body.has-picks .hover-actions {
   opacity: 1 !important;
 }
 .hover-actions button.del[aria-pressed="true"] { opacity: 1; background: #c0392b; color: #fff; }
+.card.marked {
+  background: color-mix(in srgb, var(--err) 6%, var(--sheet));
+}
 .card.marked .thumb {
   box-shadow: 0 0 0 2px var(--err), inset 0 0 0 1px rgba(255, 255, 255, .15);
 }
 .card.marked .thumb::before {
   content: ""; position: absolute; inset: 0;
-  background: color-mix(in srgb, var(--err) 14%, transparent);
+  background: color-mix(in srgb, var(--err) 18%, transparent);
   pointer-events: none; z-index: 1;
 }
 .card.marked .thumb img { opacity: .88; }
@@ -1304,32 +1308,64 @@ body.has-picks .tools, body.has-picks .hover-actions {
 
 /* ------------------------------------------------------------------ Burst Card Wrap & Redesign */
 .card-wrap {
-  border-radius: 25px; padding: 0; box-shadow: 0 8px 22px rgba(60, 70, 140, 0.13); display: flex;
+  border-radius: 25px; padding: 3px; box-shadow: 0 8px 22px rgba(60, 70, 140, 0.13); display: flex;
   transition: transform .2s cubic-bezier(.2, .8, .2, 1), box-shadow .2s ease; position: relative;
-  min-width: 0;
+  min-width: 0; background: transparent; box-sizing: border-box;
 }
 :root[data-theme="dark"] .card-wrap { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
 .card-wrap:hover { transform: translateY(-3px); box-shadow: 0 12px 28px rgba(60, 70, 140, 0.18); }
 :root[data-theme="dark"] .card-wrap:hover { box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6); }
-.card-wrap.is-best { padding: 3px; background: var(--aurora); box-shadow: 0 0 36px rgba(96, 165, 250, 0.45); }
-.card-wrap.is-marked { padding: 2.5px; background: linear-gradient(135deg, var(--err), color-mix(in srgb, var(--err) 50%, #fff)); box-shadow: 0 0 24px color-mix(in srgb, var(--err) 35%, transparent); }
+
+/* Best shot card: Green border (no rainbow) */
+.card-wrap.is-best {
+  background: var(--ok);
+  box-shadow: 0 0 26px color-mix(in srgb, var(--ok) 38%, transparent), 0 8px 22px rgba(16, 185, 129, 0.16);
+}
+
+/* Selected cards: Blue border */
+.card-wrap.picked, .card-wrap.sel, .card-wrap.is-selected {
+  background: var(--blue, var(--primary));
+  box-shadow: 0 0 24px color-mix(in srgb, var(--blue, var(--primary)) 35%, transparent);
+}
+
+/* Marked deleted card: Red border */
+.card-wrap.is-marked {
+  background: var(--err);
+  box-shadow: 0 0 24px color-mix(in srgb, var(--err) 35%, transparent);
+}
 
 .card-wrap .card {
   background: var(--sheet); border-radius: 22px; padding: 10px; display: flex; flex-direction: column;
-  width: 100%; border: 1px solid var(--line); box-sizing: border-box; margin: 0; position: relative; overflow: hidden;
+  width: 100%; height: 100%; border: 1px solid var(--line); box-sizing: border-box; margin: 0; position: relative; overflow: hidden;
   min-width: 0;
 }
-.card-wrap.is-best .card { border: none; }
+.card-wrap.is-best .card,
+.card-wrap.picked .card,
+.card-wrap.sel .card,
+.card-wrap.is-selected .card,
+.card-wrap.is-marked .card { border-color: transparent; }
+
+/* Light red overlay and background tint for marked deleted card */
+.card-wrap.is-marked .card {
+  background: color-mix(in srgb, var(--err) 6%, var(--sheet));
+}
+.card-wrap.is-marked .photo::before {
+  content: ""; position: absolute; inset: 0;
+  background: color-mix(in srgb, var(--err) 18%, transparent);
+  pointer-events: none; z-index: 1; border-radius: inherit;
+}
+.card-wrap.is-marked .photo img { opacity: .88; }
 
 .card-wrap .photo {
   position: relative; height: 180px; border-radius: 15px; overflow: hidden;
-  background: var(--well); cursor: pointer;
+  background: var(--well); cursor: pointer; flex: none;
 }
 .card-wrap .photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform .3s ease; }
 .card-wrap:hover .photo img { transform: scale(1.02); }
 
 .card-wrap .caption {
   position: static; padding: 10px 4px 6px; color: var(--ink); pointer-events: auto; display: flex; flex-direction: column; gap: 4px;
+  flex: 1 1 auto; min-height: 0;
 }
 .card-wrap .burst-row-title {
   display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0;
@@ -1359,7 +1395,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .card-wrap .stat-pill.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
 .card-wrap .stat-pill.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
 
-.card-wrap .actions { display: flex; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.card-wrap .actions { display: flex; gap: 6px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .card-wrap .btn {
   height: 35px; border-radius: 10px; font-size: 12px; font-weight: 700; display: inline-flex;
   align-items: center; justify-content: center; gap: 5px; border: 0; cursor: pointer; transition: all .18s ease;
