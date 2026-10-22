@@ -66,7 +66,10 @@ INSTRUCTIONS = (
     "it strips location and camera details and can blur or leave out photos showing license "
     "plates, cards, screens, house numbers or ID documents (that check can miss small details, "
     "so tell the user to look the result over). Only create_composite and clean_export write "
-    "files, and only new ones; no tool can modify, move or delete an existing photo."
+    "files, and only new ones; no tool can modify, move or delete an existing photo. "
+    "To answer questions about a specific person (when did I last see X, where): call "
+    "list_people for the known names, then person_photos(name) for their photos with dates "
+    "and place."
 )
 
 
@@ -172,6 +175,25 @@ class LibraryQueries:
             rows = s.exec(select(I).where(col(I.id).in_(ids))).all() if ids else []
             by_id = {r.id: r for r in rows}
             return {"items": [self._row(by_id[i], sc) for i, sc in pairs if i in by_id]}
+
+    def list_people(self) -> dict:
+        from .people_actions import list_people as _list_people
+        return {"items": _list_people(self.db)}
+
+    def person_photos(self, name, date_from=None, date_to=None, limit=20) -> dict:
+        from .db.repository import PhotoRepository
+        I, F = M.ImageRecord, M.FaceDetection
+        limit = max(1, min(int(limit), MAX_RESULTS))
+        with get_session(self.db) as s:
+            person = PhotoRepository(s).find_person_by_name(name)
+            if person is None:
+                known = sorted(p.name for p in s.exec(select(M.PersonCluster)).all() if p.name)
+                raise ValueError(f"no person named {name!r}; known people: {known}")
+            conds = [*self._filters(date_from, date_to, None),
+                    col(I.id).in_(select(F.image_id).where(F.person_id == person.id))]
+            rows = s.exec(select(I).where(*conds).order_by(col(I.taken_at).desc(), col(I.id))
+                          .limit(limit)).all()
+            return {"items": [{**self._row(r), "city": r.city, "region": r.region} for r in rows]}
 
     def list_bursts(self, date_from=None, date_to=None, only_fixable=False, limit=20) -> dict:
         from .clustering.group_shots import group_matrix_payload
@@ -302,6 +324,20 @@ def build_server(queries: LibraryQueries):
         """Return the photo so you can read text in it. size: preview (1600px) or medium (800px)."""
         data, fmt = queries.image_bytes(image_id, size)
         return Image(data=data, format=fmt)
+
+    @server.tool(annotations=read)
+    @_guard
+    def list_people() -> dict:
+        """Known people (face clusters), most faces first. Use with person_photos."""
+        return queries.list_people()
+
+    @server.tool(annotations=read)
+    @_guard
+    def person_photos(name: str, date_from: str | None = None, date_to: str | None = None,
+                      limit: int = 20) -> dict:
+        """Photos a named person appears in, newest first: date, place and filename for each.
+        Call list_people first if you don't know the exact name. Dates are ISO (YYYY-MM-DD)."""
+        return queries.person_photos(name, date_from, date_to, limit)
 
     @server.tool(annotations=read)
     @_guard

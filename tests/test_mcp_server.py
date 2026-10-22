@@ -71,7 +71,7 @@ def test_server_registers_read_only_tools(q):
     tools = asyncio.run(server.list_tools())
     names = {t.name for t in tools}
     assert names == {"library_overview", "search_photos", "list_photos", "photo_info", "view_photo",
-                     "list_bursts", "create_composite", "clean_export"}
+                     "list_bursts", "create_composite", "clean_export", "list_people", "person_photos"}
     by_name = {t.name: t for t in tools}
     assert by_name["list_bursts"].annotations.read_only_hint is True
     for n in ("create_composite", "clean_export"):
@@ -229,3 +229,39 @@ def test_clean_export_policies_and_refusals(q, tmp_path, monkeypatch):
     r = q.q.clean_export(ids, str(out), "blur")
     assert r["exported"] == 2 and r["blurred"] == 1
     assert {i: Path(q.q.info(i)["path"]).read_bytes() for i in ids} == originals
+
+
+# ------------------------------------------------------------------- people
+def test_list_people_tool_reports_named_clusters(q):
+    with get_session(q.w.db) as s:
+        s.add(M.PersonCluster(name="Safi", face_count=1))
+    items = q.q.list_people()["items"]
+    assert len(items) == 1
+    assert items[0]["name"] == "Safi" and items[0]["face_count"] == 1
+
+
+def test_person_photos_returns_date_town_and_filename(q):
+    iid = q.w.ids[0]
+    with get_session(q.w.db) as s:
+        rec = s.get(M.ImageRecord, iid)
+        rec.taken_at = datetime(2026, 6, 1, 9, tzinfo=timezone.utc)
+        rec.city, rec.region, rec.country_code = "Casablanca", "Casablanca-Settat", "MA"
+        p = M.PersonCluster(name="Safi", face_count=1)
+        s.add(p)
+        s.flush()
+        s.add(M.FaceDetection(image_id=iid, bbox_x1=0, bbox_y1=0, bbox_x2=1, bbox_y2=1,
+                              confidence=0.9, person_id=p.id))
+    filename = q.q.info(iid)["filename"]
+
+    r = q.q.person_photos("safi")  # case-insensitive, matches Task 3's find_person_by_name
+
+    assert len(r["items"]) == 1
+    item = r["items"][0]
+    assert item["id"] == iid and item["city"] == "Casablanca"
+    assert item["taken_at"].startswith("2026-06-01")
+    assert item["filename"] == filename
+
+
+def test_person_photos_raises_a_clear_error_for_an_unknown_name(q):
+    with pytest.raises(ValueError, match="no person"):
+        q.q.person_photos("nobody")
