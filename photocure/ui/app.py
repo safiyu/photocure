@@ -2449,6 +2449,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index():
         html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+        try:
+            stamp = max(int(p.stat().st_mtime) for p in STATIC_DIR.iterdir() if p.suffix in (".js", ".mjs", ".css"))
+        except (OSError, ValueError):
+            stamp = 0
+        asset_v = f"{__version__}.{stamp}" if stamp else __version__
+        html = html.replace("?v={{VERSION}}", f"?v={asset_v}")
         html = html.replace(TOKEN_PLACEHOLDER, "").replace("{{VERSION}}", __version__)
         return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 

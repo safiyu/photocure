@@ -12,8 +12,10 @@
       document.documentElement.dataset.theme = t;
     })();
   </script>
-  <link rel="icon" type="image/png" href="/static/favicon.png">
+  <link rel="icon" href="/static/favicon.ico" type="image/vnd.microsoft.icon">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <link rel="icon" sizes="192x192" href="/static/icon-192.png">
+  <link rel="icon" sizes="512x512" href="/static/icon-512.png">
   <link rel="stylesheet" href="/static/style.css?v={{VERSION}}">
 </head>
 <body>
@@ -62,7 +64,7 @@
   <div class="shell">
     <aside class="side" id="side" aria-label="Main navigation">
       <div class="brand">
-        <img class="logo" src="/static/logo.png" alt="" width="38" height="38">
+        <img class="logo" src="/static/logo.svg" alt="" width="38" height="38">
         <div><b>Photocure</b></div>
       </div>
 
@@ -903,10 +905,14 @@
 
   <div id="facepanel" class="bio-overlay bg-cyber-grid" hidden role="dialog" aria-label="Face inspection panel"></div>
   <div id="toasts" class="toasts" aria-live="polite"></div>
-  <!-- Floating merge-face preview tooltip (JS-positioned on hover) -->
   <div id="people-merge-preview" role="tooltip" aria-hidden="true">
     <img id="people-merge-preview-img" src="" alt="">
     <span id="people-merge-preview-label"></span>
+  </div>
+  <!-- Floating tag list tooltip (JS-positioned on hover over +N tag pill) -->
+  <div id="card-tags-tooltip" class="tag-tooltip" hidden role="tooltip" aria-hidden="true">
+    <div class="tag-tooltip-title">Tags</div>
+    <div id="card-tags-tooltip-list" class="tag-tooltip-list"></div>
   </div>
   <script type="module" src="/static/virtual_grid.mjs"></script>
   <script src="/static/app.js?v={{VERSION}}"></script>

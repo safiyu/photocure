@@ -516,9 +516,13 @@
     img.onerror = () => { img.style.opacity = ".15"; };
     const thumb = el("div", { class: "thumb photo", title: "View photo" }, img);
     const showReason = it.uncertain_reason && !it.manual_bucket;
-    const flags = flagList(it).slice(0, 3);
-    const badgesEl = flags.length ? el("div", { class: "flags tags" },
-      flags.map((f) => el("span", { class: "badge tag " + f.cls, text: f.text }))) : null;
+    // Every flag lives in a single "+N" pill beside the category; hovering shows the full list.
+    const allFlags = flagList(it);
+    const flagPill = allFlags.length ? el("span", {
+      class: "cat-tag-pill tag-overflow-pill",
+      text: "+" + allFlags.length,
+      "data-overflow-tags": JSON.stringify(allFlags),
+    }) : null;
     const cap = el("figcaption", { class: "caption info" },
       el("div", { class: "fn name", title: it.relative_path || it.filename, text: it.filename }),
       showReason ? el("div", { class: "reason", title: it.uncertain_reason.text, text: shortReason(it) }) : null,
@@ -527,10 +531,10 @@
         el("button", { class: "catpick cat", type: "button", "data-catpick": id, title: "Change category",
           "aria-haspopup": "listbox", "aria-label": `Category ${catLabel(rawCat)}, change`, tabindex: -1 },
         el("i", { class: "dot" }), el("span", { class: "t", text: catLabel(rawCat) })),
+        flagPill,
         it.manual_bucket ? [el("span", { class: "tag", text: "edited" }),
           el("button", { class: "x", "data-clear": id, title: "Back to the AI choice",
-            "aria-label": "Back to the AI choice", tabindex: -1, html: icon("x", "sm") })] : null),
-      badgesEl);
+            "aria-label": "Back to the AI choice", tabindex: -1, html: icon("x", "sm") })] : null));
 
     const actions = el("div", { class: "actions" },
       el("button", {
@@ -1778,7 +1782,69 @@
         }
       } catch (e) { toast(e.message, "err"); }
     });
-    document.addEventListener("keydown", (ev) => {
+    // ── +N overflow-tag tooltip handling ───────────────────────────────────────
+(function () {
+  const tip   = document.getElementById("card-tags-tooltip");
+  const tlist = document.getElementById("card-tags-tooltip-list");
+  if (!tip || !tlist) return;
+  let curPill = null;
+
+  function showTip(pill, ev) {
+    let tags = [];
+    try { tags = JSON.parse(pill.dataset.overflowTags || "[]"); } catch (_) {}
+    if (!tags.length) return;
+    tlist.innerHTML = "";
+    tags.forEach(({ cls, text }) => {
+      const item = document.createElement("div");
+      item.className = "tag-tooltip-item" + (cls ? " " + cls : "");
+      const dot = document.createElement("span");
+      dot.className = "tag-dot";
+      item.append(dot, document.createTextNode(text));
+      tlist.appendChild(item);
+    });
+    positionTip(ev);
+    tip.removeAttribute("hidden");
+    tip.setAttribute("aria-hidden", "false");
+  }
+
+  function positionTip(ev) {
+    const GAP = 8;
+    const tw = tip.offsetWidth  || 160;
+    const th = tip.offsetHeight || 80;
+    let x = ev.clientX + GAP;
+    let y = ev.clientY + GAP;
+    if (x + tw > window.innerWidth - GAP) x = ev.clientX - tw - GAP;
+    if (y + th > window.innerHeight - GAP) y = ev.clientY - th - GAP;
+    tip.style.left = x + "px";
+    tip.style.top  = y + "px";
+  }
+
+  function hideTip() {
+    tip.setAttribute("hidden", "");
+    tip.setAttribute("aria-hidden", "true");
+    curPill = null;
+  }
+
+  document.addEventListener("mouseover", (ev) => {
+    const pill = ev.target.closest(".tag-overflow-pill");
+    if (!pill) return;
+    curPill = pill;
+    showTip(pill, ev);
+  });
+  document.addEventListener("mousemove", (ev) => {
+    if (!curPill) return;
+    positionTip(ev);
+  });
+  document.addEventListener("mouseout", (ev) => {
+    if (!curPill) return;
+    const to = ev.relatedTarget;
+    if (to && (curPill.contains(to) || tip.contains(to))) return;
+    hideTip();
+  });
+})();
+
+// Existing keydown listener
+document.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" || ev.key === " ") {
         const goto = ev.target.closest && ev.target.closest("[data-goto]");
         if (goto && goto.dataset.goto) {
@@ -3119,14 +3185,14 @@
 
     const overlay = $("#facepanel");
     if (!overlay) return;
-    overlay.hidden = false;
-    overlay.className = "bio-overlay bg-cyber-grid";
-    overlay.innerHTML = `
-      <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
-      <div style="position:relative;z-index:30;padding:24px;text-align:center;color:#94a3b8;font-family:var(--font-mono, monospace);">
-        Loading faces...
-      </div>
-    `;
+    const wasOpen = !overlay.hidden;
+    // Opening fresh: stay hidden until the data is ready, so the scrim, HUD and faces animate in
+    // together once. Already open (frame switch): keep what is on screen instead of blanking it.
+    if (!wasOpen) {
+      overlay.className = "bio-overlay bg-cyber-grid";
+      overlay.replaceChildren();
+    }
+    const reveal = () => { overlay.hidden = false; };
 
     try {
       const [burstData, faceData, peopleData] = await Promise.all([
@@ -3149,6 +3215,7 @@
 
       const items = faceData.items || [];
       if (!items.length) {
+        reveal();
         overlay.innerHTML = `
           <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
           <div style="position:relative;z-index:30;padding:40px;text-align:center;color:#94a3b8;font-family:var(--font-mono, monospace);">
@@ -3203,8 +3270,10 @@
         selectedFaceId = activeOverlayFaces[0].id;
       }
 
+      reveal();
       renderBiometricOverlay();
     } catch (e) {
+      reveal();
       overlay.innerHTML = `
         <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
         <div style="position:relative;z-index:30;padding:40px;text-align:center;color:#ef4444;font-family:var(--font-mono, monospace);">
@@ -3529,6 +3598,8 @@
     const matrixRows = (activeOverlayBurstData && activeOverlayBurstData.face_matrix && activeOverlayBurstData.face_matrix.rows) || [];
     const matrixSubjects = (activeOverlayBurstData && activeOverlayBurstData.face_matrix && activeOverlayBurstData.face_matrix.subjects) || [];
 
+    // Entry animations only play on the first render; later swaps (layout, zoom, frame) stay still.
+    overlay.classList.toggle("bio-rerender", !!overlay.querySelector(".bio-hud-top"));
     overlay.innerHTML = `
       <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
       <svg id="overlay-svg-canvas" class="bio-svg-canvas"></svg>
@@ -4007,7 +4078,8 @@
     if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
     if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
     $$("[data-faces]", $("#burstdetail")).forEach((b) => {
-      b.onclick = async () => {
+      b.onclick = async (ev) => {
+        ev.stopPropagation(); // the global [data-faces] delegate would open the overlay a second time
         const imgId = num(b.dataset.faces);
         await openBiometricProjection(id, imgId);
       };
@@ -5072,7 +5144,7 @@
         const chips = (about.models || []).map((m) => `<span class="about-chip">${esc(m.name)}</span>`).join("");
         aboutCard.innerHTML = `
           <div class="about">
-            <img class="about-logo" src="/static/logo.png" alt="" width="64" height="64">
+            <img class="about-logo" src="/static/logo.svg" alt="" width="64" height="64">
             <div class="about-main">
               <div class="about-title"><span class="about-name">Photocure</span><span class="about-ver">v${esc(about.version || "0.0.0")}</span></div>
               <p class="about-tag">Offline photo curation. Your photos never leave this computer.</p>
