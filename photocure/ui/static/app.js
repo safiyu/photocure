@@ -3340,12 +3340,12 @@
                 <span class="stat-pill ${m.eye_closed > 0.2 || m.has_blinks ? "warn" : "ok"}">${m.eye_closed > 0.2 || m.has_blinks ? "Blink" : "Eyes open"}</span>
               </div>
             </div>
-            <div class="actions">
+            <div class="actions actions-icon">
               ${m.is_best_shot
-                ? `<button class="btn btn-best is-best" disabled title="This is the best shot">${BURST_ICONS.check}Best</button>`
-                : `<button class="btn btn-best" data-makebest="${num(m.id)}" title="Set as best shot">${BURST_ICONS.star}Set best</button>`}
-              <button class="btn btn-del${m.delete_approved ? " is-del" : ""}${m.is_best_shot ? " warn-best" : ""}" data-markdelete="${num(m.id)}" data-is-best="${m.is_best_shot ? "1" : "0"}" aria-pressed="${m.delete_approved ? "true" : "false"}" title="${m.delete_approved ? "Marked for delete (click to unmark)" : (m.is_best_shot ? "Mark the best shot for delete" : "Mark this frame for delete")}" aria-label="Mark delete">${BURST_ICONS.trash}<span>${m.delete_approved ? "Marked" : "Delete"}</span></button>
-              ${m.face_count ? `<button class="btn btn-faces" data-faces="${num(m.id)}" data-count="${num(m.face_count)}" title="Inspect faces">${BURST_ICONS.face}Faces</button>` : ""}
+                ? `<button class="btn btn-best is-best" disabled title="This is the best shot" aria-label="This is the best shot">${BURST_ICONS.check}</button>`
+                : `<button class="btn btn-best" data-makebest="${num(m.id)}" title="Set as best shot" aria-label="Set as best shot">${BURST_ICONS.star}</button>`}
+              <button class="btn btn-del${m.delete_approved ? " is-del" : ""}${m.is_best_shot ? " warn-best" : ""}" data-markdelete="${num(m.id)}" data-is-best="${m.is_best_shot ? "1" : "0"}" aria-pressed="${m.delete_approved ? "true" : "false"}" title="${m.delete_approved ? "Marked for delete (click to unmark)" : (m.is_best_shot ? "Mark the best shot for delete" : "Mark this frame for delete")}" aria-label="${m.delete_approved ? "Marked for delete (click to unmark)" : "Mark this frame for delete"}">${BURST_ICONS.trash}</button>
+              ${m.face_count ? `<button class="btn btn-faces" data-faces="${num(m.id)}" data-count="${num(m.face_count)}" title="Inspect faces" aria-label="Inspect faces">${BURST_ICONS.face}</button>` : ""}
             </div>
           </figure>
         </article>`;

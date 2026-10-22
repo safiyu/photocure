@@ -1605,6 +1605,16 @@ body.has-picks .tools, body.has-picks .hover-actions {
 }
 .card-wrap .btn-faces:hover { background: var(--well); border-color: var(--primary); }
 
+/* Icon-only action row: fixed square buttons, centered, no stretching to fill the row. */
+.card-wrap .actions.actions-icon { justify-content: center; }
+.card-wrap .actions.actions-icon .btn,
+.card-wrap .actions.actions-icon .btn-del,
+.card-wrap .actions.actions-icon .btn-faces {
+  flex: none; width: 35px; padding: 0;
+}
+.card-wrap .actions.actions-icon .btn svg,
+.card-wrap .actions.actions-icon .btn-del svg { width: 15px; height: 15px; }
+
 /* ----------------------------------------------------- progress card (global) */
 .progress-card { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px 20px; margin: 4px 0 20px; display: flex; flex-direction: column; gap: 10px; }
 .progress-header { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
