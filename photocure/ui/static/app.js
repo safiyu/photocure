@@ -2426,158 +2426,265 @@
     // ── Build cards ──────────────────────────────────────────────────────────
     host.innerHTML = items.map((p) => `
       <div class="people-card" draggable="true" data-person-id="${num(p.id)}" data-face-count="${num(p.face_count)}">
-        <div class="people-card-actions">
-          <div class="people-drag-handle" title="Drag to merge with another person">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="9" cy="5" r="1" fill="currentColor"/><circle cx="15" cy="5" r="1" fill="currentColor"/>
-              <circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/>
-              <circle cx="9" cy="19" r="1" fill="currentColor"/><circle cx="15" cy="19" r="1" fill="currentColor"/>
-            </svg>
-          </div>
-          <button class="people-card-delete icon-btn" title="Delete this person cluster" aria-label="Delete person">
-            <svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg>
-          </button>
-        </div>
-        <div class="people-card-avatar">
+        <!-- Portrait Image -->
+        <div class="people-card-portrait">
           ${p.sample_face_id
             ? `<img class="people-face-img" src="/api/faces/${num(p.sample_face_id)}.jpg" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
                <div class="people-face-fallback" style="display:none"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/></svg></div>`
             : `<div class="people-face-fallback"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/></svg></div>`
           }
-          <div class="people-drop-overlay">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M8 12h8M12 8l4 4-4 4"/>
-              <circle cx="12" cy="12" r="10" stroke-dasharray="4 2"/>
-            </svg>
-            <span class="people-drop-label">Merge here</span>
+        </div>
+
+        <!-- Dark Bottom Gradient Vignette -->
+        <div class="people-card-vignette"></div>
+
+        <!-- Top-Left Hover Dismiss Button -->
+        <button class="people-card-dismiss" type="button" title="Not a person / Delete cluster" aria-label="Delete person">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        <!-- Top-Right Face Count Pill -->
+        <div class="people-card-count-badge" data-count="${num(p.face_count)}">
+          ${fmtN(p.face_count)}
+        </div>
+
+        <!-- Drag & Drop Overlay -->
+        <div class="people-drop-overlay">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M8 12h8M12 8l4 4-4 4"/>
+            <circle cx="12" cy="12" r="10" stroke-dasharray="4 2"/>
+          </svg>
+          <span class="people-drop-label">Merge here</span>
+        </div>
+
+        <!-- Bottom Controls Container -->
+        <div class="people-card-bottom">
+          ${p.similar_to ? `
+            <button class="people-merge-pill" type="button"
+                    data-source-id="${num(p.id)}"
+                    data-target-id="${num(p.similar_to.target_id)}"
+                    data-target-name="${esc(p.similar_to.target_name || 'Person #' + p.similar_to.target_id)}"
+                    title="Visually similar (${Math.round(p.similar_to.score * 100)}% match). Click to merge!">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="18" cy="18" r="3"></circle>
+                <circle cx="6" cy="6" r="3"></circle>
+                <path d="M6 21V9a9 9 0 0 0 9 9"></path>
+              </svg>
+              <span>Merge with ${esc(p.similar_to.target_name || 'Person #' + p.similar_to.target_id)}?</span>
+            </button>` : ""
+          }
+
+          <!-- Interactive Name Pill -->
+          <div class="people-name-pill-wrapper" data-person-id="${num(p.id)}" data-current-name="${esc(p.name || '')}">
+            <button class="people-name-pill" type="button">
+              <span class="people-name-label">
+                ${p.name ? `<span class="people-name-dot"></span>${esc(p.name)}` : `+ Name this person`}
+              </span>
+              <span class="people-name-action">Edit</span>
+            </button>
           </div>
         </div>
-        ${p.similar_to ? `
-          <div class="people-similar-badge" title="Visually similar to ${esc(p.similar_to.target_name || 'Cluster #' + p.similar_to.target_id)} (${Math.round(p.similar_to.score * 100)}% match). Drag onto it to merge!">
-            <svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg>
-            <span>${Math.round(p.similar_to.score * 100)}% match</span>
-          </div>` : ""
-        }
-        <div class="people-card-meta">
-          <span class="people-card-count" data-count="${num(p.face_count)}">${fmtN(p.face_count)} ${p.face_count === 1 ? "face" : "faces"}</span>
-        </div>
-        <input type="text" class="people-name" list="people-names" placeholder="Unnamed"
-               value="${esc(p.name || "")}" data-person-input="${num(p.id)}">
       </div>`).join("");
 
-    // ── Rename ───────────────────────────────────────────────────────────────
-    $$("[data-person-input]", host).forEach((input) => {
-      const commit = async () => {
-        const name = input.value.trim();
-        if (!name || name === input.defaultValue.trim()) return;
-        try {
-          await post(`/api/people/${input.dataset.personInput}/rename`, { name });
-          toast("Renamed", "ok");
-          await renderPeople();
-        } catch (e) { toast(e.message, "err"); }
-      };
-      input.addEventListener("change", commit);
-      input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); input.blur(); } });
-    });
-
-    // ── Drag-and-drop merge & card actions ───────────────────────────────────
+    // ── Card Interactions, Inline Editing, Merging, Drag & Drop ──────────────
     let dragSourceId = null;
     let dragSourceCount = 0;
 
     $$(".people-card", host).forEach((card) => {
-      // delete button
-      const delBtn = card.querySelector(".people-card-delete");
-      if (delBtn) {
-        delBtn.addEventListener("click", async (ev) => {
+      const pid = card.dataset.personId;
+
+      // ── Inline Naming ──────────────────────────────────────────────────────
+      const pillWrapper = card.querySelector(".people-name-pill-wrapper");
+      if (pillWrapper) {
+        pillWrapper.addEventListener("click", (ev) => {
           ev.stopPropagation();
-          const pid = card.dataset.personId;
-          const name = (card.querySelector(".people-name")?.value || "").trim() || `Person #${pid}`;
+          if (pillWrapper.querySelector(".people-name-form")) return;
+
+          const currentName = pillWrapper.dataset.currentName || "";
+          pillWrapper.innerHTML = `
+            <form class="people-name-form" onsubmit="return false;">
+              <input type="text" class="people-name-input" list="people-names" placeholder="Type a name..." value="${esc(currentName)}">
+              <button type="submit" class="people-name-submit" title="Save name">
+                <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </button>
+            </form>
+          `;
+          const input = pillWrapper.querySelector(".people-name-input");
+          const form = pillWrapper.querySelector(".people-name-form");
+          input.focus();
+          input.select();
+
+          let saved = false;
+          const save = async () => {
+            if (saved) return;
+            saved = true;
+            const newName = input.value.trim();
+            if (newName === currentName) {
+              restore();
+              return;
+            }
+            try {
+              await post(`/api/people/${pid}/rename`, { name: newName });
+              toast("Renamed ✓", "ok");
+              await renderPeople();
+            } catch (e) {
+              toast(e.message, "err");
+              restore();
+            }
+          };
+
+          const restore = () => {
+            pillWrapper.dataset.currentName = currentName;
+            pillWrapper.innerHTML = `
+              <button class="people-name-pill" type="button">
+                <span class="people-name-label">
+                  ${currentName ? `<span class="people-name-dot"></span>${esc(currentName)}` : `+ Name this person`}
+                </span>
+                <span class="people-name-action">Edit</span>
+              </button>
+            `;
+          };
+
+          form.addEventListener("submit", (e) => {
+            e.preventDefault();
+            save();
+          });
+
+          input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              save();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              saved = true;
+              restore();
+            }
+          });
+
+          input.addEventListener("blur", () => {
+            setTimeout(() => {
+              if (!saved && pillWrapper.contains(input)) save();
+            }, 180);
+          });
+        });
+      }
+
+      // ── Suggested Merge Pill ───────────────────────────────────────────────
+      const mergeBtn = card.querySelector(".people-merge-pill");
+      if (mergeBtn) {
+        mergeBtn.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          const sourceId = mergeBtn.dataset.sourceId;
+          const targetId = mergeBtn.dataset.targetId;
+          const targetName = mergeBtn.dataset.targetName;
+          try {
+            await post(`/api/people/${sourceId}/merge-into/${targetId}`, {});
+            toast(`Merged with ${targetName} ✓`, "ok");
+            await renderPeople();
+          } catch (e) {
+            toast(`Merge failed: ${e.message}`, "err");
+          }
+        });
+      }
+
+      // ── Dismiss / Delete Cluster ───────────────────────────────────────────
+      const dismissBtn = card.querySelector(".people-card-dismiss");
+      if (dismissBtn) {
+        dismissBtn.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          const name = pillWrapper?.dataset.currentName || `Person #${pid}`;
           const ok = await showConfirmDialog({
-            title: "Delete person?",
+            title: "Delete person cluster?",
             message: `Delete cluster for "${name}"? Photos will remain in your library, but face assignments to this person will be cleared.`,
             confirmText: "Delete",
             variant: "danger",
           });
           if (!ok) return;
+
+          card.style.transform = "scale(0.92)";
+          card.style.opacity = "0";
           try {
             await api(`/api/people/${pid}`, { method: "DELETE" });
             toast("Person deleted", "ok");
-            await renderPeople();
+            setTimeout(() => renderPeople(), 220);
           } catch (e) {
+            card.style.transform = "";
+            card.style.opacity = "";
             toast(`Delete failed: ${e.message}`, "err");
           }
         });
       }
 
-      // dragstart — record which card is being dragged
+      // ── Drag & Drop Merging ────────────────────────────────────────────────
       card.addEventListener("dragstart", (ev) => {
-        dragSourceId = card.dataset.personId;
+        dragSourceId = pid;
         dragSourceCount = parseInt(card.dataset.faceCount, 10) || 0;
         card.classList.add("people-card--dragging");
         ev.dataTransfer.effectAllowed = "move";
         ev.dataTransfer.setData("text/plain", dragSourceId);
-        // Ghost image: the avatar portion only
-        const avatar = card.querySelector(".people-card-avatar");
-        if (avatar) ev.dataTransfer.setDragImage(avatar, avatar.offsetWidth / 2, avatar.offsetHeight / 2);
+
+        const portrait = card.querySelector(".people-card-portrait");
+        if (portrait) {
+          ev.dataTransfer.setDragImage(portrait, portrait.offsetWidth / 2, portrait.offsetHeight / 2);
+        }
       });
 
       card.addEventListener("dragend", () => {
         card.classList.remove("people-card--dragging");
         $$(".people-card--drop-target", host).forEach((c) => {
           c.classList.remove("people-card--drop-target");
-          // reset combined count label
-          const countEl = c.querySelector(".people-card-count");
-          if (countEl) {
-            const orig = parseInt(countEl.dataset.count, 10) || 0;
-            countEl.textContent = `${fmtN(orig)} ${orig === 1 ? "face" : "faces"}`;
+          const badge = c.querySelector(".people-card-count-badge");
+          if (badge) {
+            const orig = parseInt(c.dataset.faceCount, 10) || 0;
+            badge.textContent = fmtN(orig);
           }
         });
         dragSourceId = null;
         dragSourceCount = 0;
       });
 
-      // dragenter/dragover — highlight drop target, show combined count
       card.addEventListener("dragenter", (ev) => {
         ev.preventDefault();
-        if (!dragSourceId || card.dataset.personId === dragSourceId) return;
+        if (!dragSourceId || pid === dragSourceId) return;
         card.classList.add("people-card--drop-target");
-        // Show combined count preview
-        const countEl = card.querySelector(".people-card-count");
-        if (countEl) {
+
+        const badge = card.querySelector(".people-card-count-badge");
+        if (badge) {
           const targetCount = parseInt(card.dataset.faceCount, 10) || 0;
           const combined = targetCount + dragSourceCount;
-          countEl.textContent = `${fmtN(combined)} ${combined === 1 ? "face" : "faces"} after merge`;
+          badge.textContent = fmtN(combined);
         }
       });
 
       card.addEventListener("dragover", (ev) => {
         ev.preventDefault();
-        if (!dragSourceId || card.dataset.personId === dragSourceId) return;
+        if (!dragSourceId || pid === dragSourceId) return;
         ev.dataTransfer.dropEffect = "move";
       });
 
       card.addEventListener("dragleave", (ev) => {
-        // Only fire when leaving the card entirely (not just entering a child)
         if (card.contains(ev.relatedTarget)) return;
         card.classList.remove("people-card--drop-target");
-        const countEl = card.querySelector(".people-card-count");
-        if (countEl) {
+        const badge = card.querySelector(".people-card-count-badge");
+        if (badge) {
           const orig = parseInt(card.dataset.faceCount, 10) || 0;
-          countEl.textContent = `${fmtN(orig)} ${orig === 1 ? "face" : "faces"}`;
+          badge.textContent = fmtN(orig);
         }
       });
 
-      // drop — call merge API
       card.addEventListener("drop", async (ev) => {
         ev.preventDefault();
-        const targetId = card.dataset.personId;
-        if (!dragSourceId || targetId === dragSourceId) return;
+        if (!dragSourceId || pid === dragSourceId) return;
 
         card.classList.remove("people-card--drop-target");
         card.classList.add("people-card--merging");
 
         try {
-          await post(`/api/people/${dragSourceId}/merge-into/${targetId}`, {});
+          await post(`/api/people/${dragSourceId}/merge-into/${pid}`, {});
           toast("Clusters merged ✓", "ok");
           await renderPeople();
         } catch (e) {
@@ -2586,11 +2693,15 @@
         }
       });
 
-      // click → open person photo overlay
+      // ── Card Click → Open Person Photo Overlay ─────────────────────────────
       card.addEventListener("click", (ev) => {
-        if (ev.target.closest(".people-name") || ev.target.closest(".people-card-actions")) return;
+        if (ev.target.closest(".people-name-pill-wrapper") ||
+            ev.target.closest(".people-merge-pill") ||
+            ev.target.closest(".people-card-dismiss")) {
+          return;
+        }
         if (dragSourceId) return; // ignore stray clicks right after a drag
-        showPersonPhotos(card.dataset.personId);
+        showPersonPhotos(pid);
       });
     });
   }

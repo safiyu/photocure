@@ -3152,95 +3152,335 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .people-sort-caption {
   font-size: 13px; font-weight: 600; color: var(--mut); margin-right: 2px;
 }
-.people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+.people-section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: #94a3b8;
+  text-transform: uppercase;
+  margin: 4px 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.people-section-label::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: rgba(255, 255, 255, 0.08);
+}
+.people-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 18px;
+}
+
 .people-card {
-  background: var(--sheet); border: 1px solid var(--line);
-  border-radius: var(--r-md, 12px); padding: 14px;
-  display: flex; flex-direction: column; gap: 8px;
-  position: relative; cursor: grab;
-  transition: box-shadow .15s, border-color .15s, transform .15s, opacity .15s;
+  position: relative;
+  aspect-ratio: 4 / 5;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #12141D;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition: transform .3s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color .3s ease,
+              box-shadow .3s ease,
+              opacity .25s ease;
   user-select: none;
 }
-.people-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,.3); border-color: var(--focus); }
-
-/* ── Card actions (top-right buttons: drag + delete) ─────────────────────── */
-.people-card-actions {
-  position: absolute; top: 8px; right: 8px; z-index: 2;
-  display: flex; align-items: center; gap: 4px;
+.people-card:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  transform: translateY(-3px);
 }
-.people-drag-handle {
-  color: var(--mut); opacity: 0; transition: opacity .15s, color .15s, background .15s;
-  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
-  cursor: grab; border-radius: 6px;
-}
-.people-card:hover .people-drag-handle { opacity: 1; }
-.people-drag-handle:hover { color: var(--ink); background: var(--well); }
-.people-drag-handle svg { width: 16px; height: 16px; }
 
-.people-card-delete {
-  color: var(--mut); opacity: 0; transition: opacity .15s, color .15s, background .15s;
-  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
-  border-radius: 6px; cursor: pointer; border: none; background: transparent; padding: 0;
+/* ── Full-bleed portrait image & vignette ────────────────────────────────── */
+.people-card-portrait {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  overflow: hidden;
+  background: #0d0f17;
 }
-.people-card:hover .people-card-delete { opacity: 1; }
-.people-card-delete:hover { color: var(--err); background: color-mix(in srgb, var(--err) 15%, transparent); }
-.people-card-delete svg { width: 15px; height: 15px; }
-
-/* ── Similarity match badge ──────────────────────────────────────────────── */
-.people-similar-badge {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 3px 8px; border-radius: 999px;
-  background: color-mix(in srgb, var(--focus) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--focus) 35%, transparent);
-  color: var(--focus);
-  font-size: 11px; font-weight: 600;
-  cursor: help;
-  align-self: flex-start;
-  margin-top: -2px;
+.people-face-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 20%;
+  display: block;
+  transition: transform .5s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.people-similar-badge svg { width: 12px; height: 12px; }
+.people-card:hover .people-face-img {
+  transform: scale(1.05);
+}
+.people-face-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mut);
+  background: #12141D;
+}
+.people-face-fallback svg {
+  width: 56px;
+  height: 56px;
+}
 
-/* ── Avatar ──────────────────────────────────────────────────────────────── */
-.people-card-avatar { width: 100%; aspect-ratio: 1; border-radius: calc(var(--r-md, 12px) - 2px); overflow: hidden; background: var(--well); margin-bottom: 2px; position: relative; }
-.people-face-img { width: 100%; height: 100%; object-fit: cover; object-position: center top; display: block; transition: transform .2s ease; }
-.people-card:hover .people-face-img { transform: scale(1.04); }
-.people-face-fallback { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: var(--mut); }
-.people-face-fallback svg { width: 48px; height: 48px; }
+/* Gradient vignette over portrait */
+.people-card-vignette {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.95) 0%, rgba(0, 0, 0, 0.45) 45%, rgba(0, 0, 0, 0.08) 75%, transparent 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ── Top-Left Dismiss / Delete button ────────────────────────────────────── */
+.people-card-dismiss {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #cbd5e1;
+  opacity: 0;
+  transition: opacity .2s ease, background .2s ease, border-color .2s ease, color .2s ease, transform .15s ease;
+  cursor: pointer;
+}
+.people-card:hover .people-card-dismiss {
+  opacity: 1;
+}
+.people-card-dismiss:hover {
+  background: rgba(239, 68, 68, 0.85);
+  border-color: rgba(248, 113, 113, 0.9);
+  color: #fff;
+  transform: scale(1.08);
+}
+.people-card-dismiss svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ── Top-Right Count badge ───────────────────────────────────────────────── */
+.people-card-count-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+/* ── Bottom Controls Container ───────────────────────────────────────────── */
+.people-card-bottom {
+  position: absolute;
+  inset-inline: 12px;
+  bottom: 12px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Merge suggestion pill ───────────────────────────────────────────────── */
+.people-merge-pill {
+  width: 100%;
+  padding: 7px 12px;
+  border-radius: 12px;
+  background: rgba(99, 102, 241, 0.32);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(129, 140, 248, 0.45);
+  color: #e0e7ff;
+  font-size: 12px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  text-decoration: none;
+  box-sizing: border-box;
+}
+.people-merge-pill:hover {
+  background: rgba(99, 102, 241, 0.52);
+  border-color: rgba(165, 180, 252, 0.65);
+  color: #fff;
+  transform: translateY(-1px);
+}
+.people-merge-pill svg {
+  width: 14px;
+  height: 14px;
+  color: #a5b4fc;
+  flex-shrink: 0;
+}
+
+/* ── Interactive Name pill ───────────────────────────────────────────────── */
+.people-name-pill-wrapper {
+  width: 100%;
+}
+.people-name-pill {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #fff;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+  box-sizing: border-box;
+}
+.people-card:hover .people-name-pill {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+.people-name-pill:hover {
+  background: rgba(0, 0, 0, 0.92);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+.people-name-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.people-name-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #34d399;
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.7);
+  flex-shrink: 0;
+}
+.people-name-action {
+  font-size: 11px;
+  color: #94a3b8;
+  flex-shrink: 0;
+  transition: color .15s ease;
+}
+.people-card:hover .people-name-action {
+  color: #cbd5e1;
+}
+
+/* Inline Edit Form */
+.people-name-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid #6366f1;
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+  box-sizing: border-box;
+}
+.people-name-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #fff;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 0;
+}
+.people-name-input::placeholder {
+  color: #64748b;
+}
+.people-name-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #34d399;
+  cursor: pointer;
+  padding: 2px;
+  flex-shrink: 0;
+  transition: transform .15s ease, color .15s ease;
+}
+.people-name-submit:hover {
+  color: #6ee7b7;
+  transform: scale(1.15);
+}
+.people-name-submit svg {
+  width: 16px;
+  height: 16px;
+}
 
 /* ── Drop overlay (shown when another card is dragged over) ──────────────── */
 .people-drop-overlay {
   position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 6px;
-  background: rgba(43, 154, 246, .72); backdrop-filter: blur(4px);
+  align-items: center; justify-content: center; gap: 8px;
+  background: rgba(99, 102, 241, 0.78); backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   color: #fff; border-radius: inherit;
   opacity: 0; pointer-events: none;
-  transition: opacity .15s;
+  transition: opacity .18s;
+  z-index: 10;
 }
-.people-drop-overlay svg { width: 40px; height: 40px; }
-.people-drop-label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.people-drop-overlay svg { width: 44px; height: 44px; }
+.people-drop-label { font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 
-/* ── Dragging state (the card being lifted) ──────────────────────────────── */
-.people-card--dragging { opacity: .45; transform: scale(.97); cursor: grabbing; }
+/* ── Dragging state ──────────────────────────────────────────────────────── */
+.people-card--dragging { opacity: .45; transform: scale(.96); cursor: grabbing; }
 
-/* ── Drop target (valid landing zone) ───────────────────────────────────── */
-.people-card--drop-target { border-color: var(--focus); box-shadow: 0 0 0 2px var(--focus); }
+/* ── Drop target state ───────────────────────────────────────────────────── */
+.people-card--drop-target {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px #6366f1, 0 16px 40px rgba(99, 102, 241, 0.4);
+}
 .people-card--drop-target .people-drop-overlay { opacity: 1; }
-.people-card--drop-target .people-face-img { transform: scale(1.04); }
+.people-card--drop-target .people-face-img { transform: scale(1.05); }
 @keyframes spin-ring { to { stroke-dashoffset: -24; } }
 .people-card--drop-target .people-drop-overlay svg circle {
   animation: spin-ring .8s linear infinite;
 }
 
-/* ── Merging state (waiting for API) ─────────────────────────────────────── */
-@keyframes people-merge-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(43,154,246,.5); } 50% { box-shadow: 0 0 0 8px rgba(43,154,246,0); } }
+/* ── Merging state ───────────────────────────────────────────────────────── */
+@keyframes people-merge-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(99,102,241,.6); } 50% { box-shadow: 0 0 0 10px rgba(99,102,241,0); } }
 .people-card--merging { animation: people-merge-pulse .6s ease-out 2; pointer-events: none; }
-
-/* ── Meta / count ────────────────────────────────────────────────────────── */
-.people-card-meta { display: flex; align-items: center; gap: 6px; min-height: 20px; }
-.people-card-count { color: var(--mut); font-size: 13px; transition: color .15s; }
-.people-card--drop-target .people-card-count { color: var(--focus); font-weight: 600; }
-.people-name { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--well); color: var(--ink); width: 100%; box-sizing: border-box; cursor: text; }
-.people-name:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
 
 
