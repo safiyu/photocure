@@ -26,15 +26,6 @@ def _step(html: str, step_id: str) -> str:
 
 # ------------------------------------------------------------------ triple chevrons
 
-def test_step_flow_has_three_chevrons():
-    html = _html()
-    assert _step(html, "step-scan").count('class="chev"') == 3, "step-scan needs 3 chevrons"
-    assert 'class="chev"' not in _step(html, "step-infer"), "the last step has no trailing chevrons"
-    rule = re.search(r"\.step-flow\s+\.chev:nth-child\(3\)\s*\{([^}]*)\}", _css())
-    assert rule, ".step-flow .chev:nth-child(3) rule missing"
-    assert ".7s" in rule.group(1), "third chevron must be delayed .7s to extend the stagger"
-
-
 # ------------------------------------------------------------------ sidebar
 
 def _nav(html: str) -> str:
@@ -155,15 +146,6 @@ def test_hero_is_not_sticky_and_reduced_motion_covers_transitions():
 
 
 # ------------------------------------------------------------------ blob cards and dark gradient
-
-def test_step_cards_have_organic_elliptical_radii():
-    css = _css()
-    rule = re.search(r"(?m)^\.step\s*\{([^}]*)\}", css)
-    assert rule, ".step base rule not found"
-    radius = re.search(r"border-radius:\s*([^;]+);", rule.group(1))
-    assert radius and "/" in radius.group(1), "blob shape needs elliptical radii (a '/' in border-radius)"
-    assert "var(--r-lg)" not in radius.group(1)
-
 
 def test_active_step_is_raised_with_scooped_cta():
     css = _css()

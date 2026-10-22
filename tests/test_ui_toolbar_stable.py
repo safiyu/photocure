@@ -16,8 +16,8 @@ def _rule(selector: str) -> str:
 
 
 def test_page_reserves_the_scrollbar_gutter():
-    body = _rule("html")
-    assert "scrollbar-gutter: stable" in body and "overflow-y: scroll" in body
+    body = _rule(".content")
+    assert "scrollbar-gutter: stable" in body and "overflow-y: auto" in body
 
 
 def test_scrubber_is_a_fixed_grid_not_a_wrapping_row():
@@ -28,5 +28,5 @@ def test_scrubber_is_a_fixed_grid_not_a_wrapping_row():
 
 
 def test_row_count_has_a_stable_width():
-    body = _rule(".rowcount")
+    body = _rule(".toolbar .rowcount, .toolbar .count")
     assert "min-width" in body and "text-align: right" in body

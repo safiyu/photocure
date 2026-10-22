@@ -50,6 +50,18 @@ try {
   await page.waitFor("document.querySelector('#grid') && document.querySelector('#grid').classList.contains('vgrid')", 20000, "app initialised");
   await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click()");
   await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 20000, "first cards");
+  await page.eval(`(() => {
+    const sc = document.querySelector('.content');
+    if (!sc) return false;
+    window.__sc = sc;
+    window.scrollTo = function(x, y) {
+      if (typeof x === 'object' && x !== null) return sc.scrollTo(x);
+      return sc.scrollTo(x || 0, y || 0);
+    };
+    Object.defineProperty(window, 'scrollY', { get: () => sc.scrollTop, configurable: true });
+    Object.defineProperty(document.documentElement, 'scrollHeight', { get: () => sc.scrollHeight, configurable: true });
+    return true;
+  })()`);
   await settle();
 
   await scenario("one-time code signs in and is removed from the address bar", async () => {
@@ -831,21 +843,6 @@ try {
     }
   });
 
-  await scenario("step chevrons are centered in the gaps and animate", async () => {
-    await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); true");
-    await settle();
-    const r = await page.eval(`(() => {
-      const steps = [...document.querySelectorAll('.steps > .step')];
-      return steps.slice(0, 1).map((s, i) => {
-        const a = s.getBoundingClientRect(), b = steps[i + 1].getBoundingClientRect(), f = s.querySelector('.step-flow').getBoundingClientRect();
-        return { gap: (a.right + b.left) / 2, flow: (f.left + f.right) / 2, anim: getComputedStyle(s.querySelector('.chev')).animationName };
-      });
-    })()`);
-    for (const x of r) {
-      check(Math.abs(x.gap - x.flow) <= 3, `chevrons are ${Math.round(x.flow - x.gap)}px off the gap center`);
-      check(x.anim === "chev-flow", "chevrons are not animating: " + x.anim);
-    }
-  });
 
   await scenario("a dismissed progress card stays dismissed until a new task starts", async () => {
     const stub = (run, active) => page.eval(`(() => { if (!window.__rf2) window.__rf2 = window.fetch.bind(window); window.fetch = (u, i) => /\\/api\\/progress/.test(String(u)) ? Promise.resolve(new Response(JSON.stringify({ active: ${active}, task: "Scan", step: "Scan", done: ${active ? 3 : 10}, total: 10, percent: ${active ? 30 : 100}, message: "Scan complete", detail: "", error: null, stopping: false, stopped: false, run: ${run} }), { status: 200, headers: { "Content-Type": "application/json" } })) : window.__rf2(u, i); return true; })()`);

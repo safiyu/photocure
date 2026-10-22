@@ -509,10 +509,10 @@
         el("button", { class: "catpick cat", type: "button", "data-catpick": id, title: "Change category",
           "aria-haspopup": "listbox", "aria-label": `Category ${catLabel(rawCat)}, change`, tabindex: -1 },
         el("i", { class: "dot" }), el("span", { class: "t", text: catLabel(rawCat) })),
-        badgesEl,
         it.manual_bucket ? [el("span", { class: "tag", text: "edited" }),
           el("button", { class: "x", "data-clear": id, title: "Back to the AI choice",
-            "aria-label": "Back to the AI choice", tabindex: -1, html: icon("x", "sm") })] : null));
+            "aria-label": "Back to the AI choice", tabindex: -1, html: icon("x", "sm") })] : null),
+      badgesEl);
 
     const actions = el("div", { class: "actions" },
       el("button", {
@@ -3185,6 +3185,13 @@
     const nameById = Object.fromEntries(data.members.map((m) => [m.id, m.filename]));
     const summary = groupSummary(group, (i) => nameById[i] || "this frame");
     const banner = summary ? `<div class="gm-banner ${summary.tone}" role="status">${esc(summary.text)}</div>` : "";
+    const gmBadge = (m) => {
+      if (!summary) return "";
+      if (group.status === "perfect" && m.id === group.best_id) return '<span class="tag-badge best gm-badge">All eyes open</span>';
+      if (group.status === "composite" && (m.id === group.best_id || m.id === group.partner_id)) return '<span class="tag-badge best gm-badge">Composite pair</span>';
+      if (group.status === "best_effort" && m.id === group.best_id) return '<span class="tag-badge warn gm-badge">Closest</span>';
+      return "";
+    };
     const gmDetail = (m) => {
       const f = gmById[m.id];
       if (!f) return "";
@@ -3228,7 +3235,7 @@
             <div class="caption">
               <div class="burst-row-title">
                 <div class="file" title="${esc(m.filename)}">${esc(m.filename)}</div>
-                <span class="tag-badge ${m.is_best_shot ? "best" : (m.delete_approved ? "warn" : "")}">${m.is_best_shot ? "Best shot" : (m.delete_approved ? "Marked delete" : "Alternate")}</span>
+                <span class="tag-badge ${m.is_best_shot ? "best" : (m.delete_approved ? "warn" : "")}">${m.is_best_shot ? "Best shot" : (m.delete_approved ? "Marked delete" : "Alternate")}</span>${gmBadge(m)}
               </div>
               <div class="meta">${esc(metaText)}</div>
               <div class="burst-stats">

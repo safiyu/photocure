@@ -130,10 +130,9 @@ export class VirtualGrid {
       if (this.raf) return;
       this.raf = win.requestAnimationFrame(() => { this.raf = 0; this.update(); });
     };
-    this._scroller = (host && typeof host.closest === "function") ? host.closest(".content") : null;
-    if (this._scroller && typeof this._scroller.addEventListener === "function") {
-      this._scroller.addEventListener("scroll", this._schedule, { passive: true });
-    }
+    this._scroller = null;
+    this._scrollerBound = false;
+    this._getScroller();
     win.addEventListener("scroll", this._schedule, { passive: true });
     win.addEventListener("resize", this._schedule);
     if (typeof ResizeObserver !== "undefined") {
@@ -146,6 +145,10 @@ export class VirtualGrid {
     if (!this._scroller && this.host && typeof this.host.closest === "function") {
       this._scroller = this.host.closest(".content");
     }
+    if (this._scroller && !this._scrollerBound && typeof this._scroller.addEventListener === "function") {
+      this._scroller.addEventListener("scroll", this._schedule, { passive: true });
+      this._scrollerBound = true;
+    }
     return this._scroller;
   }
 
@@ -153,7 +156,7 @@ export class VirtualGrid {
     if (typeof this.host.removeEventListener === "function") {
       this.host.removeEventListener("focusin", this._onFocusIn);
     }
-    if (this._scroller && typeof this._scroller.removeEventListener === "function") {
+    if (this._scroller && this._scrollerBound && typeof this._scroller.removeEventListener === "function") {
       this._scroller.removeEventListener("scroll", this._schedule);
     }
     this.win.removeEventListener("scroll", this._schedule);

@@ -1818,6 +1818,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
   .bulk { left: 50%; width: calc(100vw - 24px); flex-wrap: wrap; border-radius: 18px; }
   /* C8: the 3-step workflow stacks into a single column on tablet/mobile. */
   .steps { grid-template-columns: 1fr; }
+  .steps.pipe-cols { grid-template-columns: 1fr; }
   .step.active { transform: none; }
   .step-flow { right: 50%; top: auto; bottom: -8px; transform: translate(50%, 50%) rotate(90deg); }
   .lb { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }

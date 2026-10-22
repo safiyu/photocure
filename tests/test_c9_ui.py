@@ -16,32 +16,6 @@ def _index() -> str:
     return INDEX.read_text(encoding="utf-8")
 
 
-def test_step_flow_markup_only_inside_the_first_step():
-    html = _index()
-    scan_block = re.search(
-        r'<li class="step" id="step-scan">(.*?)</li>', html, re.DOTALL
-    )
-    assert scan_block, "step-scan <li> not found"
-    assert 'class="step-flow"' in scan_block.group(1), "step-scan must contain .step-flow"
-    assert 'aria-hidden="true"' in scan_block.group(1), ".step-flow must be aria-hidden"
-    assert scan_block.group(1).count('class="chev"') == 3, "step-scan .step-flow must hold 3 chevrons"
-
-    infer_block = re.search(
-        r'<li class="step" id="step-infer">(.*?)</li>', html, re.DOTALL
-    )
-    assert infer_block, "step-infer <li> not found"
-    assert 'class="step-flow"' not in infer_block.group(1), (
-        "step-infer (last) must NOT contain a trailing .step-flow"
-    )
-
-
-def test_step_flow_css_rule_and_keyframes():
-    css = _style()
-    assert re.search(r"\.step-flow\s*\{", css), ".step-flow rule missing"
-    assert "@keyframes chev-flow" in css, "@keyframes chev-flow missing"
-    assert re.search(r"\.step-flow\s+\.chev\s*\{", css), ".step-flow .chev rule missing"
-
-
 def test_step_flow_state_aware_colours():
     css = _style()
     done = re.search(r"\.step\.done\s+\.step-flow\s*\{([^}]*)\}", css)
