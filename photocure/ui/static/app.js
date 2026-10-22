@@ -342,7 +342,15 @@
   }
 
   const eff = (it) => it.manual_bucket || it.category;
-  // Tiers: micro for the grid, medium for burst inspection, preview for the lightbox.
+  // Dynamic tier: micro (440px) when small, medium (800px) when slider is enlarged (>210px)
+  // or on high-DPI screens, so thumbnails never get noisy/pixelated when enlarged.
+  function gridThumbTier(density) {
+    const d = density != null ? density : (state.density || 200);
+    const dpr = typeof window !== "undefined" ? (window.devicePixelRatio || 1) : 1;
+    return (d > 210 || d * dpr > 360) ? "medium" : "micro";
+  }
+
+  // Tiers: micro for the grid (when small), medium for enlarged cards/bursts, preview for lightbox.
   const thumbUrl = (id, tier) => {
     const it = state.byId[id];
     return "/thumbnail/" + num(id) + "?tier=" + (tier || "micro") + (it && it.fp ? "&v=" + it.fp : "");
@@ -495,7 +503,16 @@
     const cls = ["card", it.locked ? "locked" : "", picked ? "picked" : "", num(it.rating) === -1 ? "rejected" : "",
       it.delete_approved ? "marked" : "", isBest ? "best" : ""]
       .filter(Boolean).join(" ");
-    const img = el("img", { loading: "lazy", decoding: "async", src: thumbUrl(id), alt: it.filename || "" });
+    const curTier = gridThumbTier();
+    const v = it && it.fp ? "&v=" + it.fp : "";
+    const img = el("img", {
+      loading: "lazy",
+      decoding: "async",
+      src: thumbUrl(id, curTier),
+      srcset: `${thumbUrl(id, "micro")} 440w, ${thumbUrl(id, "medium")} 800w`,
+      sizes: `(max-width: 480px) 100vw, ${Math.round((state.density || 200) * 1.25)}px`,
+      alt: it.filename || "",
+    });
     img.onerror = () => { img.style.opacity = ".15"; };
     const thumb = el("div", { class: "thumb photo", title: "View photo" }, img);
     const showReason = it.uncertain_reason && !it.manual_bucket;
@@ -1885,7 +1902,7 @@
     img.classList.remove("swap-in");
     void img.offsetWidth;
     img.classList.add("swap-in");
-    img.src = thumbUrl(id, "micro");  // already cached from the grid: shows instantly
+    img.src = thumbUrl(id, gridThumbTier());  // already cached from the grid: shows instantly
     $("#lb-loading").hidden = false;
     const big = new Image();
     big.onload = () => { if (my === lb.token) { img.src = big.src; $("#lb-loading").hidden = true; } };
@@ -5138,14 +5155,42 @@
 
     let saved = null;
     try { saved = localStorage.getItem("pcur-density"); } catch (e) { /* ignore */ }
-    const curVal = saved || ($("#density") ? $("#density").value : "200") || "200";
+    const curVal = saved || ($("#density") ? $("#density").value : "220") || "220";
     const setDens = (val) => {
-      document.documentElement.style.setProperty("--thumb-min", val + "px");
-      try { localStorage.setItem("pcur-density", val); } catch (e) { /* ignore */ }
+      const numVal = Math.max(220, parseInt(val, 10) || 220);
+      state.density = numVal;
+      document.documentElement.style.setProperty("--thumb-min", numVal + "px");
+      try { localStorage.setItem("pcur-density", String(numVal)); } catch (e) { /* ignore */ }
       $$(".density input, #density, .density-slider").forEach((s) => {
-        if (s.value !== String(val)) s.value = val;
+        if (s.value !== String(numVal)) s.value = numVal;
       });
-      allGrids().forEach((g) => g.vg.update());
+
+      const newTier = gridThumbTier(numVal);
+      const tierChanged = state.gridTier && state.gridTier !== newTier;
+      state.gridTier = newTier;
+
+      // Update sizes attribute and upgrade visible card images in real time
+      const sizesAttr = `(max-width: 480px) 100vw, ${Math.round(numVal * 1.25)}px`;
+      $$(".card .thumb img, .vgrid .thumb img").forEach((img) => {
+        img.sizes = sizesAttr;
+        const card = img.closest(".card");
+        if (card && card.dataset.id) {
+          const id = num(card.dataset.id);
+          const expected = thumbUrl(id, newTier);
+          if (newTier === "medium" && !img.src.includes("tier=medium")) {
+            img.src = expected;
+          } else if (newTier === "micro" && img.src.includes("tier=medium")) {
+            img.src = expected;
+          }
+        }
+      });
+
+      allGrids().forEach((g) => {
+        if (g && g.vg) {
+          if (tierChanged) g.vg._clearCards();
+          g.vg.update();
+        }
+      });
     };
     document.addEventListener("input", (e) => {
       if (e.target && e.target.matches && e.target.matches(".density input, #density, .density-slider")) {

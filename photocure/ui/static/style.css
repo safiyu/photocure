@@ -46,7 +46,7 @@
 
   --r-sm: 8px;
   --r-lg: 14px;
-  --thumb-min: 200px;
+  --thumb-min: 220px;
   --side-w: 252px;
 
   /* Brand scales sampled from the logo (blue 45%, pink 26%, amber 22%). */
@@ -871,17 +871,21 @@ body.has-picks .tools, body.has-picks .hover-actions {
 }
 .card .actions {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   justify-content: center;
+  align-items: center;
   margin-top: auto;
   padding-top: 8px;
   border-top: 1px solid var(--line);
   box-sizing: border-box;
   flex: none;
+  width: 100%;
 }
 /* Icon-only, same fixed-square treatment as the burst frame card (.card-wrap .actions-icon). */
 .card .actions .btn {
-  width: 35px;
+  flex: 1 1 0;
+  max-width: 35px;
+  min-width: 0;
   height: 34px;
   border-radius: 10px;
   font-size: 11px;
@@ -895,7 +899,6 @@ body.has-picks .tools, body.has-picks .hover-actions {
   cursor: pointer;
   transition: all .18s ease;
   padding: 0;
-  flex: none;
   box-sizing: border-box;
 }
 .card .actions .btn svg,
