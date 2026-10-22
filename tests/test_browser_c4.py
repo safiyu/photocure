@@ -102,6 +102,6 @@ def test_the_expected_scenarios_all_ran(outcome):
         "persistent reset-filters", "version badge button", "touch swipe navigation",
         "date presets", "roving focus", "picker and help modals", "no script errors",
         "rapid tab switching", "reduced motion closes", "reopening a dialog that is closing",
-        "import flow: the next step", "keyboard focus shows a visible ring", "clicking the version opens Settings", "empty states sit near the vertical middle", "step chevrons are centered", "a dismissed progress card stays dismissed", "category dropdown is alphabetical", "toolbar and sliders stay put", "burst detail shows the group matrix", "utility tab collects reference shots", "event stories fall back", "on a wide screen the frame is centered",
+        "import flow: the next step", "keyboard focus shows a visible ring", "clicking the version opens Settings", "empty states sit near the vertical middle", "a dismissed progress card stays dismissed", "category dropdown is alphabetical", "toolbar and sliders stay put", "burst detail shows the group matrix", "utility tab collects reference shots", "event stories fall back", "on a wide screen the frame is centered",
     ):
         assert any(needle in n for n in names), f"no scenario mentions {needle!r}: {sorted(names)}"

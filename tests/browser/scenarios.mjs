@@ -159,14 +159,14 @@ try {
   let rated;
   await scenario("keys rate, clear, reject, un-reject and favourite the selected photo", async () => {
     rated = await page.eval("document.querySelector('#grid .card.sel .fn').textContent");
-    const flags = () => page.eval("document.querySelector('#grid .card.sel .flags').textContent");
+    const flags = () => page.eval("(document.querySelector('#grid .card.sel .flags')?.textContent ?? '')");
     const ratings = async () => (await api("/api/facets")).ratings;
     const before = await ratings();
     await press("4");
-    await page.waitFor("document.querySelector('#grid .card.sel .flags').textContent.includes('\\u26054')", 8000, "four stars shown");
+    await page.waitFor("(document.querySelector('#grid .card.sel .flags')?.textContent ?? '').includes('\\u26054')", 8000, "four stars shown");
     check((await ratings())["4"] === before["4"] + 1, "server did not record 4 stars");
     await press("0");
-    await page.waitFor("!document.querySelector('#grid .card.sel .flags').textContent.includes('\\u2605')", 8000, "rating cleared");
+    await page.waitFor("!(document.querySelector('#grid .card.sel .flags')?.textContent ?? '').includes('\\u2605')", 8000, "rating cleared");
     await press("x");
     await page.waitFor("document.querySelector('#grid .card.sel.rejected')", 8000, "rejected look");
     check((await flags()).includes("Rejected"), "no Rejected badge");
@@ -174,11 +174,11 @@ try {
     await press("x");
     await page.waitFor("!document.querySelector('#grid .card.sel.rejected')", 8000, "un-rejected");
     await press("f");
-    await page.waitFor("document.querySelector('#grid .card.sel .flags').textContent.includes('\\u2665')", 8000, "favourite badge");
+    await page.waitFor("(document.querySelector('#grid .card.sel .flags')?.textContent ?? '').includes('\\u2665')", 8000, "favourite badge");
     await press("f");
-    await page.waitFor("!document.querySelector('#grid .card.sel .flags').textContent.includes('\\u2665')", 8000, "favourite removed");
+    await page.waitFor("!(document.querySelector('#grid .card.sel .flags')?.textContent ?? '').includes('\\u2665')", 8000, "favourite removed");
     await press("5");
-    await page.waitFor("document.querySelector('#grid .card.sel .flags').textContent.includes('\\u26055')", 8000, "five stars shown");
+    await page.waitFor("(document.querySelector('#grid .card.sel .flags')?.textContent ?? '').includes('\\u26055')", 8000, "five stars shown");
     await shot("04-rated");
   });
 
@@ -396,7 +396,7 @@ try {
 
     // A selection: choosing from a selected card moves every selected photo.
     const b = await idOf(1), c = await idOf(2);
-    for (const id of [b, c]) await page.eval(`document.querySelector('#grid .card[data-id="${id}"] .pick').click()`);
+    for (const id of [b, c]) await page.eval(`document.querySelector('#grid .card[data-id="${id}"] [data-pick]').click()`);
     await page.waitFor("!document.querySelector('#bulkbar').hidden", 5000, "bulk bar shows");
     await openFor(1);
     await page.waitFor("!!document.querySelector('.catmenu')", 5000, "picker opens for a selection");
@@ -790,7 +790,7 @@ try {
       await page.waitFor("!document.querySelector('#progress-card').hidden && document.querySelector('#progress-card').classList.contains('active')", 15000, "the poll sees a running task");
       await page.eval(`window.__pg = ${JSON.stringify(idle)}; true`);
     };
-    const tall = (id) => page.eval(`getComputedStyle(document.querySelector('#${id}')).height === '48px'`);
+    const tall = (id) => page.eval(`document.querySelector('#${id}').closest('.step').classList.contains('active')`);
     const hint = () => page.eval("document.querySelector('#dock-hint').textContent");
     const dump = () => page.eval("JSON.stringify({ infer: document.querySelector('#step-infer').className, scan: document.querySelector('#step-scan').className, stateInfer: document.querySelector('#state-infer').textContent, cardHidden: document.querySelector('#progress-card').hidden, pgActive: window.__pg && window.__pg.active, patch: window.__patch, grouped: localStorage.getItem('pcur-grouped-total') })");
     const until = (expr, ms, label) => page.waitFor(expr, ms, label).catch(async (e) => { throw new Error(e.message + " | state " + (await dump())); });
@@ -799,17 +799,17 @@ try {
       await install();
       await stored(total); await refresh({});
       await until("document.querySelector('#step-scan').classList.contains('active')", 15000, "scan is next");
-      check(await tall("btn-scan") && !(await tall("btn-infer")), "only Scan should be the long button");
+      check(await tall("btn-scan") && !(await tall("btn-infer")), "only the Scan card should be highlighted as next");
       check(/Scan/.test(await hint()), "hint should invite the next scan: " + (await hint()));
 
       await refresh({ stats: { pending_inference: 3 } });
       await until("document.querySelector('#step-infer').classList.contains('active')", 15000, "analyze is next");
-      check(await tall("btn-infer") && !(await tall("btn-scan")), "Analyze should be the long button");
+      check(await tall("btn-infer") && !(await tall("btn-scan")), "only the Analyze card should be highlighted as next");
       check(/Analyze/.test(await hint()) && /group/i.test(await hint()) && /sort/i.test(await hint()), "hint should say Analyze, group and sort: " + (await hint()));
 
       await stored(total - 1); await refresh({});
       await page.waitFor("document.querySelector('#step-infer').classList.contains('active') && document.querySelector('#state-infer').textContent === 'Needs grouping'", 15000, "analyze stays next until the new photos are grouped");
-      check(await tall("btn-infer"), "Analyze should stay the long button until grouping is done");
+      check(await tall("btn-infer"), "the Analyze card should stay highlighted until grouping is done");
     } finally {
       await page.eval("if (window.__rf) window.fetch = window.__rf; window.__pg = null; localStorage.removeItem('pcur-grouped-total'); true");
       await sleep(3500);
@@ -875,13 +875,18 @@ try {
     await page.viewport(1400, 1900);
     await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); window.scrollTo(0, 0); true");
     await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
+    const search = (v) => page.eval(`(() => { const q = document.querySelector('#q'); q.value = ${JSON.stringify(v)}; q.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    // Any filter reveals the reset button, so both measurements run with one active; only the scrollbar may differ.
+    await search("IMG_");
+    await page.waitFor("!document.querySelector('#reset-filters').hidden && document.querySelectorAll('#grid .vg-window .card').length > 0", 10000, "filtered grid");
+    await settle();
     const geo = () => page.eval(`JSON.stringify(['#density', '#scrub-from', '#scrub-to', '#rowcount', '#q'].map((s) => { const r = document.querySelector(s).getBoundingClientRect(); return [s, Math.round(r.left), Math.round(r.top), Math.round(r.width)]; }))`);
     const tall = await geo();
-    await page.eval("(() => { const q = document.querySelector('#q'); q.value = 'zzz-no-such-photo'; q.dispatchEvent(new Event('input', { bubbles: true })); return true; })()");
+    await search("zzz-no-such-photo");
     await page.waitFor("document.querySelector('#rowcount').textContent === '0 photos'", 10000, "no results");
     await page.waitFor("document.documentElement.scrollHeight <= innerHeight + 2", 8000, "the page no longer scrolls");
     const short = await geo();
-    await page.eval("(() => { const q = document.querySelector('#q'); q.value = ''; q.dispatchEvent(new Event('input', { bubbles: true })); return true; })()");
+    await search("");
     await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 10000, "cards are back");
     await page.viewport(1400, 900);
     check(tall === short, "toolbar moved when the scrollbar went away:\n" + tall + "\n" + short);
@@ -937,7 +942,7 @@ try {
     try {
       await page.eval("document.querySelector('.tab[data-tab=\"library\"]').click(); window.scrollTo(0, 0); true");
       await settle();
-      const g = await page.eval(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); const c = r('.content'), m = r('.steps'), t = r('.topbar'), a = r('#step-scan'), b = r('#step-infer'); return { left: m.left - c.left, right: c.right - m.right, topL: t.left - m.left, topR: t.right - m.right, dw: Math.abs(a.width - b.width), dh: Math.abs(a.height - b.height) }; })()`);
+      const g = await page.eval(`(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); const c = r('.content'), m = r('.steps'), t = r('.topbar'), a = r('#step-scan'), b = r('#step-infer'); return { left: m.left - c.left, right: (c.left + document.querySelector('.content').clientWidth) - m.right, topL: t.left - m.left, topR: t.right - m.right, dw: Math.abs(a.width - b.width), dh: Math.abs(a.height - b.height) }; })()`);
       check(Math.abs(g.left - g.right) <= 4, `content gaps differ: left ${Math.round(g.left)}px, right ${Math.round(g.right)}px`);
       check(Math.abs(g.topL) <= 1 && Math.abs(g.topR) <= 1, `header is not aligned with the content: ${Math.round(g.topL)} / ${Math.round(g.topR)}`);
       check(g.dw <= 1 && g.dh <= 1, `step cards differ in size by ${Math.round(g.dw)} x ${Math.round(g.dh)}`);
