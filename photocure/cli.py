@@ -1349,8 +1349,8 @@ def geocode(db: Path = typer.Option(DEFAULT_DB, "--db"),
     """Fill in place names (city, region, country) for photos that have GPS. Works offline."""
     from .scanner import geo
     if not geo.available():
-        cmd = pip_install_cmd('"photocure[geo]"')
-        console.print(f"[yellow]Place names need the geo extra:[/yellow] {escape(cmd)}")
+        cmd = pip_install_cmd("--upgrade photocure")
+        console.print(f"[yellow]Place names need the reverse_geocoder package:[/yellow] {escape(cmd)}")
         raise typer.Exit(1)
     cfg = _config(db)
     with get_session(cfg.db_path) as s:

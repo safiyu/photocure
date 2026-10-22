@@ -147,11 +147,18 @@ def test_geocoding_can_be_turned_off(tmp_path, monkeypatch):
     assert calls == []
 
 
-def test_geocode_command_reports_a_missing_package_with_the_exact_install_command(tmp_path, monkeypatch):
+def test_reverse_geocoder_is_a_required_dependency():
+    import tomllib
+    data = tomllib.loads(Path("pyproject.toml").read_text())
+    assert any(d.startswith("reverse_geocoder") for d in data["project"]["dependencies"])
+    assert "geo" not in data["project"]["optional-dependencies"]
+
+
+def test_geocode_command_reports_a_missing_package_without_a_stale_extra_name(tmp_path, monkeypatch):
     monkeypatch.setattr(geo, "available", lambda: False)
     r = runner.invoke(cli_mod.app, ["geocode", "--db", str(tmp_path / "x.db")])
     out = " ".join(r.output.split())
-    assert r.exit_code == 1 and "photocure[geo]" in out and "pip install" in out
+    assert r.exit_code == 1 and "photocure[geo]" not in out and "pip install" in out
 
 
 def test_geocode_command_fills_an_existing_library(tmp_path, monkeypatch):

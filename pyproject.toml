@@ -27,6 +27,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "pyyaml>=6",
     "lxml>=5.0",
+    "reverse_geocoder>=1.5.1",
 ]
 
 [project.optional-dependencies]
@@ -48,8 +49,6 @@ gpu = [
     "torchvision>=0.16",
     "open-clip-torch>=2.20",
 ]
-# Place names (city, region, country) from GPS, looked up offline. Pulls in scipy.
-geo = ["reverse_geocoder>=1.5.1"]
 watch = ["watchdog>=3"]
 # Lets an AI agent search, view and act on the library: photocure mcp.
 mcp = ["mcp>=1.2"]
