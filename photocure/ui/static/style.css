@@ -3129,6 +3129,13 @@ body.has-picks .tools, body.has-picks .hover-actions {
 #hl-events .ev-head h3 { font-size: 17px; margin: 0; }
 #hl-events .ev-head span { color: var(--mut); font-size: 13px; }
 
+/* People: one card per face cluster, rename inline. */
+.people-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+.people-card { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-md, 12px); padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.people-card-count { color: var(--mut); font-size: 13px; }
+.people-name { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--well); color: var(--ink); }
+.people-name:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
 /* Duplicate review: one card per group, members side by side. */
 .dup-list { display: flex; flex-direction: column; gap: 18px; }
 .dup-group { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px 18px; }

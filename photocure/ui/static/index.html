@@ -76,6 +76,7 @@
           <button class="tab navitem" data-tab="categories"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span>Library</span><em class="count" data-count="categories"></em></button>
           <button class="tab navitem" data-tab="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span>Search</span><em class="count"></em></button>
           <button class="tab navitem" data-tab="bursts"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span>Bursts</span><em class="count" data-count="bursts"></em></button>
+          <button class="tab navitem" data-tab="people"><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg><span>People</span><em class="count"></em></button>
           <button class="tab navitem" data-tab="highlights"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg><span>Highlights</span><em class="count"></em></button>
           <button class="tab navitem" data-tab="events"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg><span>Events</span><em class="count"></em></button>
           <button class="tab navitem" data-tab="utility"><svg class="ic" aria-hidden="true"><use href="#i-inbox"/></svg><span>Utility</span><em class="count" data-count="utility"></em></button>
@@ -323,6 +324,13 @@
             <div id="burstlist" class="burstlist"></div>
             <div id="burstdetail" class="detail"></div>
           </div>
+        </section>
+
+        <!-- PEOPLE -->
+        <section id="tab-people" class="panel">
+          <p class="dup-intro">Photocure groups faces it believes are the same person as photos are analyzed. Give a cluster a name and it carries over everywhere that person appears.</p>
+          <datalist id="people-names"></datalist>
+          <div id="peoplegrid" class="people-grid"></div>
         </section>
 
         <!-- DUPLICATES -->

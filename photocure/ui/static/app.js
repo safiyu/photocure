@@ -27,6 +27,7 @@
     search: ["Search", "Describe a photo in your own words and Photocure finds it."],
     duplicates: ["Duplicates", "Identical and look-alike photos. Choose the one to keep in each group."],
     bursts: ["Bursts", "Shots taken seconds apart. The best one of each group is kept."],
+    people: ["People", "Faces Photocure grouped together. Name a cluster and it carries over everywhere that person appears."],
     highlights: ["Highlights", "Your most appealing photos first."],
     events: ["Events", "Photos grouped by when and where they were taken."],
     junk: ["Junk review", "Duplicates, graphics and accidents. Move anything that does not belong."],
@@ -2370,6 +2371,43 @@
     await showBurst(keep);
   }
 
+  async function renderPeople() {
+    const host = $("#peoplegrid");
+    const data = await api("/api/people");
+    const items = data.items || [];
+    const datalist = $("#people-names");
+    if (datalist) {
+      datalist.innerHTML = items.filter((p) => p.name)
+        .map((p) => `<option value="${esc(p.name)}"></option>`).join("");
+    }
+    if (!items.length) {
+      host.innerHTML = emptyHTML({
+        icon: "users", title: "No faces grouped yet",
+        text: "Photocure groups faces it believes are the same person as photos are analyzed. Run Analyze to find them.",
+      });
+      return;
+    }
+    host.innerHTML = items.map((p) => `
+      <div class="people-card">
+        <div class="people-card-count">${fmtN(p.face_count)} ${p.face_count === 1 ? "face" : "faces"}</div>
+        <input type="text" class="people-name" list="people-names" placeholder="Unnamed"
+               value="${esc(p.name || "")}" data-person-input="${num(p.id)}">
+      </div>`).join("");
+    $$("[data-person-input]", host).forEach((input) => {
+      const commit = async () => {
+        const name = input.value.trim();
+        if (!name || name === input.defaultValue.trim()) return;
+        try {
+          await post(`/api/people/${input.dataset.personInput}/rename`, { name });
+          toast("Renamed", "ok");
+          await renderPeople();
+        } catch (e) { toast(e.message, "err"); }
+      };
+      input.addEventListener("change", commit);
+      input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); input.blur(); } });
+    });
+  }
+
   // ============================================================================
   // DIRECT 1-TO-1 FACE-TO-ZOOM BIOMETRIC PROJECTION (NeuralVision)
   // ============================================================================
@@ -4100,6 +4138,7 @@
       if (isEventView()) renderEventHighlights();
     }
     if (name === "bursts") renderBursts().catch((e) => toast(e.message, "err"));
+    if (name === "people") renderPeople().catch((e) => toast(e.message, "err"));
     if (name === "events") loadEvents().catch((e) => toast(e.message, "err"));
     if (name === "actions") loadTransactions().catch(() => {});
     if (name === "settings") { refreshSettings(true); refreshKeywords(); }
