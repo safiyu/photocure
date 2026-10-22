@@ -31,6 +31,9 @@ def list_people(db_path: Path | str) -> list[dict]:
 
 
 def rename_person(db_path: Path | str, person_id: int, name: str) -> dict:
+    name = name.strip()
+    if not name:
+        raise ActionError("name must not be blank")
     with get_session(db_path) as s:
         repo = PhotoRepository(s)
         p = s.get(M.PersonCluster, person_id)
@@ -53,6 +56,10 @@ def reassign_face(db_path: Path | str, face_id: int, *, person_id: int | None = 
                   new_name: str | None = None) -> dict:
     if (person_id is None) == (new_name is None):
         raise ActionError("exactly one of person_id or new_name is required")
+    if new_name is not None:
+        new_name = new_name.strip()
+        if not new_name:
+            raise ActionError("new_name must not be blank")
     with get_session(db_path) as s:
         repo = PhotoRepository(s)
         face = s.get(M.FaceDetection, face_id)

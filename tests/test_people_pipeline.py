@@ -67,6 +67,51 @@ def test_bumping_schema_version_requeues_already_inferred_photos(cfg, repo):
     assert len(recs) == 1
 
 
+def test_reanalysis_that_misses_remap_but_rejoins_the_same_cluster_does_not_inflate_the_count(cfg, repo):
+    # Remap only compares against this photo's own prior embedding and can miss (stricter
+    # threshold) even when the new embedding still matches the cluster's global centroid.
+    # That is still the same occurrence continuing, not a second one for this cluster.
+    pipeline = _yunet_pipeline(cfg)
+    repo.s.add(M.ImageRecord(id=501, path="/q.jpg", filename="q.jpg"))
+    repo.s.flush()
+    person = repo.create_person_cluster([1.0, 0.0])
+    repo.update_person_cluster(person.id, [0.9, 0.1], 2)  # centroid of 2 prior faces
+    repo.replace_faces(501, [M.FaceDetection(
+        bbox_x1=0, bbox_y1=0, bbox_x2=1, bbox_y2=1, confidence=0.9,
+        x1=0.1, y1=0.1, x2=0.3, y2=0.3,
+        embedding_json=quantize_embedding([1.0, 0.0]), person_id=person.id,
+    )])
+    centroids = {person.id: ClusterCentroid(person.id, [0.9, 0.1], 2)}
+    # cos(old photo embedding, new) = 0.30 (< 0.5 remap threshold: remap misses)
+    # cos(cluster centroid, new) = 0.40 (>= 0.363 join threshold: fresh clustering still hits)
+    new_face = FaceInfo(0.1, 0.1, 0.3, 0.3, confidence=0.9, face_sharpness=50.0, embedding=[0.3, 0.95])
+    result = pipeline._assign_people(repo, centroids, 501, [new_face])
+    assert result[0] == person.id
+    assert repo.all_person_clusters()[0].face_count == 2
+
+
+def test_an_identity_lost_on_reanalysis_decrements_its_cluster(cfg, repo):
+    # The old face's person_id is not reclaimed by any new face (neither remap nor fresh
+    # clustering matches it): this photo no longer has that occurrence.
+    pipeline = _yunet_pipeline(cfg)
+    repo.s.add(M.ImageRecord(id=601, path="/r.jpg", filename="r.jpg"))
+    repo.s.flush()
+    person = repo.create_person_cluster([1.0, 0.0])
+    repo.update_person_cluster(person.id, [1.0, 0.0], 2)
+    repo.replace_faces(601, [M.FaceDetection(
+        bbox_x1=0, bbox_y1=0, bbox_x2=1, bbox_y2=1, confidence=0.9,
+        x1=0.1, y1=0.1, x2=0.3, y2=0.3,
+        embedding_json=quantize_embedding([1.0, 0.0]), person_id=person.id,
+    )])
+    centroids = {person.id: ClusterCentroid(person.id, [1.0, 0.0], 2)}
+    # Completely different embedding: no face resolves to `person` this time.
+    new_face = FaceInfo(0.1, 0.1, 0.3, 0.3, confidence=0.9, face_sharpness=50.0, embedding=[0.0, 1.0])
+    result = pipeline._assign_people(repo, centroids, 601, [new_face])
+    assert result[0] != person.id
+    clusters = {c.id: c.face_count for c in repo.all_person_clusters()}
+    assert clusters[person.id] == 1
+
+
 def test_two_faces_in_the_same_photo_never_share_a_person_id(cfg, repo):
     pipeline = _yunet_pipeline(cfg)
     existing = repo.create_person_cluster([1.0, 0.0])

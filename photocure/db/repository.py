@@ -247,6 +247,14 @@ class PhotoRepository:
         p.face_count = face_count
         self.s.flush()
 
+    def decrement_person_cluster(self, person_id: int) -> None:
+        """Lower a cluster's face_count by one, floored at 0. A no-op if the cluster is gone."""
+        p = self.s.get(PersonCluster, person_id)
+        if p is None:
+            return
+        p.face_count = max(0, p.face_count - 1)
+        self.s.flush()
+
     def rename_person(self, person_id: int, name: str | None) -> PersonCluster:
         p = self.s.get(PersonCluster, person_id)
         if p is None:

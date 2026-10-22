@@ -530,18 +530,24 @@ class InferencePipeline:
 
         A face that remaps to one of this same photo's previous faces keeps that person's
         identity without changing the cluster's face_count or centroid (it is a re-detection
-        of the same occurrence, not a new one). Only faces that could not be remapped are new
-        occurrences and grow the cluster they join. Faces with no embedding (too small or
-        blurry) are left unassigned.
+        of the same occurrence, not a new one). The same holds when remap misses (its threshold
+        is stricter) but a face still lands, via fresh clustering, on a person this same photo
+        already had before: still a continuing occurrence, not a new one. Only a person this
+        photo did not already have before is a genuinely new occurrence and grows the cluster it
+        joins. Any old identity this photo had that no new face resolves to (remapped or not) has
+        lost its occurrence here and the cluster shrinks by one. Faces with no embedding (too
+        small or blurry) are left unassigned.
         """
         old = [OldFace(f.person_id, dequantize_embedding(f.embedding_json))
                for f in repo.faces_for_image(image_id)
                if f.person_id is not None and f.embedding_json]
+        old_person_ids = {o.person_id for o in old}
         new = [NewFace(i, f.embedding) for i, f in enumerate(faces) if f.embedding is not None]
         remap = remap_person_ids(old, new, self.cfg.face.cluster_remap_threshold)
 
         result: list[int | None] = [None] * len(faces)
         claimed_in_image: set[int] = set()
+        resolved_person_ids: set[int] = set()
         for i, f in enumerate(faces):
             if f.embedding is None:
                 continue
@@ -557,11 +563,24 @@ class InferencePipeline:
                 else:
                     c = centroids[pid]
                     new_centroid = update_centroid(c.centroid, c.face_count, f.embedding)
-                    new_count = c.face_count + 1
+                    # A person this photo already had keeps their count: this is the same
+                    # occurrence continuing (remap's stricter threshold just missed it), not a
+                    # second one. Only a person new to this photo grows the cluster.
+                    new_count = c.face_count if pid in old_person_ids else c.face_count + 1
                     repo.update_person_cluster(pid, new_centroid, new_count)
                     centroids[pid] = ClusterCentroid(pid, new_centroid, new_count)
             result[i] = pid
             claimed_in_image.add(pid)
+            resolved_person_ids.add(pid)
+
+        for lost_pid in old_person_ids - resolved_person_ids:
+            c = centroids.get(lost_pid)
+            if c is not None:
+                new_count = max(0, c.face_count - 1)
+                centroids[lost_pid] = ClusterCentroid(lost_pid, c.centroid, new_count)
+                repo.update_person_cluster(lost_pid, c.centroid, new_count)
+            else:
+                repo.decrement_person_cluster(lost_pid)
         return result
 
     @staticmethod

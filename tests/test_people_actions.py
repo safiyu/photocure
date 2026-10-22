@@ -70,6 +70,13 @@ def test_rename_unknown_person_raises_404(cfg, repo):
     assert exc.value.status == 404
 
 
+def test_rename_person_rejects_a_blank_name(cfg, repo):
+    p = repo.create_person_cluster([1.0])
+    repo.s.commit()
+    with pytest.raises(ActionError, match="blank"):
+        rename_person(cfg.db_path, p.id, "   ")
+
+
 def test_reassign_face_to_an_existing_person_updates_both_face_counts(cfg, session, repo):
     _image(session, 10)
     old = repo.create_person_cluster([1.0])
@@ -106,3 +113,11 @@ def test_reassign_face_requires_exactly_one_of_person_id_or_new_name(cfg, sessio
         reassign_face(cfg.db_path, f.id)
     with pytest.raises(ActionError):
         reassign_face(cfg.db_path, f.id, person_id=1, new_name="x")
+
+
+def test_reassign_face_rejects_a_blank_new_name(cfg, session, repo):
+    _image(session, 31)
+    f = _face(session, 31)
+    session.commit()
+    with pytest.raises(ActionError, match="blank"):
+        reassign_face(cfg.db_path, f.id, new_name="   ")
