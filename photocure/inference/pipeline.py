@@ -34,6 +34,14 @@ from rich.progress import (
 from sqlalchemy import and_, or_
 from sqlmodel import col, select as sselect
 
+from ..clustering.face_identity import (
+    ClusterCentroid,
+    NewFace,
+    OldFace,
+    assign_cluster,
+    remap_person_ids,
+    update_centroid,
+)
 from ..config import CuratorConfig
 from ..db.models import (
     FaceDetection,
@@ -41,7 +49,7 @@ from ..db.models import (
     QualityMetric,
     SemanticScore,
 )
-from ..db.repository import PhotoRepository, quantize_embedding
+from ..db.repository import PhotoRepository, dequantize_embedding, quantize_embedding
 from ..db.session import get_session
 from ..quality.engine import QualityEngine
 from ..quality.image_loader import load_image
@@ -328,6 +336,12 @@ class InferencePipeline:
         face_batch = max(1, int(dev.face_batch_size))
         face_engine = FaceEngine(self.cfg, backend=self.bs)
         done = 0
+        # Loaded once so a cluster created or grown earlier in this run is visible to later
+        # images, without re-reading every centroid from the DB on each face.
+        centroids: dict[int, ClusterCentroid] = {
+            c.id: ClusterCentroid(c.id, dequantize_embedding(c.centroid_json) or [], c.face_count)
+            for c in repo.all_person_clusters() if c.centroid_json
+        }
         try:
             for chunk in chunks:
                 if cancel_check and cancel_check():
@@ -375,9 +389,12 @@ class InferencePipeline:
                                 image_id=fr.image_id,
                                 **{k: v for k, v in q.items() if k != "needs_review"},
                             ))
+                            person_ids = self._assign_people(repo, centroids, fr.image_id, faces)
                             repo.replace_faces(
                                 fr.image_id,
-                                [self._face_row(fr.image_id, f, fr.scale, fr.bgr.shape) for f in faces],
+                                [self._face_row(fr.image_id, f, fr.scale, fr.bgr.shape,
+                                               embedding=f.embedding, person_id=pid)
+                                 for f, pid in zip(faces, person_ids)],
                             )
                             rec.blink_count = counts[0]
                             rec.has_blinks = counts[0] > 0
@@ -488,11 +505,13 @@ class InferencePipeline:
             empty_cuda_cache(self.bs)
 
     def _analyze_crops(self, engine: FaceEngine, rec: ImageRecord, fr: _LoadedFrame, faces: list) -> None:
-        """Stage 2: measure faces on the full-resolution photo (or the frame if it already is)."""
+        """Stage 2: measure faces and compute identity embeddings on the full-resolution photo
+        (or the frame if it already is)."""
         if not faces:
             return
         if fr.scale >= 0.999:
             engine.analyze_faces(fr.bgr, faces)
+            engine.compute_embeddings(fr.bgr, faces)
             return
         try:
             full = load_image(rec.path, max_side=None, orientation=rec.orientation)
@@ -501,11 +520,53 @@ class InferencePipeline:
             return
         try:
             engine.analyze_faces(full.bgr, faces)
+            engine.compute_embeddings(full.bgr, faces)
         finally:
             del full
 
+    def _assign_people(self, repo: PhotoRepository, centroids: dict[int, ClusterCentroid],
+                       image_id: int, faces: Sequence) -> list[int | None]:
+        """Resolve a person for each face (same order as ``faces``), mutating ``centroids``.
+
+        A face that remaps to one of this same photo's previous faces keeps that person's
+        identity without changing the cluster's face_count or centroid (it is a re-detection
+        of the same occurrence, not a new one). Only faces that could not be remapped are new
+        occurrences and grow the cluster they join. Faces with no embedding (too small or
+        blurry) are left unassigned.
+        """
+        old = [OldFace(f.person_id, dequantize_embedding(f.embedding_json))
+               for f in repo.faces_for_image(image_id)
+               if f.person_id is not None and f.embedding_json]
+        new = [NewFace(i, f.embedding) for i, f in enumerate(faces) if f.embedding is not None]
+        remap = remap_person_ids(old, new, self.cfg.face.cluster_remap_threshold)
+
+        result: list[int | None] = [None] * len(faces)
+        claimed_in_image: set[int] = set()
+        for i, f in enumerate(faces):
+            if f.embedding is None:
+                continue
+            if i in remap:
+                pid = remap[i]
+            else:
+                candidates = [c for c in centroids.values() if c.person_id not in claimed_in_image]
+                pid = assign_cluster(f.embedding, candidates, self.cfg.face.cluster_join_threshold)
+                if pid is None:
+                    created = repo.create_person_cluster(f.embedding)
+                    pid = created.id
+                    centroids[pid] = ClusterCentroid(pid, list(f.embedding), 1)
+                else:
+                    c = centroids[pid]
+                    new_centroid = update_centroid(c.centroid, c.face_count, f.embedding)
+                    new_count = c.face_count + 1
+                    repo.update_person_cluster(pid, new_centroid, new_count)
+                    centroids[pid] = ClusterCentroid(pid, new_centroid, new_count)
+            result[i] = pid
+            claimed_in_image.add(pid)
+        return result
+
     @staticmethod
-    def _face_row(image_id: int, f, scale: float = 1.0, shape: tuple = (0, 0)) -> FaceDetection:
+    def _face_row(image_id: int, f, scale: float = 1.0, shape: tuple = (0, 0),
+                 embedding: list[float] | None = None, person_id: int | None = None) -> FaceDetection:
         h, w = shape[:2]
         return FaceDetection(
             image_id=image_id,
@@ -519,6 +580,8 @@ class InferencePipeline:
             eye_closed_score=f.eye_closed_score,
             eye_status=f.eye_status,
             is_blink=bool(getattr(f, "is_blink", False)),
+            embedding_json=quantize_embedding(embedding) if embedding else None,
+            person_id=person_id,
         )
 
 

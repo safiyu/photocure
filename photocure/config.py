@@ -164,7 +164,13 @@ class FaceSettings(BaseSettings):
     baseline_pct: float = 15.0         # (tune) percentile that defines the baseline
     track_iou: float = 0.45            # (tune) minimum overlap to continue a face track
     # Rows written before this version have boxes in an unknown frame and are re-detected.
-    schema_version: int = 1
+    # v2 adds SFace identity embeddings, so every already-analyzed photo is re-detected once
+    # to backfill them.
+    schema_version: int = 2
+    # (tune) SFace's documented same-person cosine operating point.
+    cluster_join_threshold: float = 0.363
+    # (tune) stricter than cluster_join_threshold: remap is scoped to one photo's own prior faces.
+    cluster_remap_threshold: float = 0.5
 
 
 class TaxonomySettings(BaseSettings):
