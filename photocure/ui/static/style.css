@@ -872,13 +872,16 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .card .actions {
   display: flex;
   gap: 6px;
+  justify-content: center;
   margin-top: auto;
   padding-top: 8px;
   border-top: 1px solid var(--line);
   box-sizing: border-box;
   flex: none;
 }
+/* Icon-only, same fixed-square treatment as the burst frame card (.card-wrap .actions-icon). */
 .card .actions .btn {
+  width: 35px;
   height: 34px;
   border-radius: 10px;
   font-size: 11px;
@@ -886,16 +889,13 @@ body.has-picks .tools, body.has-picks .hover-actions {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
   border: 1.5px solid var(--line);
   background: var(--sheet);
   color: var(--ink);
   cursor: pointer;
   transition: all .18s ease;
-  padding: 0 4px;
-  flex: 1 1 0;
-  min-width: 0;
-  white-space: nowrap;
+  padding: 0;
+  flex: none;
   box-sizing: border-box;
 }
 .card .actions .btn svg,
@@ -906,14 +906,6 @@ body.has-picks .tools, body.has-picks .hover-actions {
 }
 .card .actions .btn-lbl {
   display: none;
-}
-@container (min-width: 280px) {
-  .card .actions .btn-lbl {
-    display: inline;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 }
 .card .actions .btn:hover {
   background: var(--well);
@@ -983,6 +975,17 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .card .actions .btn-similar:hover {
   border-color: var(--primary);
   background: var(--well);
+}
+
+/* Faces button: same treatment as the burst frame card's .btn-faces */
+.card .actions .btn-faces {
+  background: var(--primary-soft);
+  color: var(--link);
+  border-color: transparent;
+}
+.card .actions .btn-faces:hover {
+  background: var(--well);
+  border-color: var(--primary);
 }
 
 /* ----------------------------------------------------------------- empty states */

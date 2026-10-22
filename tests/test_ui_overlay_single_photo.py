@@ -41,3 +41,20 @@ def test_burst_only_actions_are_guarded_when_there_is_no_burst():
 def test_reassign_face_is_exposed_to_inline_handlers():
     js = _read("app.js")
     assert "window.reassignFace = reassignFace" in js
+
+
+def test_facepanel_is_a_persistent_page_element_not_only_inside_burst_detail():
+    # openBiometricProjection(null, imageId) must work from any tab, not just Bursts, so
+    # #facepanel cannot only exist inside showBurst()'s own dynamically-replaced markup.
+    html = _read("index.html")
+    assert 'id="facepanel"' in html
+    show_burst_body = _fn(_read("app.js"), "showBurst")
+    assert 'id="facepanel"' not in show_burst_body
+
+
+def test_generic_cards_get_a_faces_entry_point_when_they_have_faces():
+    js = _read("app.js")
+    card_body = _fn(js, "cardNode")
+    assert "data-faces" in card_body
+    delegate_body = _fn(js, "bindDelegates")
+    assert "dataset.faces" in delegate_body and "openBiometricProjection(null" in delegate_body

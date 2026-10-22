@@ -549,7 +549,15 @@
         title: "Find similar photos",
         "aria-label": "Find similar photos",
         tabindex: -1,
-      }, el("span", { class: "btn-ic", html: icon("copy", "sm") }), el("span", { class: "btn-lbl", text: "Similar" }))
+      }, el("span", { class: "btn-ic", html: icon("copy", "sm") }), el("span", { class: "btn-lbl", text: "Similar" })),
+      it.face_count ? el("button", {
+        type: "button",
+        class: "btn btn-faces",
+        "data-faces": id,
+        title: "Inspect faces",
+        "aria-label": "Inspect faces",
+        tabindex: -1,
+      }, el("span", { class: "btn-ic", html: icon("face", "sm") }), el("span", { class: "btn-lbl", text: "Faces" })) : null
     );
 
     return el("figure", { class: cls, "data-id": id, tabindex: -1, role: "gridcell" }, thumb, cap, actions);
@@ -1717,7 +1725,7 @@
   function bindDelegates() {
     document.addEventListener("click", async (ev) => {
       const t = ev.target.closest && ev.target.closest(
-        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-similar],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
+        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-similar],[data-faces],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
       if (!t) return;
       try {
         if (t.dataset.pick) await togglePick(num(t.dataset.pick), ev.shiftKey);
@@ -1732,6 +1740,8 @@
         else if (t.dataset.similar) {
           closeLightbox();
           await showSimilar(num(t.dataset.similar));
+        } else if (t.dataset.faces) {
+          await openBiometricProjection(null, num(t.dataset.faces));
         } else if (t.dataset.more) {
           const g = grids[t.dataset.more];
           if (g) await g.loadMore();
@@ -3303,7 +3313,6 @@
         ${banner}
         <div class="toolbar" id="blinkbar"></div>
       </div>
-      <div id="facepanel" class="bio-overlay bg-cyber-grid" hidden role="dialog" aria-label="Face inspection panel"></div>
       <section class="burstgrid grid anim-in" id="grid" aria-label="Frames">` +
       data.members.map((m) => {
         const sharp = m.sharpness_norm != null ? num(m.sharpness_norm) : 1.0;
