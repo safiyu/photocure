@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from photocure.db import models as M
+from photocure.db.repository import quantize_embedding
 from photocure.db.session import get_session
 from photocure.ui import app as ui_app
 from photocure.ui.app import create_app
@@ -395,12 +396,6 @@ def test_events_endpoints(env, monkeypatch):
     assert env.client.post("/api/events/999/rename", json={"name": "x"}).status_code == 404
 
 
-def test_identity_clustering_endpoints_are_gone(env):
-    assert env.client.get("/api/people").status_code == 404
-    assert env.client.post("/api/people/cluster", json={}).status_code == 404
-    assert env.client.post("/api/people/1/rename", json={"name": "x"}).status_code == 404
-
-
 # ------------------------------------------------------- verify and repair
 def test_verify_and_repair_endpoints(env, monkeypatch):
     from photocure.services import Planner
@@ -672,3 +667,75 @@ def test_any_photo_can_be_marked_for_delete_in_any_section(env):
     assert env.client.post(f"/api/bursts/{bid}/best-shot", json={"image_id": alt1}).status_code == 200
     detail = {m["id"]: m for m in env.client.get(f"/api/burst/{bid}").json()["members"]}
     assert not detail[alt1]["delete_approved"]
+
+
+# --------------------------------------------------------------------- people
+def _seed_person(env, name: str | None = None, face_count: int = 0) -> int:
+    with get_session(env.db) as s:
+        p = M.PersonCluster(name=name, face_count=face_count)
+        s.add(p)
+        s.flush()
+        return p.id
+
+
+def _seed_face(env, image_id: int, person_id: int | None = None,
+               embedding: list[float] | None = None) -> int:
+    with get_session(env.db) as s:
+        f = M.FaceDetection(
+            image_id=image_id, bbox_x1=0, bbox_y1=0, bbox_x2=1, bbox_y2=1, confidence=0.9,
+            x1=0.1, y1=0.1, x2=0.3, y2=0.3, person_id=person_id,
+            embedding_json=quantize_embedding(embedding) if embedding else None,
+        )
+        s.add(f)
+        s.flush()
+        return f.id
+
+
+def test_get_people_lists_known_clusters(env):
+    pid = _seed_person(env, name="Alice", face_count=3)
+    items = env.client.get("/api/people").json()["items"]
+    assert {"id": pid, "name": "Alice", "face_count": 3} in items
+
+
+def test_rename_person_endpoint_merges_duplicates(env):
+    keep = _seed_person(env, name="Safi", face_count=1)
+    dup = _seed_person(env, name=None, face_count=2)
+    iid = env.client.get("/api/images").json()["items"][0]["id"]
+    _seed_face(env, iid, person_id=dup)
+
+    r = env.client.post(f"/api/people/{dup}/rename", json={"name": " safi "})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == keep and body["face_count"] == 3
+
+    r = env.client.post("/api/people/999999/rename", json={"name": "x"})
+    assert r.status_code == 404
+
+
+def test_reassign_face_endpoint_moves_one_face(env):
+    old = _seed_person(env, name="Old", face_count=1)
+    new = _seed_person(env, name="New", face_count=1)
+    iid = env.client.get("/api/images").json()["items"][0]["id"]
+    fid = _seed_face(env, iid, person_id=old, embedding=[1.0, 0.0])
+
+    r = env.client.post(f"/api/faces/{fid}/reassign", json={"person_id": new})
+    assert r.status_code == 200 and r.json()["person_id"] == new
+
+    r = env.client.post(f"/api/faces/{fid}/reassign", json={"new_name": "Brand New"})
+    assert r.status_code == 200 and r.json()["person_name"] == "Brand New"
+
+    r = env.client.post("/api/faces/999999/reassign", json={"person_id": new})
+    assert r.status_code == 404
+
+    r = env.client.post(f"/api/faces/{fid}/reassign", json={})
+    assert r.status_code == 400
+
+
+def test_image_faces_endpoint_now_reports_person_id_and_name(env):
+    pid = _seed_person(env, name="Safi", face_count=1)
+    iid = env.client.get("/api/images").json()["items"][0]["id"]
+    fid = _seed_face(env, iid, person_id=pid)
+
+    items = env.client.get(f"/api/images/{iid}/faces").json()["items"]
+    by_id = {it["id"]: it for it in items}
+    assert by_id[fid]["person_id"] == pid and by_id[fid]["person_name"] == "Safi"

@@ -55,7 +55,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
-from sqlmodel import select
+from sqlmodel import col, select
 
 from .. import __version__
 from ..auth import COOKIE_NAME, AuthManager, build_allowed_hosts, origin_allowed
@@ -99,6 +99,15 @@ class ReassignReq(BaseModel):
 
 class LockReq(BaseModel):
     locked: bool = True
+
+
+class RenamePersonReq(BaseModel):
+    name: str
+
+
+class ReassignFaceReq(BaseModel):
+    person_id: int | None = None
+    new_name: str | None = None
 
 
 class PlanReq(BaseModel):
@@ -1377,6 +1386,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
             fp = _fingerprint(rec)
             faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == image_id)
                            .order_by(M.FaceDetection.id)).all()
+            person_ids = {f.person_id for f in faces if f.person_id is not None}
+            names = {p.id: p.name for p in (
+                s.exec(select(M.PersonCluster).where(col(M.PersonCluster.id).in_(person_ids))).all()
+                if person_ids else [])}
             return {"image_id": image_id, "items": [{
                 "id": f.id, "confidence": round(f.confidence, 3),
                 "box": [f.x1, f.y1, f.x2, f.y2] if f.x1 is not None else None,
@@ -1385,7 +1398,33 @@ def create_app(db_path: str | None = None) -> FastAPI:
                                      if f.eye_closed_score is not None else None),
                 "sharpness": round(f.face_sharpness, 1) if f.face_sharpness is not None else None,
                 "url": f"/api/faces/{f.id}.jpg?v={fp}" if f.x1 is not None else None,
+                "person_id": f.person_id,
+                "person_name": names.get(f.person_id) if f.person_id is not None else None,
             } for f in faces]}
+
+    @app.get("/api/people")
+    def list_people_endpoint():
+        """Known people, most faces first."""
+        from ..people_actions import list_people
+        return {"items": list_people(dbp)}
+
+    @app.post("/api/people/{person_id}/rename", dependencies=auth)
+    def rename_person_endpoint(person_id: int, body: RenamePersonReq):
+        """Rename a person, or merge into an existing person with the same name."""
+        from ..people_actions import ActionError, rename_person
+        try:
+            return rename_person(dbp, person_id, body.name)
+        except ActionError as e:
+            raise HTTPException(e.status, str(e)) from None
+
+    @app.post("/api/faces/{face_id}/reassign", dependencies=auth)
+    def reassign_face_endpoint(face_id: int, body: ReassignFaceReq):
+        """Move one face to a different (or brand-new) person."""
+        from ..people_actions import ActionError, reassign_face
+        try:
+            return reassign_face(dbp, face_id, person_id=body.person_id, new_name=body.new_name)
+        except ActionError as e:
+            raise HTTPException(e.status, str(e)) from None
 
     @app.get("/api/faces/{face_name}")
     def face_crop(face_name: str, v: str | None = Query(None)):
