@@ -10,6 +10,19 @@ from .db.repository import PhotoRepository, dequantize_embedding
 from .db.session import get_session
 
 
+def _best_face_id_for(person_id: int, s) -> int | None:
+    """Return the face ID with the highest sharpness for a given person cluster, or any face ID."""
+    # Try sharpest face first
+    best = s.exec(
+        select(M.FaceDetection.id, M.FaceDetection.face_sharpness)
+        .where(M.FaceDetection.person_id == person_id)
+        .where(M.FaceDetection.x1.isnot(None))  # must have normalised bbox for crop endpoint
+        .order_by(M.FaceDetection.face_sharpness.desc())
+        .limit(1)
+    ).first()
+    return best[0] if best else None
+
+
 class ActionError(ValueError):
     """A refusal with a message fit to show the user and the HTTP status the web app should use."""
 
@@ -18,8 +31,8 @@ class ActionError(ValueError):
         self.status = status
 
 
-def _as_dict(p: M.PersonCluster) -> dict:
-    return {"id": p.id, "name": p.name, "face_count": p.face_count}
+def _as_dict(p: M.PersonCluster, sample_face_id: int | None = None) -> dict:
+    return {"id": p.id, "name": p.name, "face_count": p.face_count, "sample_face_id": sample_face_id}
 
 
 def list_people(db_path: Path | str) -> list[dict]:
@@ -27,7 +40,7 @@ def list_people(db_path: Path | str) -> list[dict]:
         repo = PhotoRepository(s)
         clusters = repo.all_person_clusters()
         clusters.sort(key=lambda p: (p.face_count, p.id), reverse=True)
-        return [_as_dict(p) for p in clusters]
+        return [_as_dict(p, _best_face_id_for(p.id, s)) for p in clusters]
 
 
 def rename_person(db_path: Path | str, person_id: int, name: str) -> dict:

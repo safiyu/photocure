@@ -2399,6 +2399,13 @@
     }
     host.innerHTML = items.map((p) => `
       <div class="people-card">
+        <div class="people-card-avatar">
+          ${p.sample_face_id
+            ? `<img class="people-face-img" src="/api/faces/${num(p.sample_face_id)}.jpg" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+               <div class="people-face-fallback" style="display:none"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/></svg></div>`
+            : `<div class="people-face-fallback"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/></svg></div>`
+          }
+        </div>
         <div class="people-card-count">${fmtN(p.face_count)} ${p.face_count === 1 ? "face" : "faces"}</div>
         <input type="text" class="people-name" list="people-names" placeholder="Unnamed"
                value="${esc(p.name || "")}" data-person-input="${num(p.id)}">
