@@ -1408,10 +1408,19 @@ def create_app(db_path: str | None = None) -> FastAPI:
             }
 
     @app.get("/api/people")
-    def list_people_endpoint():
-        """Known people, most faces first."""
+    def list_people_endpoint(sort: str = "similarity"):
+        """Known people clusters, arranged by similarity (default), count, or name."""
         from ..people_actions import list_people
-        return {"items": list_people(dbp)}
+        return {"items": list_people(dbp, sort=sort)}
+
+    @app.delete("/api/people/{person_id}", dependencies=auth)
+    def delete_person_endpoint(person_id: int):
+        """Delete a person cluster and unassign all its associated faces."""
+        from ..people_actions import ActionError, delete_person
+        try:
+            return delete_person(dbp, person_id)
+        except ActionError as e:
+            raise HTTPException(e.status, str(e)) from None
 
     @app.post("/api/people/{person_id}/rename", dependencies=auth)
     def rename_person_endpoint(person_id: int, body: RenamePersonReq):

@@ -329,7 +329,25 @@
 
         <!-- PEOPLE -->
         <section id="tab-people" class="panel">
-          <p class="dup-intro">Photocure groups faces it believes are the same person as photos are analyzed. Give a cluster a name and it carries over everywhere that person appears.</p>
+          <div class="people-toolbar">
+            <div class="people-sort-group" role="radiogroup" aria-label="Sort people">
+              <span class="people-sort-caption">Arrange:</span>
+              <button class="chip-btn" id="people-sort-similar" data-sort="similarity" aria-pressed="true" type="button" title="Group visually similar faces together to spot and merge duplicates">
+                <svg class="ic" aria-hidden="true"><use href="#i-users"/></svg>
+                <span>Similar faces</span>
+              </button>
+              <button class="chip-btn" id="people-sort-count" data-sort="count" aria-pressed="false" type="button" title="Sort by most photos first">
+                <svg class="ic" aria-hidden="true"><use href="#i-image"/></svg>
+                <span>Most photos</span>
+              </button>
+              <button class="chip-btn" id="people-sort-name" data-sort="name" aria-pressed="false" type="button" title="Sort alphabetically by name">
+                <span>Name A–Z</span>
+              </button>
+            </div>
+            <span class="grow"></span>
+            <span id="people-summary" class="rowcount" role="status"></span>
+          </div>
+          <p class="dup-intro">Photocure groups faces it believes are the same person. Drag and drop any card onto another to merge them. Hover or click to inspect photos.</p>
           <datalist id="people-names"></datalist>
           <div id="peoplegrid" class="people-grid"></div>
         </section>
@@ -723,9 +741,15 @@
             <span class="ppo-count" id="ppo-count"></span>
           </div>
         </div>
-        <button class="ppo-close icon-btn" id="ppo-close" aria-label="Close">
-          <svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>
-        </button>
+        <div class="ppo-actions">
+          <button class="btn sm ghost danger ppo-delete-btn" id="ppo-delete" title="Delete this person cluster" aria-label="Delete person">
+            <svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg>
+            <span>Delete person</span>
+          </button>
+          <button class="ppo-close icon-btn" id="ppo-close" aria-label="Close">
+            <svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>
+          </button>
+        </div>
       </header>
       <div class="ppo-body">
         <div id="ppo-grid" class="ppo-grid"></div>

@@ -767,3 +767,36 @@ def test_image_faces_endpoint_now_reports_person_id_and_name(env):
     items = env.client.get(f"/api/images/{iid}/faces").json()["items"]
     by_id = {it["id"]: it for it in items}
     assert by_id[fid]["person_id"] == pid and by_id[fid]["person_name"] == "Safi"
+
+
+def test_delete_person_endpoint(env):
+    pid = _seed_person(env, name="To Remove", face_count=2)
+    iid = env.client.get("/api/images").json()["items"][0]["id"]
+    fid = _seed_face(env, iid, person_id=pid)
+
+    r = env.client.delete(f"/api/people/{pid}")
+    assert r.status_code == 200
+    assert r.json() == {"id": pid, "deleted": True}
+
+    # Verify 404 on subsequent delete
+    r = env.client.delete(f"/api/people/{pid}")
+    assert r.status_code == 404
+
+    # Verify face unlinked
+    faces = env.client.get(f"/api/images/{iid}/faces").json()["items"]
+    by_id = {f["id"]: f for f in faces}
+    assert by_id[fid]["person_id"] is None
+
+
+def test_list_people_sort_options(env):
+    p1 = _seed_person(env, name="Zack", face_count=1)
+    p2 = _seed_person(env, name="Adam", face_count=5)
+
+    # Sort by count
+    r_count = env.client.get("/api/people?sort=count").json()["items"]
+    assert r_count[0]["id"] == p2 and r_count[1]["id"] == p1
+
+    # Sort by name
+    r_name = env.client.get("/api/people?sort=name").json()["items"]
+    assert r_name[0]["id"] == p2 and r_name[1]["id"] == p1  # Adam before Zack
+

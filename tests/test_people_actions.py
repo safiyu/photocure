@@ -6,7 +6,7 @@ from sqlmodel import select
 
 from photocure.db import models as M
 from photocure.db.repository import quantize_embedding
-from photocure.people_actions import ActionError, list_people, reassign_face, rename_person
+from photocure.people_actions import ActionError, delete_person, list_people, reassign_face, rename_person
 
 
 def _face(session, image_id: int, person_id: int | None = None,
@@ -121,3 +121,48 @@ def test_reassign_face_rejects_a_blank_new_name(cfg, session, repo):
     session.commit()
     with pytest.raises(ActionError, match="blank"):
         reassign_face(cfg.db_path, f.id, new_name="   ")
+
+
+def test_delete_person_unlinks_faces_and_removes_cluster(cfg, session, repo):
+    _image(session, 40)
+    p = repo.create_person_cluster([1.0, 0.0])
+    pid = p.id
+    repo.rename_person(pid, "To Delete")
+    f = _face(session, 40, person_id=pid)
+    session.commit()
+
+    res = delete_person(cfg.db_path, pid)
+    assert res == {"id": pid, "deleted": True}
+
+    session.expire_all()
+    assert session.get(M.PersonCluster, pid) is None
+    refreshed_face = session.get(M.FaceDetection, f.id)
+    assert refreshed_face.person_id is None
+
+
+def test_arrange_similar_faces_together(cfg, session, repo):
+    # Cluster A1 (Alice) and A2 (Alice dup) have high similarity ([1.0, 0.05])
+    # Cluster B1 (Bob) has completely different vector ([0.0, 1.0])
+    # B1 has higher face count than A2, but A2 should be placed adjacent to A1
+    a1 = repo.create_person_cluster([1.0, 0.0])
+    repo.rename_person(a1.id, "Alice")
+    repo.update_person_cluster(a1.id, [1.0, 0.0], 10)
+
+    b1 = repo.create_person_cluster([0.0, 1.0])
+    repo.rename_person(b1.id, "Bob")
+    repo.update_person_cluster(b1.id, [0.0, 1.0], 8)
+
+    a2 = repo.create_person_cluster([0.98, 0.02])
+    repo.update_person_cluster(a2.id, [0.98, 0.02], 3)
+    session.commit()
+
+    items = list_people(cfg.db_path, sort="similarity")
+    ids = [it["id"] for it in items]
+    # In similarity sort: a1 is followed immediately by similar a2, then b1
+    assert ids == [a1.id, a2.id, b1.id]
+    # a2 should have a similar_to match pointing to a1
+    a2_dict = next(it for it in items if it["id"] == a2.id)
+    assert "similar_to" in a2_dict
+    assert a2_dict["similar_to"]["target_id"] == a1.id
+    assert a2_dict["similar_to"]["score"] >= 0.90
+

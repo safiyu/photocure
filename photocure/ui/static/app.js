@@ -2381,10 +2381,30 @@
     await showBurst(keep);
   }
 
+  let activePpoPersonId = null;
+
   async function renderPeople() {
     const host = $("#peoplegrid");
-    const data = await api("/api/people");
+    const sort = state.peopleSort || "similarity";
+    const data = await api(`/api/people?sort=${encodeURIComponent(sort)}`);
     const items = data.items || [];
+
+    // Summary count
+    const sumEl = $("#people-summary");
+    if (sumEl) sumEl.textContent = `${fmtN(items.length)} ${items.length === 1 ? "person" : "people"}`;
+
+    // Sort buttons
+    $$(".people-sort-group .chip-btn").forEach((btn) => {
+      btn.setAttribute("aria-pressed", btn.dataset.sort === sort);
+      if (!btn._wired) {
+        btn._wired = true;
+        btn.addEventListener("click", () => {
+          state.peopleSort = btn.dataset.sort;
+          renderPeople();
+        });
+      }
+    });
+
     const datalist = $("#people-names");
     if (datalist) {
       datalist.innerHTML = items.filter((p) => p.name)
@@ -2401,12 +2421,17 @@
     // ── Build cards ──────────────────────────────────────────────────────────
     host.innerHTML = items.map((p) => `
       <div class="people-card" draggable="true" data-person-id="${num(p.id)}" data-face-count="${num(p.face_count)}">
-        <div class="people-drag-handle" title="Drag to merge with another person">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="9" cy="5" r="1" fill="currentColor"/><circle cx="15" cy="5" r="1" fill="currentColor"/>
-            <circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/>
-            <circle cx="9" cy="19" r="1" fill="currentColor"/><circle cx="15" cy="19" r="1" fill="currentColor"/>
-          </svg>
+        <div class="people-card-actions">
+          <div class="people-drag-handle" title="Drag to merge with another person">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="9" cy="5" r="1" fill="currentColor"/><circle cx="15" cy="5" r="1" fill="currentColor"/>
+              <circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/>
+              <circle cx="9" cy="19" r="1" fill="currentColor"/><circle cx="15" cy="19" r="1" fill="currentColor"/>
+            </svg>
+          </div>
+          <button class="people-card-delete icon-btn" title="Delete this person cluster" aria-label="Delete person">
+            <svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg>
+          </button>
         </div>
         <div class="people-card-avatar">
           ${p.sample_face_id
@@ -2422,6 +2447,12 @@
             <span class="people-drop-label">Merge here</span>
           </div>
         </div>
+        ${p.similar_to ? `
+          <div class="people-similar-badge" title="Visually similar to ${esc(p.similar_to.target_name || 'Cluster #' + p.similar_to.target_id)} (${Math.round(p.similar_to.score * 100)}% match). Drag onto it to merge!">
+            <svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg>
+            <span>${Math.round(p.similar_to.score * 100)}% match</span>
+          </div>` : ""
+        }
         <div class="people-card-meta">
           <span class="people-card-count" data-count="${num(p.face_count)}">${fmtN(p.face_count)} ${p.face_count === 1 ? "face" : "faces"}</span>
         </div>
@@ -2444,11 +2475,35 @@
       input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); input.blur(); } });
     });
 
-    // ── Drag-and-drop merge ──────────────────────────────────────────────────
+    // ── Drag-and-drop merge & card actions ───────────────────────────────────
     let dragSourceId = null;
     let dragSourceCount = 0;
 
     $$(".people-card", host).forEach((card) => {
+      // delete button
+      const delBtn = card.querySelector(".people-card-delete");
+      if (delBtn) {
+        delBtn.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          const pid = card.dataset.personId;
+          const name = (card.querySelector(".people-name")?.value || "").trim() || `Person #${pid}`;
+          const ok = await showConfirmDialog({
+            title: "Delete person?",
+            message: `Delete cluster for "${name}"? Photos will remain in your library, but face assignments to this person will be cleared.`,
+            confirmText: "Delete",
+            variant: "danger",
+          });
+          if (!ok) return;
+          try {
+            await api(`/api/people/${pid}`, { method: "DELETE" });
+            toast("Person deleted", "ok");
+            await renderPeople();
+          } catch (e) {
+            toast(`Delete failed: ${e.message}`, "err");
+          }
+        });
+      }
+
       // dragstart — record which card is being dragged
       card.addEventListener("dragstart", (ev) => {
         dragSourceId = card.dataset.personId;
@@ -2528,7 +2583,7 @@
 
       // click → open person photo overlay
       card.addEventListener("click", (ev) => {
-        if (ev.target.closest(".people-name") || ev.target.closest(".people-drag-handle")) return;
+        if (ev.target.closest(".people-name") || ev.target.closest(".people-card-actions")) return;
         if (dragSourceId) return; // ignore stray clicks right after a drag
         showPersonPhotos(card.dataset.personId);
       });
@@ -2549,6 +2604,7 @@
   async function showPersonPhotos(personId) {
     const overlay = ppoEl();
     if (!overlay) return;
+    activePpoPersonId = personId;
 
     // Show overlay immediately with a loading state
     ppoName().textContent = "Loading…";
@@ -2622,11 +2678,12 @@
   function closePersonPhotos() {
     const overlay = ppoEl();
     if (!overlay) return;
+    activePpoPersonId = null;
     closeOverlay(overlay);
     document.body.style.overflow = "";
   }
 
-  // Wire up close button + backdrop click + Escape
+  // Wire up close button + backdrop click + Escape + delete
   function initPpo() {
     const overlay = ppoEl();
     if (!overlay) return;
@@ -2634,6 +2691,25 @@
     overlay.querySelector(".ppo-backdrop")?.addEventListener("click", closePersonPhotos);
     overlay.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") closePersonPhotos();
+    });
+    $("#ppo-delete")?.addEventListener("click", async () => {
+      if (!activePpoPersonId) return;
+      const name = ppoName().textContent.trim() || `Person #${activePpoPersonId}`;
+      const ok = await showConfirmDialog({
+        title: "Delete person?",
+        message: `Delete cluster for "${name}"? Photos will remain in your library, but face assignments to this person will be cleared.`,
+        confirmText: "Delete",
+        variant: "danger",
+      });
+      if (!ok) return;
+      try {
+        await api(`/api/people/${activePpoPersonId}`, { method: "DELETE" });
+        closePersonPhotos();
+        toast("Person deleted", "ok");
+        await renderPeople();
+      } catch (e) {
+        toast(`Delete failed: ${e.message}`, "err");
+      }
     });
   }
   initPpo();
