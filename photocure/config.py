@@ -167,10 +167,10 @@ class FaceSettings(BaseSettings):
     # v2 adds SFace identity embeddings, so every already-analyzed photo is re-detected once
     # to backfill them.
     schema_version: int = 2
-    # (tune) SFace's documented same-person cosine operating point.
-    cluster_join_threshold: float = 0.363
-    # (tune) stricter than cluster_join_threshold: remap is scoped to one photo's own prior faces.
-    cluster_remap_threshold: float = 0.5
+    # (tune) SFace cosine similarity operating point (cosine distance <= 0.363 means similarity >= 0.637).
+    cluster_join_threshold: float = 0.64
+    # (tune) Stricter remap threshold scoped to one photo's own prior faces.
+    cluster_remap_threshold: float = 0.64
 
 
 class TaxonomySettings(BaseSettings):

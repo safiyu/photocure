@@ -1440,6 +1440,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
         except ActionError as e:
             raise HTTPException(e.status, str(e)) from None
 
+    @app.post("/api/people/recluster", dependencies=auth)
+    def recluster_people_endpoint(threshold: float = 0.64):
+        """Recluster all detected faces with strict identity threshold (default 0.64)."""
+        from ..people_actions import recluster_people
+        return recluster_people(dbp, threshold=threshold)
+
     @app.get("/api/people/{person_id}/photos")
     def person_photos_endpoint(person_id: int):
         """All distinct photos that contain a face belonging to *person_id*, newest first."""

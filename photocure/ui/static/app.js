@@ -2410,6 +2410,32 @@
       }
     });
 
+    // Recluster button
+    const reclusterBtn = $("#people-recluster-btn");
+    if (reclusterBtn && !reclusterBtn._wired) {
+      reclusterBtn._wired = true;
+      reclusterBtn.addEventListener("click", async () => {
+        const ok = await showConfirmDialog({
+          title: "Re-cluster all faces?",
+          message: "This will separate faces that were mistakenly grouped together by applying the strict facial identity threshold (0.64). Custom names will be preserved.",
+          confirmText: "Re-cluster",
+          variant: "primary",
+        });
+        if (!ok) return;
+        reclusterBtn.disabled = true;
+        toast("Re-clustering faces with strict threshold…", "ok");
+        try {
+          const res = await post("/api/people/recluster", {});
+          toast(`Done! Formed ${fmtN(res.clusters_created)} person clusters across ${fmtN(res.faces_clustered)} faces.`, "ok");
+          await renderPeople();
+        } catch (e) {
+          toast(`Re-clustering failed: ${e.message}`, "err");
+        } finally {
+          reclusterBtn.disabled = false;
+        }
+      });
+    }
+
     const datalist = $("#people-names");
     if (datalist) {
       datalist.innerHTML = items.filter((p) => p.name)
@@ -2467,11 +2493,15 @@
                     data-target-id="${num(p.similar_to.target_id)}"
                     data-target-name="${esc(p.similar_to.target_name || 'Person #' + p.similar_to.target_id)}"
                     title="Visually similar (${Math.round(p.similar_to.score * 100)}% match). Click to merge!">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="18" cy="18" r="3"></circle>
-                <circle cx="6" cy="6" r="3"></circle>
-                <path d="M6 21V9a9 9 0 0 0 9 9"></path>
-              </svg>
+              ${p.similar_to.target_sample_face_id ? `
+                <img class="people-merge-thumb" src="/api/faces/${num(p.similar_to.target_sample_face_id)}.jpg" alt="" loading="lazy">
+              ` : `
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="18" cy="18" r="3"></circle>
+                  <circle cx="6" cy="6" r="3"></circle>
+                  <path d="M6 21V9a9 9 0 0 0 9 9"></path>
+                </svg>
+              `}
               <span>Merge with ${esc(p.similar_to.target_name || 'Person #' + p.similar_to.target_id)}?</span>
             </button>` : ""
           }

@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlmodel import select
 
 from .db import models as M
-from .db.repository import PhotoRepository, dequantize_embedding
+from .db.repository import PhotoRepository, dequantize_embedding, quantize_embedding
 from .db.session import get_session
 
 
@@ -38,11 +38,11 @@ def _as_dict(p: M.PersonCluster, sample_face_id: int | None = None, similar_to: 
     return d
 
 
-def _arrange_by_similarity(clusters: list[M.PersonCluster]) -> list[tuple[M.PersonCluster, dict | None]]:
+def _arrange_by_similarity(clusters: list[M.PersonCluster], s=None) -> list[tuple[M.PersonCluster, dict | None]]:
     """Arrange person clusters so that visually similar faces are grouped next to each other.
 
     Returns a list of tuples: (cluster, match_info), where match_info is either None or
-    {'target_id': int, 'target_name': str | None, 'score': float}.
+    {'target_id': int, 'target_name': str | None, 'target_sample_face_id': int | None, 'score': float}.
     """
     if len(clusters) <= 1:
         return [(c, None) for c in clusters]
@@ -79,8 +79,8 @@ def _arrange_by_similarity(clusters: list[M.PersonCluster]) -> list[tuple[M.Pers
         for i in range(n):
             for j in range(i, n):
                 if len(with_emb[i][1]) == len(with_emb[j][1]):
-                    s = float(np.dot(with_emb[i][1], with_emb[j][1]))
-                    sim_matrix[i, j] = sim_matrix[j, i] = s
+                    s_val = float(np.dot(with_emb[i][1], with_emb[j][1]))
+                    sim_matrix[i, j] = sim_matrix[j, i] = s_val
 
     unvisited = set(range(n))
     ordered: list[tuple[int, dict | None]] = []
@@ -106,12 +106,15 @@ def _arrange_by_similarity(clusters: list[M.PersonCluster]) -> list[tuple[M.Pers
                     best_cand = cand
                     best_ref = group[max_idx]
 
-            # Threshold for linking as similar face: 0.40
-            if best_cand is not None and best_score >= 0.40:
+            # Strict threshold for linking as similar face / suggesting merge: 0.65
+            if best_cand is not None and best_score >= 0.65:
                 unvisited.remove(best_cand)
+                target_cluster = with_emb[best_ref][0]
+                target_sample_face_id = _best_face_id_for(target_cluster.id, s) if s is not None else None
                 match_info = {
-                    "target_id": with_emb[best_ref][0].id,
-                    "target_name": with_emb[best_ref][0].name,
+                    "target_id": target_cluster.id,
+                    "target_name": target_cluster.name,
+                    "target_sample_face_id": target_sample_face_id,
                     "score": round(best_score, 2),
                 }
                 ordered.append((best_cand, match_info))
@@ -140,7 +143,7 @@ def list_people(db_path: Path | str, sort: str = "similarity") -> list[dict]:
             clusters.sort(key=lambda p: (p.face_count, p.id or 0), reverse=True)
             return [_as_dict(p, _best_face_id_for(p.id, s)) for p in clusters]
         else:  # default: "similarity"
-            arranged = _arrange_by_similarity(clusters)
+            arranged = _arrange_by_similarity(clusters, s)
             return [_as_dict(p, _best_face_id_for(p.id, s), match) for p, match in arranged]
 
 
@@ -246,5 +249,123 @@ def delete_person(db_path: Path | str, person_id: int) -> dict:
         s.delete(p)
         s.flush()
         return {"id": person_id, "deleted": True}
+
+
+def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
+    """Recompute all person clusters from scratch using the strict cosine threshold.
+
+    - Preserves existing custom names on clusters.
+    - Enforces same-photo exclusivity (faces from the same photo cannot share a cluster).
+    - Sorts seeds by face sharpness so the clearest faces define the cluster centroids.
+    """
+    import json
+    from collections import Counter
+    import numpy as np
+
+    with get_session(db_path) as s:
+        # 1. Fetch all faces with valid embeddings
+        faces = s.exec(
+            select(M.FaceDetection)
+            .where(M.FaceDetection.embedding_json.isnot(None))
+        ).all()
+
+        if not faces:
+            return {"clusters_created": 0, "faces_clustered": 0}
+
+        # Keep existing custom names mapped to old person_id
+        old_clusters = s.exec(select(M.PersonCluster)).all()
+        custom_names = {c.id: c.name for c in old_clusters if c.name}
+
+        # Map face_id -> old custom name if any
+        face_custom_name = {f.id: custom_names[f.person_id] for f in faces if f.person_id in custom_names}
+
+        # 2. Sort faces by sharpness descending
+        faces_sorted = sorted(faces, key=lambda f: f.face_sharpness or 0.0, reverse=True)
+
+        clusters: list[dict] = []
+        for f in faces_sorted:
+            try:
+                emb = dequantize_embedding(f.embedding_json)
+                if not emb:
+                    continue
+                arr = np.asarray(emb, dtype=np.float32)
+                norm = float(np.linalg.norm(arr))
+                if norm < 1e-6:
+                    continue
+                u = arr / norm
+            except Exception:
+                continue
+
+            best_c = None
+            best_sim = threshold
+
+            for c in clusters:
+                if f.image_id in c["image_ids"]:
+                    continue  # Can never have the same person twice in the same photo
+                sim = float(np.dot(u, c["centroid"]))
+                if sim >= best_sim:
+                    best_sim = sim
+                    best_c = c
+
+            c_name = face_custom_name.get(f.id)
+            if best_c is not None:
+                best_c["face_ids"].append(f.id)
+                best_c["image_ids"].add(f.image_id)
+                if c_name:
+                    best_c["names"].append(c_name)
+                # update running centroid and re-normalize
+                n = len(best_c["face_ids"])
+                new_cent = (best_c["centroid"] * (n - 1) + u) / n
+                best_c["centroid"] = new_cent / float(np.linalg.norm(new_cent))
+            else:
+                clusters.append({
+                    "centroid": u,
+                    "face_ids": [f.id],
+                    "image_ids": {f.image_id},
+                    "names": [c_name] if c_name else [],
+                })
+
+        # 3. Clear all existing face person assignments
+        for f in faces:
+            f.person_id = None
+        s.flush()
+
+        # Delete all old clusters
+        for c in old_clusters:
+            s.delete(c)
+        s.flush()
+
+        # 4. Insert new clusters and update faces
+        created_count = 0
+        total_assigned = 0
+
+        # Build a lookup face_id -> face object for quick person_id assignment
+        face_by_id = {f.id: f for f in faces}
+
+        for c_data in clusters:
+            cluster_name = None
+            if c_data["names"]:
+                cluster_name = Counter(c_data["names"]).most_common(1)[0][0]
+
+            centroid_list = c_data["centroid"].tolist()
+            new_c = M.PersonCluster(
+                centroid_json=quantize_embedding(centroid_list),
+                face_count=len(c_data["face_ids"]),
+                name=cluster_name,
+            )
+            s.add(new_c)
+            s.flush()  # assign new_c.id
+
+            for fid in c_data["face_ids"]:
+                face_obj = face_by_id.get(fid)
+                if face_obj is not None:
+                    face_obj.person_id = new_c.id
+
+            created_count += 1
+            total_assigned += len(c_data["face_ids"])
+
+        s.commit()
+        return {"clusters_created": created_count, "faces_clustered": total_assigned}
+
 
 

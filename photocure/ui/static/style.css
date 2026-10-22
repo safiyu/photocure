@@ -3340,6 +3340,15 @@ body.has-picks .tools, body.has-picks .hover-actions {
   color: #a5b4fc;
   flex-shrink: 0;
 }
+.people-merge-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1.5px solid rgba(255, 255, 255, 0.55);
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
 
 /* ── Interactive Name pill ───────────────────────────────────────────────── */
 .people-name-pill-wrapper {

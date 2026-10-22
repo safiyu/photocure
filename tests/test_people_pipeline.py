@@ -82,9 +82,9 @@ def test_reanalysis_that_misses_remap_but_rejoins_the_same_cluster_does_not_infl
         embedding_json=quantize_embedding([1.0, 0.0]), person_id=person.id,
     )])
     centroids = {person.id: ClusterCentroid(person.id, [0.9, 0.1], 2)}
-    # cos(old photo embedding, new) = 0.30 (< 0.5 remap threshold: remap misses)
-    # cos(cluster centroid, new) = 0.40 (>= 0.363 join threshold: fresh clustering still hits)
-    new_face = FaceInfo(0.1, 0.1, 0.3, 0.3, confidence=0.9, face_sharpness=50.0, embedding=[0.3, 0.95])
+    # cos(old photo embedding, new) = 0.60 (< 0.64 remap threshold: remap misses)
+    # cos(cluster centroid, new) = 0.68 (>= 0.64 join threshold: fresh clustering still hits)
+    new_face = FaceInfo(0.1, 0.1, 0.3, 0.3, confidence=0.9, face_sharpness=50.0, embedding=[0.60, 0.80])
     result = pipeline._assign_people(repo, centroids, 501, [new_face])
     assert result[0] == person.id
     assert repo.all_person_clusters()[0].face_count == 2

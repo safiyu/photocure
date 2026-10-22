@@ -6,7 +6,7 @@ from sqlmodel import select
 
 from photocure.db import models as M
 from photocure.db.repository import quantize_embedding
-from photocure.people_actions import ActionError, delete_person, list_people, reassign_face, rename_person
+from photocure.people_actions import ActionError, delete_person, list_people, reassign_face, recluster_people, rename_person
 
 
 def _face(session, image_id: int, person_id: int | None = None,
@@ -165,4 +165,40 @@ def test_arrange_similar_faces_together(cfg, session, repo):
     assert "similar_to" in a2_dict
     assert a2_dict["similar_to"]["target_id"] == a1.id
     assert a2_dict["similar_to"]["score"] >= 0.90
+
+
+def test_recluster_people_separates_distinct_individuals(cfg, session, repo):
+    _image(session, 1)
+    _image(session, 2)
+    _image(session, 3)
+
+    # Person 1 (Boy) with embedding [1.0, 0.0] in image 1 and 2
+    f1 = _face(session, 1, embedding=[1.0, 0.0])
+    f2 = _face(session, 2, embedding=[0.95, 0.05])
+    # Person 2 (Girl) with embedding [0.0, 1.0] in image 2 and 3
+    f3 = _face(session, 2, embedding=[0.0, 1.0])
+    f4 = _face(session, 3, embedding=[0.05, 0.95])
+
+    # Suppose an old corrupted cluster had all 4 faces assigned to it
+    corrupt = repo.create_person_cluster([0.5, 0.5])
+    repo.rename_person(corrupt.id, "Corrupted")
+    repo.update_person_cluster(corrupt.id, [0.5, 0.5], 4)
+    for f in (f1, f2, f3, f4):
+        f.person_id = corrupt.id
+    session.commit()
+
+    res = recluster_people(cfg.db_path, threshold=0.64)
+    assert res["clusters_created"] == 2
+    assert res["faces_clustered"] == 4
+
+    session.expire_all()
+    rf1 = session.get(M.FaceDetection, f1.id)
+    rf2 = session.get(M.FaceDetection, f2.id)
+    rf3 = session.get(M.FaceDetection, f3.id)
+    rf4 = session.get(M.FaceDetection, f4.id)
+
+    assert rf1.person_id == rf2.person_id
+    assert rf3.person_id == rf4.person_id
+    assert rf1.person_id != rf3.person_id
+
 

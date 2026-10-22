@@ -49,6 +49,10 @@ def dequantize_embedding(blob: str) -> list[float] | None:
         raw = json.loads(blob)
     except (ValueError, TypeError):
         return None
+    if not raw:
+        return []
+    if isinstance(raw[0], float):
+        return [float(v) for v in raw]
     arr = np.fromiter(raw, dtype=np.int16, count=len(raw)).view(np.float16)
     return [float(v) for v in arr]
 
