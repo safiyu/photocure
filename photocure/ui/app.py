@@ -1422,6 +1422,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
         except ActionError as e:
             raise HTTPException(e.status, str(e)) from None
 
+    @app.post("/api/people/{source_id}/merge-into/{target_id}", dependencies=auth)
+    def merge_people_endpoint(source_id: int, target_id: int):
+        """Merge all faces from source cluster into target cluster (drag-and-drop merge)."""
+        from ..people_actions import ActionError, merge_people
+        try:
+            return merge_people(dbp, source_id, target_id)
+        except ActionError as e:
+            raise HTTPException(e.status, str(e)) from None
+
     @app.post("/api/faces/{face_id}/reassign", dependencies=auth)
     def reassign_face_endpoint(face_id: int, body: ReassignFaceReq):
         """Move one face to a different (or brand-new) person."""

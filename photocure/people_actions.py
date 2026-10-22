@@ -104,3 +104,31 @@ def reassign_face(db_path: Path | str, face_id: int, *, person_id: int | None = 
             target.face_count += 1
         s.flush()
         return {"id": face.id, "person_id": target.id, "person_name": target.name}
+
+
+def merge_people(db_path: Path | str, source_id: int, target_id: int) -> dict:
+    """Merge all faces from *source* cluster into *target* cluster, then delete *source*.
+
+    Returns the updated target dict (with fresh sample_face_id).
+    """
+    if source_id == target_id:
+        raise ActionError("cannot merge a cluster into itself")
+    with get_session(db_path) as s:
+        source = s.get(M.PersonCluster, source_id)
+        target = s.get(M.PersonCluster, target_id)
+        if source is None:
+            raise ActionError(f"no person with id {source_id}", 404)
+        if target is None:
+            raise ActionError(f"no person with id {target_id}", 404)
+
+        # Re-parent every face from source → target
+        faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.person_id == source_id)).all()
+        for f in faces:
+            f.person_id = target_id
+        target.face_count += len(faces)
+        s.delete(source)
+        s.flush()
+
+        sample_face_id = _best_face_id_for(target_id, s)
+        return _as_dict(target, sample_face_id)
+

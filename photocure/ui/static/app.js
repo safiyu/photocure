@@ -2397,19 +2397,39 @@
       });
       return;
     }
+
+    // ── Build cards ──────────────────────────────────────────────────────────
     host.innerHTML = items.map((p) => `
-      <div class="people-card">
+      <div class="people-card" draggable="true" data-person-id="${num(p.id)}" data-face-count="${num(p.face_count)}">
+        <div class="people-drag-handle" title="Drag to merge with another person">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="9" cy="5" r="1" fill="currentColor"/><circle cx="15" cy="5" r="1" fill="currentColor"/>
+            <circle cx="9" cy="12" r="1" fill="currentColor"/><circle cx="15" cy="12" r="1" fill="currentColor"/>
+            <circle cx="9" cy="19" r="1" fill="currentColor"/><circle cx="15" cy="19" r="1" fill="currentColor"/>
+          </svg>
+        </div>
         <div class="people-card-avatar">
           ${p.sample_face_id
             ? `<img class="people-face-img" src="/api/faces/${num(p.sample_face_id)}.jpg" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
                <div class="people-face-fallback" style="display:none"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/></svg></div>`
             : `<div class="people-face-fallback"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/></svg></div>`
           }
+          <div class="people-drop-overlay">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M8 12h8M12 8l4 4-4 4"/>
+              <circle cx="12" cy="12" r="10" stroke-dasharray="4 2"/>
+            </svg>
+            <span class="people-drop-label">Merge here</span>
+          </div>
         </div>
-        <div class="people-card-count">${fmtN(p.face_count)} ${p.face_count === 1 ? "face" : "faces"}</div>
+        <div class="people-card-meta">
+          <span class="people-card-count" data-count="${num(p.face_count)}">${fmtN(p.face_count)} ${p.face_count === 1 ? "face" : "faces"}</span>
+        </div>
         <input type="text" class="people-name" list="people-names" placeholder="Unnamed"
                value="${esc(p.name || "")}" data-person-input="${num(p.id)}">
       </div>`).join("");
+
+    // ── Rename ───────────────────────────────────────────────────────────────
     $$("[data-person-input]", host).forEach((input) => {
       const commit = async () => {
         const name = input.value.trim();
@@ -2423,7 +2443,91 @@
       input.addEventListener("change", commit);
       input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); input.blur(); } });
     });
+
+    // ── Drag-and-drop merge ──────────────────────────────────────────────────
+    let dragSourceId = null;
+    let dragSourceCount = 0;
+
+    $$(".people-card", host).forEach((card) => {
+      // dragstart — record which card is being dragged
+      card.addEventListener("dragstart", (ev) => {
+        dragSourceId = card.dataset.personId;
+        dragSourceCount = parseInt(card.dataset.faceCount, 10) || 0;
+        card.classList.add("people-card--dragging");
+        ev.dataTransfer.effectAllowed = "move";
+        ev.dataTransfer.setData("text/plain", dragSourceId);
+        // Ghost image: the avatar portion only
+        const avatar = card.querySelector(".people-card-avatar");
+        if (avatar) ev.dataTransfer.setDragImage(avatar, avatar.offsetWidth / 2, avatar.offsetHeight / 2);
+      });
+
+      card.addEventListener("dragend", () => {
+        card.classList.remove("people-card--dragging");
+        $$(".people-card--drop-target", host).forEach((c) => {
+          c.classList.remove("people-card--drop-target");
+          // reset combined count label
+          const countEl = c.querySelector(".people-card-count");
+          if (countEl) {
+            const orig = parseInt(countEl.dataset.count, 10) || 0;
+            countEl.textContent = `${fmtN(orig)} ${orig === 1 ? "face" : "faces"}`;
+          }
+        });
+        dragSourceId = null;
+        dragSourceCount = 0;
+      });
+
+      // dragenter/dragover — highlight drop target, show combined count
+      card.addEventListener("dragenter", (ev) => {
+        ev.preventDefault();
+        if (!dragSourceId || card.dataset.personId === dragSourceId) return;
+        card.classList.add("people-card--drop-target");
+        // Show combined count preview
+        const countEl = card.querySelector(".people-card-count");
+        if (countEl) {
+          const targetCount = parseInt(card.dataset.faceCount, 10) || 0;
+          const combined = targetCount + dragSourceCount;
+          countEl.textContent = `${fmtN(combined)} ${combined === 1 ? "face" : "faces"} after merge`;
+        }
+      });
+
+      card.addEventListener("dragover", (ev) => {
+        ev.preventDefault();
+        if (!dragSourceId || card.dataset.personId === dragSourceId) return;
+        ev.dataTransfer.dropEffect = "move";
+      });
+
+      card.addEventListener("dragleave", (ev) => {
+        // Only fire when leaving the card entirely (not just entering a child)
+        if (card.contains(ev.relatedTarget)) return;
+        card.classList.remove("people-card--drop-target");
+        const countEl = card.querySelector(".people-card-count");
+        if (countEl) {
+          const orig = parseInt(card.dataset.faceCount, 10) || 0;
+          countEl.textContent = `${fmtN(orig)} ${orig === 1 ? "face" : "faces"}`;
+        }
+      });
+
+      // drop — call merge API
+      card.addEventListener("drop", async (ev) => {
+        ev.preventDefault();
+        const targetId = card.dataset.personId;
+        if (!dragSourceId || targetId === dragSourceId) return;
+
+        card.classList.remove("people-card--drop-target");
+        card.classList.add("people-card--merging");
+
+        try {
+          await post(`/api/people/${dragSourceId}/merge-into/${targetId}`, {});
+          toast("Clusters merged ✓", "ok");
+          await renderPeople();
+        } catch (e) {
+          card.classList.remove("people-card--merging");
+          toast(`Merge failed: ${e.message}`, "err");
+        }
+      });
+    });
   }
+
 
   // ============================================================================
   // DIRECT 1-TO-1 FACE-TO-ZOOM BIOMETRIC PROJECTION (NeuralVision)
