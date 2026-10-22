@@ -39,6 +39,8 @@ class FaceInfo:
     eye_closed_score: float | None = None
     eye_status: str = "unknown"
     is_blink: bool = False
+    # SFace embedding (128-dim), or None when too small/blurry to trust or SFace is unavailable.
+    embedding: list[float] | None = None
 
     @property
     def w(self) -> float:
@@ -85,6 +87,8 @@ class FaceEngine:
         self._yunet = None
         self._landmarker = None
         self._landmarker_failed = False
+        self._recognizer = None
+        self._recognizer_failed = False
 
     # ------------------------------------------------------------- lifecycle
     def _ensure_loaded(self) -> None:
@@ -153,8 +157,9 @@ class FaceEngine:
                 self._landmarker.close()
             except Exception:
                 pass
-        self._yunet = self._landmarker = None
+        self._yunet = self._landmarker = self._recognizer = None
         self._landmarker_failed = False
+        self._recognizer_failed = False
         empty_cuda_cache(self.bs)
 
     # ------------------------------------------------------ stage 1: detect
@@ -200,6 +205,36 @@ class FaceEngine:
                 continue
             face.face_sharpness = standardized_sharpness(crop, f.sharpness_width)
             face.eye_closed_score = self._eye_closed_score(shrink_to(crop, f.landmark_max_side))
+
+    # ------------------------------------------------- stage 3: identity embedding
+    def _ensure_recognizer_loaded(self):
+        if self._recognizer is not None or self._recognizer_failed:
+            return self._recognizer
+        path = models.model_path(models.SFACE)
+        if path is None or not hasattr(cv2, "FaceRecognizerSF"):
+            self._recognizer_failed = True
+            log.warning("SFace is unavailable (model missing, altered, or OpenCV too old); "
+                        "faces will not get an identity embedding")
+            return None
+        self._recognizer = cv2.FaceRecognizerSF.create(str(path), "")
+        return self._recognizer
+
+    def compute_embeddings(self, full_bgr: np.ndarray, faces: Sequence[FaceInfo]) -> None:
+        """Fill ``face.embedding`` for faces trusted enough to have a sharpness score."""
+        recognizer = self._ensure_recognizer_loaded()
+        if recognizer is None:
+            return
+        H, W = full_bgr.shape[:2]
+        for face in faces:
+            if face.face_sharpness is None:  # too small/blurry; analyze_faces already said so
+                continue
+            x, y = face.x1 * W, face.y1 * H
+            w, h = face.w * W, face.h * H
+            landmarks_px = [c for lx, ly in face.landmarks for c in (lx * W, ly * H)]
+            row = np.array([[x, y, w, h, *landmarks_px, face.confidence]], dtype=np.float32)
+            aligned = recognizer.alignCrop(full_bgr, row)
+            feature = recognizer.feature(aligned)
+            face.embedding = feature.flatten().tolist()
 
     def _eye_closed_score(self, crop: np.ndarray) -> float | None:
         lm = self._load_landmarker()

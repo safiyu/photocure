@@ -194,6 +194,19 @@ def test_no_faces_flag_disables_analysis_entirely():
     assert FaceEngine(cfg, backend=_bs()).detect_faces_batch([cv2.imread(str(PORTRAIT))]) == [[]]
 
 
+def test_compute_embeddings_fills_a_vector_for_a_real_face_and_skips_tiny_ones():
+    engine = FaceEngine(_cfg(), backend=_bs())
+    bgr = cv2.imread(str(PORTRAIT))
+    faces = engine.detect_faces_batch([bgr])[0]
+    engine.analyze_faces(bgr, faces)
+    engine.compute_embeddings(bgr, faces)
+    assert faces and faces[0].embedding and len(faces[0].embedding) > 0
+
+    tiny = FaceInfo(0.0, 0.0, 0.01, 0.01, confidence=0.9, face_sharpness=None)
+    engine.compute_embeddings(bgr, [tiny])
+    assert tiny.embedding is None
+
+
 class _Cat:
     def __init__(self, name, score):
         self.category_name, self.score = name, score
@@ -275,7 +288,7 @@ def test_real_landmarker_when_mediapipe_is_installed():
 
 # ------------------------------------------------------ bundled model integrity
 def test_manifest_lists_the_bundled_models_with_matching_hashes():
-    bundled = {models.YUNET, models.LANDMARKER, models.AESTHETIC}
+    bundled = {models.YUNET, models.LANDMARKER, models.SFACE, models.AESTHETIC}
     assert all(models.verify_model(f) for f in bundled)
     assert {m["file"] for m in models.load_manifest()} == bundled
     assert all(len(m["sha256"]) == 64 and m["upstream_url"].startswith("https://")

@@ -11,6 +11,7 @@ log = logging.getLogger("photocure.models")
 MODELS_DIR = Path(__file__).resolve().parent
 YUNET = "face_detection_yunet_2023mar.onnx"
 LANDMARKER = "face_landmarker.task"
+SFACE = "face_recognition_sface_2021dec.onnx"
 AESTHETIC = "aesthetic_laion_sa_v1_vit_b_16.npz"
 
 _verified: dict[tuple[str, int, int], bool] = {}

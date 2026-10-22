@@ -17,6 +17,14 @@
       "sha256": "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff"
     },
     {
+      "file": "face_recognition_sface_2021dec.onnx",
+      "name": "SFace face recognizer",
+      "purpose": "Turns a detected face into an embedding so the same person can be matched across photos",
+      "license": "Apache-2.0",
+      "upstream_url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+      "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+    },
+    {
       "file": "aesthetic_laion_sa_v1_vit_b_16.npz",
       "name": "LAION aesthetic predictor v1 (ViT-B/16 linear head)",
       "purpose": "Rates how appealing a photo looks from its CLIP embedding",
