@@ -5,7 +5,7 @@ import logging
 import os
 from pathlib import Path
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 log = logging.getLogger("photocure.config")
@@ -13,6 +13,11 @@ log = logging.getLogger("photocure.config")
 # "integrated" means whichever integrated or entry level GPU the machine has.
 DEVICE_CHOICES = ("auto", "cuda", "rocm", "xpu", "mps", "directml", "integrated", "cpu")
 MAX_WORKERS = 128
+
+
+def _sub_config(prefix: str) -> SettingsConfigDict:
+    """Share .env file loading and extra='ignore' across all nested settings classes."""
+    return SettingsConfigDict(env_prefix=prefix, env_file=".env", extra="ignore")
 
 
 def normalize_device(value: object) -> str:
@@ -50,16 +55,15 @@ def default_db_path() -> Path:
     return legacy if (not new.exists() and legacy.exists()) else new
 
 
-DEFAULT_DB = default_db_path()
 
 
 class DeviceSettings(BaseSettings):
     """GPU / device settings tuned for an 8 GiB RTX 4060 shared with the desktop."""
 
-    model_config = SettingsConfigDict(env_prefix="PCUR_DEVICE_")
+    model_config = _sub_config("PCUR_DEVICE_")
 
-    # One of DEVICE_CHOICES. An unknown value falls back to "auto" with a warning.
-    device: str = "auto"
+    # One of DEVICE_CHOICES. Can be set via PCUR_DEVICE_DEVICE or PCUR_DEVICE.
+    device: str = Field(default="auto", validation_alias=AliasChoices("PCUR_DEVICE_DEVICE", "PCUR_DEVICE", "device"))
     # Which GPU to use when the machine has more than one.
     device_index: int = Field(default=0, ge=0, le=MAX_WORKERS)
     # Threads decoding images ahead of the model. 0 means auto.
@@ -69,10 +73,11 @@ class DeviceSettings(BaseSettings):
     # Cap PyTorch fraction of VRAM (0.75 of 8 GiB ~= 6 GiB, keeping headroom for Xorg/Jellyfin).
     cuda_memory_fraction: float = 0.75
     use_fp16: bool = True
+    # Number of decoded frames per face detection chunk.
     face_batch_size: int = 32
     clip_batch_size: int = 64
-    # Downscale longest edge before model inference (saves VRAM on 48MP frames).
-    face_max_side: int = 1280
+    # Downscale longest edge before YuNet inference (1600 ensures >=60px faces on 48MP stay >=16px).
+    face_max_side: int = 1600
     clip_max_side: int = 512
     # How many decoded frames to hold in RAM at once while running inference.
     # Bounding this (instead of the whole library) keeps peak memory ~O(chunk)
@@ -92,7 +97,7 @@ class DeviceSettings(BaseSettings):
 class QualityThresholds(BaseSettings):
     """Quality scoring thresholds (Laplacian variance & luminance)."""
 
-    model_config = SettingsConfigDict(env_prefix="PCUR_QUALITY_")
+    model_config = _sub_config("PCUR_QUALITY_")
 
     # Laplacian variance of a center-cropped, normalized patch.
     blur_low: float = 50.0      # below this -> "blurry"
@@ -116,17 +121,18 @@ class QualityThresholds(BaseSettings):
 class BurstThresholds(BaseSettings):
     """Burst detection & best-shot selection thresholds."""
 
-    model_config = SettingsConfigDict(env_prefix="PCUR_BURST_")
+    model_config = _sub_config("PCUR_BURST_")
 
     window_seconds: int = 30
     similarity_threshold: float = 0.88
     # Burst group must contain >= 2 members to be a burst.
     min_group_size: int = 2
-    # Best-shot composite weights.
-    weight_blur: float = 0.40
-    weight_face_sharp: float = 0.30
+    # Best-shot composite weights (rebalanced to sum to 1.00).
+    weight_blur: float = 0.35
+    weight_face_sharp: float = 0.25
     weight_eye: float = 0.20
     weight_resolution: float = 0.10
+    weight_aesthetic: float = 0.10
     # Standardized face sharpness (Laplacian variance at 128 px) that counts as fully sharp.
     # Measured: a sharp portrait gives about 490, mild blur about 95, clear blur under 30.
     face_sharp_ref: float = 300.0      # (tune)
@@ -135,13 +141,24 @@ class BurstThresholds(BaseSettings):
     blink_penalty_max: float = 0.45    # (tune)
     # Longest time span a single burst may cover.
     max_burst_duration_s: float = 120.0
-    weight_aesthetic: float = 0.10
+
+    @model_validator(mode="after")
+    def _normalize_weights(self) -> BurstThresholds:
+        total = (self.weight_blur + self.weight_face_sharp + self.weight_eye +
+                 self.weight_resolution + self.weight_aesthetic)
+        if total > 0 and abs(total - 1.0) > 1e-4:
+            self.weight_blur /= total
+            self.weight_face_sharp /= total
+            self.weight_eye /= total
+            self.weight_resolution /= total
+            self.weight_aesthetic /= total
+        return self
 
 
 class FaceSettings(BaseSettings):
     """Face detection, crop and blink thresholds. Every number here is a starting default."""
 
-    model_config = SettingsConfigDict(env_prefix="PCUR_FACE_")
+    model_config = _sub_config("PCUR_FACE_")
 
     # False turns face analysis off completely (infer --no-faces): no faces, no blink flags.
     enabled: bool = True
@@ -167,16 +184,18 @@ class FaceSettings(BaseSettings):
     # v2 adds SFace identity embeddings, so every already-analyzed photo is re-detected once
     # to backfill them.
     schema_version: int = 2
-    # (tune) SFace cosine similarity operating point (cosine distance <= 0.363 means similarity >= 0.637).
-    cluster_join_threshold: float = 0.64
-    # (tune) Stricter remap threshold scoped to one photo's own prior faces.
+    # SFace incremental clustering operating point:
+    # 0.55 prevents stranger centroid drift (strangers have cosine similarity < 0.45)
+    # while maintaining stability across varied angles and lighting.
+    cluster_join_threshold: float = 0.55
+    # Stricter remap threshold scoped to one photo's own prior faces on re-analysis.
     cluster_remap_threshold: float = 0.64
 
 
 class TaxonomySettings(BaseSettings):
     """Zero-shot classification gating."""
 
-    model_config = SettingsConfigDict(env_prefix="PCUR_TAXONOMY_")
+    model_config = _sub_config("PCUR_TAXONOMY_")
 
     min_confidence: float = 0.40   # below -> Uncertain_Review
     min_margin: float = 0.08       # top-1 minus top-2 below this -> Uncertain_Review
@@ -219,7 +238,8 @@ class CuratorConfig(BaseSettings):
     quick_hash_head_bytes: int = 64 * 1024
     quick_hash_tail_bytes: int = 64 * 1024
 
-    device: DeviceSettings = Field(default_factory=DeviceSettings)
+    # AliasChoices prevents accidental collision when PCUR_DEVICE is set as a string.
+    device: DeviceSettings = Field(default_factory=DeviceSettings, validation_alias=AliasChoices("device", "__device_internal__"))
     quality: QualityThresholds = Field(default_factory=QualityThresholds)
     burst: BurstThresholds = Field(default_factory=BurstThresholds)
     face: FaceSettings = Field(default_factory=FaceSettings)
@@ -277,9 +297,15 @@ def resolve_workers(cfg: CuratorConfig, resolved_device: str | None = None,
     """Concrete worker counts: explicit values win, 0 means auto.
 
     ``resolved_device`` is the device that will really run (after auto detection);
-    without it the configured device is used and "auto" is treated as a GPU.
+    without it the configured device is used and "auto" probes hardware.
     """
     device = (resolved_device or cfg.device.device or "auto").lower()
+    if device == "auto":
+        try:
+            from .inference import backends as bk
+            device = bk.detect_backend(cfg).device
+        except Exception:
+            device = "cpu"
     on_cpu = device == "cpu"
     scan = cfg.scan_workers if cfg.scan_workers > 0 else auto_scan_workers(cpu_count)
     decode = (cfg.device.decode_workers if cfg.device.decode_workers > 0

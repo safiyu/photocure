@@ -2388,11 +2388,111 @@
 
   let activePpoPersonId = null;
 
-  async function renderPeople() {
+  // Cache so tab-switching back to People skips DOM rebuild & image re-load.
+  // Mutating actions (merge, rename, delete, recluster) pass force=true.
+  const _pc = { sort: null, fp: null };
+
+  function _peopleFP(items) {
+    return items.map((p) =>
+      `${p.id}:${p.face_count}:${p.name || ""}:${p.similar_to ? p.similar_to.target_id : ""}`
+    ).join("|");
+  }
+
+  // Smooth FLIP ripple delete: removes a single card and ripples subsequent cards into place
+  async function rippleDeleteCard(card, pid) {
+    const host = $("#peoplegrid");
+    if (!host || !card) return;
+
+    if (reducedMotion()) {
+      card.remove();
+      _finalizeDelete(host, pid);
+      return;
+    }
+
+    // 1. Identify all sibling cards that follow this card in DOM order
+    const allCards = Array.from(host.querySelectorAll(".people-card"));
+    const delIdx = allCards.indexOf(card);
+    const subsequent = delIdx !== -1 ? allCards.slice(delIdx + 1) : [];
+
+    // 2. First: Record their current bounding rects before DOM changes
+    const firstRects = subsequent.map((el) => el.getBoundingClientRect());
+
+    // 3. Animate the deleted card: shrink, fade out, and blur
+    card.style.pointerEvents = "none";
+    card.style.transition = "transform .22s cubic-bezier(0.4, 0, 1, 1), opacity .2s ease, filter .2s ease";
+    card.style.transform = "scale(0.72)";
+    card.style.opacity = "0";
+    card.style.filter = "blur(4px)";
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    // 4. Last: Remove the deleted card from the DOM
+    card.remove();
+
+    // 5. Invert: Set delta transform so subsequent cards visually stay where they were
+    subsequent.forEach((el, i) => {
+      const lastRect = el.getBoundingClientRect();
+      const dx = firstRects[i].left - lastRect.left;
+      const dy = firstRects[i].top - lastRect.top;
+      if (dx !== 0 || dy !== 0) {
+        el.style.transition = "none";
+        el.style.transform = `translate(${dx}px, ${dy}px)`;
+      }
+    });
+
+    // Force layout reflow
+    void host.offsetHeight;
+
+    // 6. Play: Animate from inverted position back to natural (0,0) with a ripple wave delay
+    requestAnimationFrame(() => {
+      subsequent.forEach((el, i) => {
+        const rippleDelay = Math.min(i * 14, 140);
+        el.style.transition = `transform .34s cubic-bezier(0.16, 1, 0.3, 1) ${rippleDelay}ms`;
+        el.style.transform = "";
+        const clean = (e) => {
+          if (e.target === el) {
+            el.style.transition = "";
+            el.removeEventListener("transitionend", clean);
+          }
+        };
+        el.addEventListener("transitionend", clean);
+      });
+    });
+
+    _finalizeDelete(host, pid);
+  }
+
+  function _finalizeDelete(host, pid) {
+    const remaining = host.querySelectorAll(".people-card");
+    const count = remaining.length;
+    const sumEl = $("#people-summary");
+    if (sumEl) sumEl.textContent = `${fmtN(count)} ${count === 1 ? "person" : "people"}`;
+
+    if (count === 0) {
+      host.innerHTML = `<div class="people-empty"><svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><p>No identified people yet.</p></div>`;
+    }
+
+    if (_pc.fp) {
+      _pc.fp = _pc.fp.split("|").filter((seg) => !seg.startsWith(`${pid}:`)).join("|");
+    }
+  }
+
+  async function renderPeople(force = false) {
     const host = $("#peoplegrid");
     const sort = state.peopleSort || "similarity";
     const data = await api(`/api/people?sort=${encodeURIComponent(sort)}`);
     const items = data.items || [];
+    const fp = _peopleFP(items);
+
+    // ── Cache hit: data unchanged, DOM already built → just scroll-restore ────
+    if (!force && sort === _pc.sort && fp === _pc.fp && host && host.children.length > 0) {
+      // Update counts/summary even without a full rebuild
+      const sumEl = $("#people-summary");
+      if (sumEl) sumEl.textContent = `${fmtN(items.length)} ${items.length === 1 ? "person" : "people"}`;
+      return;
+    }
+    _pc.sort = sort;
+    _pc.fp   = fp;
 
     // Summary count
     const sumEl = $("#people-summary");
@@ -2405,6 +2505,7 @@
         btn._wired = true;
         btn.addEventListener("click", () => {
           state.peopleSort = btn.dataset.sort;
+          _pc.sort = null; // sort changed → force rebuild
           renderPeople();
         });
       }
@@ -2427,7 +2528,8 @@
         try {
           const res = await post("/api/people/recluster", {});
           toast(`Done! Formed ${fmtN(res.clusters_created)} person clusters across ${fmtN(res.faces_clustered)} faces.`, "ok");
-          await renderPeople();
+          _pc.fp = null;
+          await renderPeople(true);
         } catch (e) {
           toast(`Re-clustering failed: ${e.message}`, "err");
         } finally {
@@ -2450,14 +2552,16 @@
     }
 
     // ── Build cards ──────────────────────────────────────────────────────────
-    host.innerHTML = items.map((p) => `
-      <div class="people-card" draggable="true" data-person-id="${num(p.id)}" data-face-count="${num(p.face_count)}">
+    host.innerHTML = items.map((p, i) => `
+      <div class="people-card" draggable="true" data-person-id="${num(p.id)}" data-face-count="${num(p.face_count)}" style="--card-index:${i}">
         <!-- Portrait Image -->
         <div class="people-card-portrait">
           ${p.sample_face_id
-            ? `<img class="people-face-img" src="/api/faces/${num(p.sample_face_id)}.jpg" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-               <div class="people-face-fallback" style="display:none"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/></svg></div>`
-            : `<div class="people-face-fallback"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/></svg></div>`
+            ? `<img class="people-face-img" src="/api/faces/${num(p.sample_face_id)}.jpg" alt="" loading="lazy"
+                 onload="this.classList.add('loaded')"
+                 onerror="this.classList.add('loaded');this.style.display='none';this.nextElementSibling.style.display='flex'">
+               <div class="people-face-fallback" style="display:none"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/></svg></div>`
+            : `<div class="people-face-fallback"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/></svg></div>`
           }
         </div>
 
@@ -2478,7 +2582,7 @@
 
         <!-- Drag & Drop Overlay -->
         <div class="people-drop-overlay">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M8 12h8M12 8l4 4-4 4"/>
             <circle cx="12" cy="12" r="10" stroke-dasharray="4 2"/>
           </svg>
@@ -2560,7 +2664,7 @@
             try {
               await post(`/api/people/${pid}/rename`, { name: newName });
               toast("Renamed ✓", "ok");
-              await renderPeople();
+              _pc.fp = null; await renderPeople(true);
             } catch (e) {
               toast(e.message, "err");
               restore();
@@ -2614,11 +2718,51 @@
           try {
             await post(`/api/people/${sourceId}/merge-into/${targetId}`, {});
             toast(`Merged with ${targetName} ✓`, "ok");
-            await renderPeople();
+            const targetCard = host.querySelector(`.people-card[data-person-id="${targetId}"]`);
+            if (targetCard) {
+              const srcCount = parseInt(card.dataset.faceCount, 10) || 0;
+              const tgtCount = parseInt(targetCard.dataset.faceCount, 10) || 0;
+              const newCount = tgtCount + srcCount;
+              targetCard.dataset.faceCount = newCount;
+              const badge = targetCard.querySelector(".people-card-count-badge");
+              if (badge) badge.textContent = fmtN(newCount);
+            }
+            await rippleDeleteCard(card, sourceId);
           } catch (e) {
             toast(`Merge failed: ${e.message}`, "err");
           }
         });
+
+        // ── Merge-thumb zoom-preview tooltip ────────────────────────────────
+        const mergeThumb = mergeBtn.querySelector(".people-merge-thumb");
+        if (mergeThumb) {
+          const preview     = document.getElementById("people-merge-preview");
+          const previewImg  = document.getElementById("people-merge-preview-img");
+          const previewLbl  = document.getElementById("people-merge-preview-label");
+          const GAP = 10; // px gap between tooltip and cursor
+
+          mergeThumb.addEventListener("mouseenter", () => {
+            previewImg.src = mergeThumb.src;
+            previewLbl.textContent = mergeBtn.dataset.targetName || "Preview";
+            preview.classList.add("visible");
+          });
+
+          mergeThumb.addEventListener("mousemove", (ev) => {
+            // Position tooltip above the cursor, centered
+            const TW = 120, TH = 140; // approx tooltip dimensions
+            let x = ev.clientX - TW / 2;
+            let y = ev.clientY - TH - GAP;
+            // Clamp to viewport
+            x = Math.max(8, Math.min(x, window.innerWidth  - TW - 8));
+            y = Math.max(8, Math.min(y, window.innerHeight - TH - 8));
+            preview.style.left = x + "px";
+            preview.style.top  = y + "px";
+          });
+
+          mergeThumb.addEventListener("mouseleave", () => {
+            preview.classList.remove("visible");
+          });
+        }
       }
 
       // ── Dismiss / Delete Cluster ───────────────────────────────────────────
@@ -2635,15 +2779,11 @@
           });
           if (!ok) return;
 
-          card.style.transform = "scale(0.92)";
-          card.style.opacity = "0";
           try {
             await api(`/api/people/${pid}`, { method: "DELETE" });
             toast("Person deleted", "ok");
-            setTimeout(() => renderPeople(), 220);
+            await rippleDeleteCard(card, pid);
           } catch (e) {
-            card.style.transform = "";
-            card.style.opacity = "";
             toast(`Delete failed: ${e.message}`, "err");
           }
         });
@@ -2716,7 +2856,22 @@
         try {
           await post(`/api/people/${dragSourceId}/merge-into/${pid}`, {});
           toast("Clusters merged ✓", "ok");
-          await renderPeople();
+          card.classList.remove("people-card--merging");
+
+          const srcCount = dragSourceCount || 0;
+          const tgtCount = parseInt(card.dataset.faceCount, 10) || 0;
+          const newCount = tgtCount + srcCount;
+          card.dataset.faceCount = newCount;
+          const badge = card.querySelector(".people-card-count-badge");
+          if (badge) badge.textContent = fmtN(newCount);
+
+          const srcCard = host.querySelector(`.people-card[data-person-id="${dragSourceId}"]`);
+          if (srcCard) {
+            await rippleDeleteCard(srcCard, dragSourceId);
+          } else {
+            _pc.fp = null;
+            await renderPeople(true);
+          }
         } catch (e) {
           card.classList.remove("people-card--merging");
           toast(`Merge failed: ${e.message}`, "err");
@@ -2777,7 +2932,7 @@
                 onerror="this.style.display='none'" class="ppo-avatar-img">`;
       } else {
         ppoAvatar().innerHTML =
-          `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'>
+          `<svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'>
              <circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/>
            </svg>`;
       }
@@ -2850,9 +3005,17 @@
       if (!ok) return;
       try {
         await api(`/api/people/${activePpoPersonId}`, { method: "DELETE" });
+        const targetPid = activePpoPersonId;
         closePersonPhotos();
         toast("Person deleted", "ok");
-        await renderPeople();
+        const host = $("#peoplegrid");
+        const card = host?.querySelector(`.people-card[data-person-id="${targetPid}"]`);
+        if (card) {
+          await rippleDeleteCard(card, targetPid);
+        } else {
+          _pc.fp = null;
+          await renderPeople(true);
+        }
       } catch (e) {
         toast(`Delete failed: ${e.message}`, "err");
       }

@@ -3169,6 +3169,16 @@ body.has-picks .tools, body.has-picks .hover-actions {
   flex: 1;
   background: rgba(255, 255, 255, 0.08);
 }
+/* ── People face-card entrance keyframes ────────────────────────────────── */
+@keyframes people-card-in {
+  from { opacity: 0; transform: translateY(22px) scale(.96); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+@keyframes people-face-shimmer {
+  0%   { background-position: -300% 0; }
+  100% { background-position:  300% 0; }
+}
+
 .people-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
@@ -3184,16 +3194,23 @@ body.has-picks .tools, body.has-picks .hover-actions {
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   cursor: pointer;
+  /* Entrance animation — stagger delay capped so later cards don't wait seconds */
+  animation: people-card-in .42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: min(calc(var(--card-index, 0) * 30ms), 320ms);
   transition: transform .3s cubic-bezier(0.16, 1, 0.3, 1),
               border-color .3s ease,
-              box-shadow .3s ease,
-              opacity .25s ease;
+              box-shadow .3s ease;
   user-select: none;
+  will-change: transform;
 }
+@media (prefers-reduced-motion: reduce) {
+  .people-card { animation: none; }
+}
+/* Hover: simple lift via transition — no animation swap so entrance never restarts */
 .people-card:hover {
   border-color: rgba(255, 255, 255, 0.28);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
-  transform: translateY(-3px);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255,255,255,.08);
+  transform: translateY(-4px) scale(1.012);
 }
 
 /* ── Full-bleed portrait image & vignette ────────────────────────────────── */
@@ -3212,9 +3229,29 @@ body.has-picks .tools, body.has-picks .hover-actions {
   object-fit: cover;
   object-position: center 20%;
   display: block;
-  transition: transform .5s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform .5s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity .35s ease,
+              filter .35s ease;
+  opacity: 0;
+  filter: blur(4px) saturate(.6);
 }
-.people-card:hover .people-face-img {
+.people-face-img.loaded {
+  opacity: 1;
+  filter: blur(0) saturate(1);
+}
+/* Shimmer skeleton shown while image is still loading */
+.people-card-portrait:not(:has(.people-face-img.loaded)) .people-face-img,
+.people-card-portrait:has(.people-face-img[src]:not(.loaded)) {
+  background:
+    linear-gradient(90deg,
+      #1a1e2a 25%,
+      #252b3b 45%,
+      #1a1e2a 65%
+    );
+  background-size: 300% 100%;
+  animation: people-face-shimmer 1.8s ease-in-out infinite;
+}
+.people-card:hover .people-face-img.loaded {
   transform: scale(1.05);
 }
 .people-face-fallback {
@@ -3311,10 +3348,10 @@ body.has-picks .tools, body.has-picks .hover-actions {
   width: 100%;
   padding: 7px 12px;
   border-radius: 12px;
-  background: rgba(99, 102, 241, 0.32);
+  background: color-mix(in srgb, var(--primary) 32%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(129, 140, 248, 0.45);
+  border: 1px solid color-mix(in srgb, var(--primary) 50%, transparent);
   color: #e0e7ff;
   font-size: 12px;
   font-weight: 500;
@@ -3329,8 +3366,8 @@ body.has-picks .tools, body.has-picks .hover-actions {
   box-sizing: border-box;
 }
 .people-merge-pill:hover {
-  background: rgba(99, 102, 241, 0.52);
-  border-color: rgba(165, 180, 252, 0.65);
+  background: color-mix(in srgb, var(--primary) 52%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 70%, transparent);
   color: #fff;
   transform: translateY(-1px);
 }
@@ -3348,7 +3385,60 @@ body.has-picks .tools, body.has-picks .hover-actions {
   border: 1.5px solid rgba(255, 255, 255, 0.55);
   flex-shrink: 0;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: zoom-in;
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
+.people-merge-thumb:hover {
+  border-color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 2px rgba(129, 140, 248, 0.7), 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+
+/* ── Floating face-preview tooltip ─────────────────────────────────────── */
+#people-merge-preview {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.75));
+}
+#people-merge-preview.visible {
+  display: flex;
+  animation: merge-preview-in .18s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes merge-preview-in {
+  from { opacity: 0; transform: translateY(6px) scale(.9); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+#people-merge-preview-img {
+  width: 110px;
+  height: 110px;
+  border-radius: 14px;
+  object-fit: cover;
+  object-position: center 20%;
+  border: 2px solid rgba(129, 140, 248, 0.8);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7), inset 0 0 0 1px rgba(255,255,255,.1);
+  display: block;
+}
+#people-merge-preview-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #e0e7ff;
+  background: rgba(30, 27, 75, 0.92);
+  border: 1px solid rgba(129, 140, 248, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+@media (prefers-reduced-motion: reduce) {
+  #people-merge-preview.visible { animation: none; }
+}
+
 
 /* ── Interactive Name pill ───────────────────────────────────────────────── */
 .people-name-pill-wrapper {
@@ -3419,8 +3509,8 @@ body.has-picks .tools, body.has-picks .hover-actions {
   background: rgba(0, 0, 0, 0.92);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
-  border: 1px solid #6366f1;
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35);
+  border: 1px solid var(--primary);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--primary) 35%, transparent);
   box-sizing: border-box;
 }
 .people-name-input {
@@ -3462,7 +3552,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .people-drop-overlay {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 8px;
-  background: rgba(99, 102, 241, 0.78); backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--primary) 78%, transparent); backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   color: #fff; border-radius: inherit;
   opacity: 0; pointer-events: none;
@@ -3477,8 +3567,8 @@ body.has-picks .tools, body.has-picks .hover-actions {
 
 /* ── Drop target state ───────────────────────────────────────────────────── */
 .people-card--drop-target {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 2px #6366f1, 0 16px 40px rgba(99, 102, 241, 0.4);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary), 0 16px 40px color-mix(in srgb, var(--primary) 40%, transparent);
 }
 .people-card--drop-target .people-drop-overlay { opacity: 1; }
 .people-card--drop-target .people-face-img { transform: scale(1.05); }
@@ -3924,4 +4014,163 @@ body.has-picks .tools, body.has-picks .hover-actions {
   .ppo-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
   .ppo-header { padding: 14px 16px; }
   .ppo-body { padding: 14px 16px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OVERLAY ANIMATIONS
+   Strategy: scrim layers (lb, similar, ppo, confirm-modal, bio-overlay)
+   fade in from opacity 0. Card/content children scale in from below for a
+   springy reveal. .closing is the exit class added by closeOverlay() in JS.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@keyframes ov-scrim-in  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ov-scrim-out { from { opacity: 1; } to { opacity: 0; } }
+
+@keyframes ov-card-in {
+  from { opacity: 0; transform: translateY(18px) scale(.96); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+@keyframes ov-card-out {
+  from { opacity: 1; transform: translateY(0)    scale(1); }
+  to   { opacity: 0; transform: translateY(12px) scale(.97); }
+}
+
+@keyframes ov-slide-up-in {
+  from { opacity: 0; transform: translateY(28px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes ov-slide-up-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(20px); }
+}
+
+/* ── Lightbox (.lb) ─────────────────────────────────────────────────────── */
+.lb:not([hidden]) {
+  animation: ov-scrim-in .22s ease both;
+}
+.lb.closing {
+  animation: ov-scrim-out .22s ease both;
+  pointer-events: none;
+}
+.lb:not([hidden]) .lb-stage,
+.lb:not([hidden]) .lb-info {
+  animation: ov-card-in .3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: .06s;
+}
+.lb:not([hidden]) .lb-close {
+  animation: ov-card-in .28s cubic-bezier(0.16, 1, 0.3, 1) .1s both;
+}
+.lb.closing .lb-stage,
+.lb.closing .lb-info,
+.lb.closing .lb-close {
+  animation: ov-card-out .18s ease both;
+}
+
+/* ── Modal (.modal — picker, help) ─────────────────────────────────────── */
+.modal:not([hidden]) {
+  animation: ov-scrim-in .2s ease both;
+}
+.modal.closing {
+  animation: ov-scrim-out .2s ease both;
+  pointer-events: none;
+}
+.modal:not([hidden]) .modal-card {
+  animation: ov-card-in .28s cubic-bezier(0.16, 1, 0.3, 1) .04s both;
+}
+.modal.closing .modal-card {
+  animation: ov-card-out .18s ease both;
+}
+
+/* ── Similar panel (.similar) ───────────────────────────────────────────── */
+.similar:not([hidden]) {
+  animation: ov-slide-up-in .28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.similar.closing {
+  animation: ov-slide-up-out .22s ease both;
+  pointer-events: none;
+}
+
+/* ── Person-photos overlay (.ppo) ───────────────────────────────────────── */
+.ppo:not([hidden]) {
+  animation: ov-scrim-in .22s ease both;
+}
+.ppo.closing {
+  animation: ov-scrim-out .22s ease both;
+  pointer-events: none;
+}
+.ppo:not([hidden]) .ppo-panel {
+  animation: ov-card-in .32s cubic-bezier(0.16, 1, 0.3, 1) .05s both;
+}
+.ppo.closing .ppo-panel {
+  animation: ov-card-out .2s ease both;
+}
+
+/* ── Confirm modal (.confirm-modal) ─────────────────────────────────────── */
+.confirm-modal:not([hidden]) {
+  animation: ov-scrim-in .18s ease both;
+}
+.confirm-modal.closing {
+  animation: ov-scrim-out .18s ease both;
+  pointer-events: none;
+}
+.confirm-modal:not([hidden]) .confirm-content {
+  animation: ov-card-in .26s cubic-bezier(0.16, 1, 0.3, 1) .03s both;
+}
+.confirm-modal.closing .confirm-content {
+  animation: ov-card-out .16s ease both;
+}
+
+/* ── Bio-overlay (.bio-overlay) ─────────────────────────────────────────── */
+.bio-overlay:not([hidden]) {
+  animation: ov-scrim-in .26s ease both;
+}
+.bio-overlay.closing {
+  animation: ov-scrim-out .26s ease both;
+  pointer-events: none;
+}
+.bio-overlay:not([hidden]) .bio-hud-top {
+  animation: ov-card-in .32s cubic-bezier(0.16, 1, 0.3, 1) .08s both;
+}
+.bio-overlay:not([hidden]) .bio-hud-bottom {
+  animation: ov-slide-up-in .32s cubic-bezier(0.16, 1, 0.3, 1) .12s both;
+}
+.bio-overlay.closing .bio-hud-top,
+.bio-overlay.closing .bio-hud-bottom {
+  animation: ov-card-out .18s ease both;
+}
+
+/* ── Bulkbar (#bulkbar) ─────────────────────────────────────────────────── */
+#bulkbar:not([hidden]) {
+  animation: ov-slide-up-in .24s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+#bulkbar.closing {
+  animation: ov-slide-up-out .18s ease both;
+  pointer-events: none;
+}
+
+/* ── Toast notifications ────────────────────────────────────────────────── */
+.toast {
+  animation: ov-slide-up-in .22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.toast.out {
+  animation: ov-slide-up-out .18s ease both;
+}
+
+/* ── Reduced motion: skip all overlay animations ────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .lb:not([hidden]), .lb.closing,
+  .lb:not([hidden]) .lb-stage, .lb:not([hidden]) .lb-info, .lb:not([hidden]) .lb-close,
+  .lb.closing .lb-stage, .lb.closing .lb-info, .lb.closing .lb-close,
+  .modal:not([hidden]), .modal.closing, .modal:not([hidden]) .modal-card, .modal.closing .modal-card,
+  .similar:not([hidden]), .similar.closing,
+  .ppo:not([hidden]), .ppo.closing, .ppo:not([hidden]) .ppo-panel, .ppo.closing .ppo-panel,
+  .confirm-modal:not([hidden]), .confirm-modal.closing,
+  .confirm-modal:not([hidden]) .confirm-content, .confirm-modal.closing .confirm-content,
+  .bio-overlay:not([hidden]), .bio-overlay.closing,
+  .bio-overlay:not([hidden]) .bio-hud-top, .bio-overlay:not([hidden]) .bio-hud-bottom,
+  .bio-overlay.closing .bio-hud-top, .bio-overlay.closing .bio-hud-bottom,
+  #bulkbar:not([hidden]), #bulkbar.closing,
+  .toast, .toast.out {
+    animation: none;
+  }
 }

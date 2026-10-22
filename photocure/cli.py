@@ -36,11 +36,11 @@ from rich.table import Table
 
 from . import __version__
 from .config import (
-    DEFAULT_DB,
     DEVICE_CHOICES,
     MAX_WORKERS,
     CuratorConfig,
     auto_scan_workers,
+    default_db_path,
     resolve_workers,
 )
 from sqlmodel import col, select
@@ -330,7 +330,7 @@ def _clip_weights_cached(cfg: CuratorConfig) -> bool | None:
 @app.command()
 def scan(
     target: Path = typer.Argument(..., help="Directory to scan (recursive)."),
-    db: Path = typer.Option(DEFAULT_DB, "--db", help="SQLite state store path."),
+    db: Path = typer.Option(default_factory=default_db_path, help="SQLite state store path."),
     workers: int | None = typer.Option(None, "--workers", "-w", min=0, max=MAX_WORKERS,
                                        help="Scan threads. 0 or omitted means auto."),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
@@ -387,7 +387,7 @@ def scan(
 # ---------------------------------------------------------------------------
 @app.command()
 def infer(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     batch_size: int | None = typer.Option(None, "--batch-size", "-b",
                                           help="Override face/CLIP batch size."),
     device: str | None = typer.Option(
@@ -497,7 +497,7 @@ def infer(
 # ---------------------------------------------------------------------------
 @app.command()
 def cluster(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     window_seconds: int | None = typer.Option(None, "--window-seconds"),
     similarity_threshold: float | None = typer.Option(None, "--similarity-threshold", "-s"),
 ):
@@ -516,7 +516,7 @@ def cluster(
 # ---------------------------------------------------------------------------
 @app.command("recluster-faces")
 def recluster_faces(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     threshold: float = typer.Option(0.64, "--threshold", "-t",
                                     help="Cosine similarity threshold for clustering faces (default 0.64)."),
 ):
@@ -534,7 +534,7 @@ def recluster_faces(
 # ---------------------------------------------------------------------------
 @app.command()
 def plan(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     output_dir: Path = typer.Option(Path("Organized"), "--output-dir", "-o",
                                     help="Organize root (Option 1)."),
     mode: str = typer.Option("category_first", "--mode",
@@ -578,7 +578,7 @@ def plan(
 # ---------------------------------------------------------------------------
 @app.command()
 def apply(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     plan_id: str | None = typer.Option(None, "--plan-id",
                                           help="Apply this persisted plan exactly as reviewed."),
     operation: str | None = typer.Option(None, "--operation",
@@ -676,7 +676,7 @@ def apply(
 # ---------------------------------------------------------------------------
 @app.command()
 def undo(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     transaction_id: str | None = typer.Option(None, "--transaction-id", "-t",
                                                  help="Defaults to the latest not yet undone."),
     no_verify: bool = typer.Option(False, "--no-verify",
@@ -703,7 +703,7 @@ def undo(
 
 @app.command("verify-txn")
 def verify_txn(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     transaction_id: str | None = typer.Option(None, "--transaction-id", "-t",
                                                  help="Defaults to the latest."),
 ):
@@ -730,7 +730,7 @@ def verify_txn(
 
 
 @app.command()
-def repair(db: Path = typer.Option(DEFAULT_DB, "--db")):
+def repair(db: Path = typer.Option(default_factory=default_db_path)):
     """Fix images.path from the action ledger (older stores)."""
     cfg = _config(db)
     n = Planner(cfg, db_path=cfg.db_path).repair_paths()
@@ -739,7 +739,7 @@ def repair(db: Path = typer.Option(DEFAULT_DB, "--db")):
 
 @app.command("trash-purge")
 def trash_purge(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     output_dir: Path = typer.Option(Path("Organized"), "--output-dir", "-o"),
     older_than_days: float | None = typer.Option(
         None, "--older-than-days", help="Default PCUR_TRASH_RETENTION_DAYS (30)."),
@@ -758,7 +758,7 @@ def trash_purge(
 
 
 @app.command()
-def transactions(db: Path = typer.Option(DEFAULT_DB, "--db")):
+def transactions(db: Path = typer.Option(default_factory=default_db_path)):
     """List ledger transactions, newest first."""
     cfg = _config(db)
     rows = Planner(cfg, db_path=cfg.db_path).list_transactions()
@@ -777,7 +777,7 @@ def transactions(db: Path = typer.Option(DEFAULT_DB, "--db")):
 @app.command()
 def similar(
     path: Path = typer.Argument(..., help="Image path (as indexed)."),
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     k: int = typer.Option(10, "-k", "--top", help="Number of neighbours."),
 ):
     """Find images similar to one image (CLIP embedding search)."""
@@ -806,7 +806,7 @@ def similar(
 @app.command()
 def search(
     query: str = typer.Argument(..., help="What to look for, e.g. 'dog on the beach'."),
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     limit: int = typer.Option(10, "-n", "--top", min=1, max=300, help="Number of results."),
     duplicates: bool = typer.Option(False, "--duplicates",
                                     help="Include duplicates and burst alternates."),
@@ -837,7 +837,7 @@ def search(
 
 @app.command()
 def highlights(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     year: int | None = typer.Option(None, "--year", min=1, max=9999,
                                     help="Default: the newest year with photos."),
     top: int = typer.Option(50, "--top", "-n", min=1, max=500, help="How many photos."),
@@ -868,7 +868,7 @@ def highlights(
 
 @app.command()
 def keywords(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     remove: bool = typer.Option(False, "--remove", help="Remove Photocure keywords instead."),
 ):
     """Write (or remove) category, highlight and event keywords in XMP sidecars.
@@ -897,7 +897,7 @@ def keywords(
 
 @app.command()
 def events(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     gap_hours: float = typer.Option(2.0, "--gap-hours"),
     gps_km: float | None = typer.Option(None, "--gps-km"),
 ):
@@ -912,7 +912,7 @@ def events(
 @app.command("export-onnx")
 def export_onnx(
     output_dir: Path = typer.Option(..., "--output-dir", "-o"),
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
 ):
     """Export the CLIP image tower and face detector to ONNX."""
     export_models = _lazy(".inference.onnx_export", "export_models")
@@ -929,7 +929,7 @@ def export_onnx(
 # stats
 # ---------------------------------------------------------------------------
 @app.command()
-def devices(db: Path = typer.Option(DEFAULT_DB, "--db")):
+def devices(db: Path = typer.Option(default_factory=default_db_path)):
     """List every GPU and CPU the app can use, which one is chosen, and the worker counts."""
     reset_backend_cache()
     cfg = _config_no_init(db)
@@ -948,7 +948,7 @@ def devices(db: Path = typer.Option(DEFAULT_DB, "--db")):
 
 
 @app.command()
-def doctor(db: Path = typer.Option(DEFAULT_DB, "--db")):
+def doctor(db: Path = typer.Option(default_factory=default_db_path)):
     """Check that the AI model, GPU and face detector are ready, and say how to fix gaps."""
     reset_backend_cache()
     cfg = _config_no_init(db)
@@ -1022,7 +1022,7 @@ def doctor(db: Path = typer.Option(DEFAULT_DB, "--db")):
 
 @app.command()
 def learn(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     rebuild: bool = typer.Option(True, "--rebuild/--no-rebuild",
                                  help="Refresh each photo's category afterwards."),
 ):
@@ -1052,7 +1052,7 @@ def learn(
 
 @app.command()
 def stats(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
 ):
     """Show state-store statistics."""
     cfg = _config(db)
@@ -1072,7 +1072,7 @@ def stats(
 # ---------------------------------------------------------------------------
 @app.command()
 def serve(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     host: str = typer.Option("127.0.0.1", "--host", envvar="PCUR_HOST"),
     port: int = typer.Option(8080, "--port", "-p", envvar="PCUR_PORT"),
     reload: bool = typer.Option(False, "--reload"),
@@ -1114,7 +1114,7 @@ def serve(
 
 @app.command(name="start")
 def start(
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
     host: str = typer.Option("127.0.0.1", "--host", envvar="PCUR_HOST"),
     port: int = typer.Option(8080, "--port", "-p", envvar="PCUR_PORT"),
     reload: bool = typer.Option(False, "--reload"),
@@ -1127,7 +1127,7 @@ def start(
 
 @app.command("mcp")
 def mcp_cmd(
-    db: Path = typer.Option(DEFAULT_DB, "--db", help="Library database. Use an absolute path."),
+    db: Path = typer.Option(default_factory=default_db_path, help="Library database. Use an absolute path."),
 ):
     """Run an MCP server on stdio so an AI agent can search your photos and make clean copies."""
     try:
@@ -1144,7 +1144,7 @@ def mcp_cmd(
 
 @app.command()
 def setup(
-    db: Path = typer.Option(DEFAULT_DB, "--db", help="Database to use for the web UI."),
+    db: Path = typer.Option(default_factory=default_db_path, help="Database to use for the web UI."),
     host: str = typer.Option("127.0.0.1", "--host"),
     port: int = typer.Option(8080, "--port", "-p"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask before downloading."),
@@ -1333,7 +1333,7 @@ app.add_typer(db_app, name="db")
 @db_app.command("restore")
 def db_restore(
     snapshot: Path = typer.Argument(..., exists=True, dir_okay=False, help="A backups/*.bak.db file."),
-    db: Path = typer.Option(DEFAULT_DB, "--db"),
+    db: Path = typer.Option(default_factory=default_db_path),
 ):
     """Replace the database with a snapshot taken before an apply."""
     import contextlib
@@ -1362,7 +1362,7 @@ def db_restore(
 
 
 @app.command()
-def geocode(db: Path = typer.Option(DEFAULT_DB, "--db"),
+def geocode(db: Path = typer.Option(default_factory=default_db_path),
             batch: int = typer.Option(500, "--batch", min=1, help="Positions looked up at a time.")):
     """Fill in place names (city, region, country) for photos that have GPS. Works offline."""
     from .scanner import geo
@@ -1395,7 +1395,7 @@ def bench_blinks(
     if not items:
         console.print("[yellow]The labels file has no usable rows (label must be open or closed).[/yellow]")
         raise typer.Exit(1)
-    cfg = _config_no_init(DEFAULT_DB)
+    cfg = _config_no_init(default_db_path())
     scored, no_face, unreadable = bench.score_labelled_photos(items, cfg)
     measured = [x for x in scored if x[1] is not None]
     console.print(f"{len(items)} labelled photos: {len(measured)} measured, "
@@ -1430,7 +1430,7 @@ def bench_pipeline_cmd(
 ):
     """Time each stage (decode, faces, landmarks, CLIP, quality, database) on a folder of photos."""
     from . import bench
-    cfg = _config_no_init(DEFAULT_DB)
+    cfg = _config_no_init(default_db_path())
     if device:
         if device.strip().lower() not in _DEVICES:
             console.print(f"[red]Unknown device '{device}'. Choose one of: {', '.join(_DEVICES)}.[/red]")

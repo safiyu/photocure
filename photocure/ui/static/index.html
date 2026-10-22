@@ -903,6 +903,11 @@
 
   <div id="facepanel" class="bio-overlay bg-cyber-grid" hidden role="dialog" aria-label="Face inspection panel"></div>
   <div id="toasts" class="toasts" aria-live="polite"></div>
+  <!-- Floating merge-face preview tooltip (JS-positioned on hover) -->
+  <div id="people-merge-preview" role="tooltip" aria-hidden="true">
+    <img id="people-merge-preview-img" src="" alt="">
+    <span id="people-merge-preview-label"></span>
+  </div>
   <script type="module" src="/static/virtual_grid.mjs"></script>
   <script src="/static/app.js?v={{VERSION}}"></script>
 </body>
