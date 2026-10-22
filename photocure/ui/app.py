@@ -1390,17 +1390,22 @@ def create_app(db_path: str | None = None) -> FastAPI:
             names = {p.id: p.name for p in (
                 s.exec(select(M.PersonCluster).where(col(M.PersonCluster.id).in_(person_ids))).all()
                 if person_ids else [])}
-            return {"image_id": image_id, "items": [{
-                "id": f.id, "confidence": round(f.confidence, 3),
-                "box": [f.x1, f.y1, f.x2, f.y2] if f.x1 is not None else None,
-                "eye_status": f.eye_status, "is_blink": bool(f.is_blink),
-                "eye_closed_score": (round(f.eye_closed_score, 3)
-                                     if f.eye_closed_score is not None else None),
-                "sharpness": round(f.face_sharpness, 1) if f.face_sharpness is not None else None,
-                "url": f"/api/faces/{f.id}.jpg?v={fp}" if f.x1 is not None else None,
-                "person_id": f.person_id,
-                "person_name": names.get(f.person_id) if f.person_id is not None else None,
-            } for f in faces]}
+            return {
+                "image_id": image_id, "filename": rec.filename, "width": rec.width,
+                "height": rec.height, "orientation": rec.orientation,
+                "taken_at": rec.taken_at.isoformat() if rec.taken_at else None,
+                "items": [{
+                    "id": f.id, "confidence": round(f.confidence, 3),
+                    "box": [f.x1, f.y1, f.x2, f.y2] if f.x1 is not None else None,
+                    "eye_status": f.eye_status, "is_blink": bool(f.is_blink),
+                    "eye_closed_score": (round(f.eye_closed_score, 3)
+                                         if f.eye_closed_score is not None else None),
+                    "sharpness": round(f.face_sharpness, 1) if f.face_sharpness is not None else None,
+                    "url": f"/api/faces/{f.id}.jpg?v={fp}" if f.x1 is not None else None,
+                    "person_id": f.person_id,
+                    "person_name": names.get(f.person_id) if f.person_id is not None else None,
+                } for f in faces],
+            }
 
     @app.get("/api/people")
     def list_people_endpoint():

@@ -2419,6 +2419,10 @@
   let activeOverlayBurstData = null;
   let activeOverlayMembers = [];
   let activeOverlayFaces = [];
+  // Stand-in for curMember when there is no burst (activeOverlayMembers is empty): built from
+  // the per-image faces response so a standalone photo renders the same chrome as a burst frame.
+  let activeOverlayStandaloneMember = null;
+  let activeOverlayPeopleNames = [];
   let overlayLayout = 'radial';      // 'radial' | 'split' | 'cinema' | 'matrix'
   let faceZoomMultiplier = 1.08;     // 0.86 (1.5x) | 1.08 (2.5x) | 1.28 (3.5x)
   let hoveredFaceId = null;
@@ -2436,6 +2440,8 @@
     activeOverlayBurstData = null;
     activeOverlayMembers = [];
     activeOverlayFaces = [];
+    activeOverlayStandaloneMember = null;
+    activeOverlayPeopleNames = [];
     hoveredFaceId = null;
     selectedFaceId = null;
   }
@@ -2490,17 +2496,37 @@
     `;
 
     try {
-      const [burstData, faceData] = await Promise.all([
-        api("/api/burst/" + num(burstId)),
-        api(`/api/images/${num(imageId)}/faces`)
+      const [burstData, faceData, peopleData] = await Promise.all([
+        burstId ? api("/api/burst/" + num(burstId)) : Promise.resolve(null),
+        api(`/api/images/${num(imageId)}/faces`),
+        api("/api/people").catch(() => ({ items: [] })),
       ]);
 
       activeOverlayBurstData = burstData;
-      activeOverlayMembers = burstData.members || [];
-      const curMember = activeOverlayMembers.find((m) => m.id === imageId) || activeOverlayMembers[0];
+      activeOverlayMembers = (burstData && burstData.members) || [];
+      activeOverlayPeopleNames = (peopleData.items || []).filter((p) => p.name).map((p) => p.name);
+      activeOverlayStandaloneMember = activeOverlayMembers.length ? null : {
+        id: imageId, filename: faceData.filename, width: faceData.width, height: faceData.height,
+        orientation: faceData.orientation, taken_at: faceData.taken_at,
+        is_best_shot: false, delete_approved: false,
+      };
+      const curMember = activeOverlayMembers.find((m) => m.id === imageId)
+        || activeOverlayMembers[0] || activeOverlayStandaloneMember;
       if (!curMember) throw new Error("Frame not found");
 
       const items = faceData.items || [];
+      if (!items.length) {
+        overlay.innerHTML = `
+          <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
+          <div style="position:relative;z-index:30;padding:40px;text-align:center;color:#94a3b8;font-family:var(--font-mono, monospace);">
+            No faces were found in this photo.
+            <br><br>
+            <button type="button" class="bio-close-btn" style="margin:0 auto;" onclick="closeBiometricProjection()">Close</button>
+          </div>
+        `;
+        activeOverlayFaces = [];
+        return;
+      }
       const wording = { open: "Eyes open", possible: "Eyes may be closing", closed: "Eyes closed", unknown: "Eyes not measured" };
 
       activeOverlayFaces = items.map((f, idx) => {
@@ -2524,7 +2550,8 @@
 
         return {
           id: f.id,
-          name: `Person ${idx + 1}`,
+          name: f.person_name || `Person ${idx + 1}`,
+          personId: f.person_id != null ? f.person_id : null,
           role: f.is_blink ? "Closed Eyes" : (stateKey === "open" ? "Clear / Open" : "Subject"),
           conf: confPercent,
           sharpness: f.sharpness,
@@ -2698,7 +2725,8 @@
     const overlay = $("#facepanel");
     if (!overlay || !activeOverlayImageId) return;
 
-    const curMember = activeOverlayMembers.find((m) => m.id === activeOverlayImageId) || activeOverlayMembers[0];
+    const curMember = activeOverlayMembers.find((m) => m.id === activeOverlayImageId)
+      || activeOverlayMembers[0] || activeOverlayStandaloneMember;
     if (!curMember) return;
 
     const vw = window.innerWidth;
@@ -2910,26 +2938,26 @@
 
         <!-- Frame Actions (Best Shot & Mark Delete) & Zoom & Close -->
         <div class="bio-hud-right">
-          ${overlayLayout !== 'matrix' ? `
-          <!-- Frame Actions -->
+          ${overlayLayout === 'matrix' ? `
+          <div class="bio-actions-bar">
+            <span style="font-size:12px; color:var(--blue-200, #bfdbfe); opacity:0.85; font-weight:500;">Same subject per column</span>
+          </div>
+          ` : activeOverlayBurstId ? `
+          <!-- Frame Actions (burst only: a standalone photo has no best-shot/delete concept here) -->
           <div class="bio-actions-bar">
             ${curMember.is_best_shot
               ? `<button type="button" class="bio-action-btn best-active" disabled title="This is the best shot">★ Best shot</button>`
               : `<button type="button" class="bio-action-btn best" onclick="makeOverlayBestShot(${curMember.id})" title="Set this frame as best shot">★ Set best</button>`}
-            <button 
-              type="button" 
-              class="bio-action-btn delete${curMember.delete_approved ? ' on' : ''}" 
-              onclick="toggleOverlayMarkDelete(${curMember.id}, ${curMember.is_best_shot ? 'true' : 'false'}, ${curMember.delete_approved ? 'true' : 'false'})" 
+            <button
+              type="button"
+              class="bio-action-btn delete${curMember.delete_approved ? ' on' : ''}"
+              onclick="toggleOverlayMarkDelete(${curMember.id}, ${curMember.is_best_shot ? 'true' : 'false'}, ${curMember.delete_approved ? 'true' : 'false'})"
               title="${curMember.is_best_shot ? 'Marking best shot for delete' : 'Mark this frame for delete'}"
             >
               ${curMember.delete_approved ? 'Marked (undo)' : 'Mark delete'}
             </button>
           </div>
-          ` : `
-          <div class="bio-actions-bar">
-            <span style="font-size:12px; color:var(--blue-200, #bfdbfe); opacity:0.85; font-weight:500;">Same subject per column</span>
-          </div>
-          `}
+          ` : ''}
 
           <div class="bio-zoom-bar">
             <span class="bio-ctrl-label">Zoom:</span>
@@ -3038,13 +3066,14 @@
 
       <!-- BOTTOM HUD -->
       <footer class="bio-hud-bottom"${overlayLayout === 'matrix' ? ' style="display:none;"' : ''}>
+        ${activeOverlayBurstId ? `
         <div class="bio-frame-switcher-wrap">
           <span class="bio-frame-label">Frames:</span>
           <div id="overlay-card-switcher" class="bio-frame-switcher">
             ${activeOverlayMembers.map((m, idx) => `
-              <button 
-                type="button" 
-                class="bio-frame-btn${m.id === activeOverlayImageId ? ' on' : ''}" 
+              <button
+                type="button"
+                class="bio-frame-btn${m.id === activeOverlayImageId ? ' on' : ''}"
                 onclick="openBiometricProjection(${activeOverlayBurstId}, ${m.id})"
                 title="${esc(m.filename)}"
               >
@@ -3053,6 +3082,7 @@
             `).join('')}
           </div>
         </div>
+        ` : ''}
 
         <div id="selected-face-drawer" class="bio-face-inspector"></div>
       </footer>
@@ -3076,7 +3106,7 @@
     if (drawerEl && activeFace) {
       drawerEl.innerHTML = `
         <div style="display:flex; align-items:center; gap:12px;">
-          <div 
+          <div
             style="width:36px; height:36px; border-radius:50%; overflow:hidden; border:2px solid ${activeFace.color}; flex:none;"
           >
             <img src="${activeFace.url}" style="width:100%; height:100%; object-fit:cover;" alt="">
@@ -3092,8 +3122,26 @@
               ${esc(activeFace.eyeStatusText)}${activeFace.sharpness ? ` • Sharpness ${num(activeFace.sharpness).toFixed(1)}` : ''}
             </div>
           </div>
+          <div style="flex:none;">
+            <input type="text" id="overlay-reassign-input" list="overlay-people-names"
+                   placeholder="Who is this?" value="${activeFace.personId != null ? esc(activeFace.name) : ''}"
+                   style="font:inherit; font-size:12px; padding:5px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.25); background:rgba(0,0,0,0.3); color:#fff; width:140px;">
+            <datalist id="overlay-people-names">
+              ${activeOverlayPeopleNames.map((n) => `<option value="${esc(n)}"></option>`).join('')}
+            </datalist>
+          </div>
         </div>
       `;
+      const reassignInput = $("#overlay-reassign-input", drawerEl);
+      if (reassignInput) {
+        const faceId = activeFace.id;
+        reassignInput.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); reassignInput.blur(); } };
+        reassignInput.onchange = () => {
+          const name = reassignInput.value.trim();
+          if (!name) return;
+          reassignFace(faceId, { new_name: name });
+        };
+      }
     }
 
     $$(".enlarged-face-node", overlay).forEach((node) => {
@@ -3146,6 +3194,14 @@
     await openBiometricProjection(activeOverlayBurstId, imageId);
   }
 
+  async function reassignFace(faceId, opts) {
+    try {
+      await post(`/api/faces/${num(faceId)}/reassign`, opts || {});
+      toast("Reassigned", "ok");
+      await openBiometricProjection(activeOverlayBurstId, activeOverlayImageId);
+    } catch (e) { toast(e.message, "err"); }
+  }
+
   // Expose handlers to window for inline onclick attributes
   window.openBiometricProjection = openBiometricProjection;
   window.closeBiometricProjection = closeBiometricProjection;
@@ -3156,6 +3212,7 @@
   window.selectFaceInOverlay = selectFaceInOverlay;
   window.makeOverlayBestShot = makeOverlayBestShot;
   window.toggleOverlayMarkDelete = toggleOverlayMarkDelete;
+  window.reassignFace = reassignFace;
 
   // Compatibility alias
   async function showFaces(imageId, host, filename) {
