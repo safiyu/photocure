@@ -1742,7 +1742,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .bulk .btn { height: 34px; }
 
 /* ------------------------------------------------------------------ lightbox */
-.lb { position: fixed; inset: 0; z-index: 90; display: grid; grid-template-columns: minmax(0, 1fr) 340px; background: var(--scrim); }
+.lb { position: fixed; inset: 0; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr) 340px; background: var(--scrim); }
 @supports (backdrop-filter: blur(6px)) {
   .lb { backdrop-filter: blur(6px); }
 }
@@ -1804,7 +1804,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .similar-head h2 { font-size: 24px; }
 
 /* ------------------------------------------------------------------ toasts */
-.toasts { position: fixed; right: 22px; bottom: 22px; z-index: 120; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none; }
+.toasts { position: fixed; right: 22px; bottom: 22px; z-index: 300; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none; }
 .toast {
   pointer-events: auto; display: flex; align-items: center; gap: 10px; max-width: 420px; padding: 11px 16px;
   background: var(--sheet); color: var(--ink); border: 1px solid var(--line); border-left: 4px solid var(--primary);

@@ -1837,7 +1837,11 @@
       lb.releaseTrap = null;
     }
     closeOverlay($("#lightbox"));
-    document.body.style.overflow = "";
+    if ($("#person-photos-overlay") && !$("#person-photos-overlay").hidden) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
     if (lb.grid) {  // leave the grid on the photo that was last viewed
       const id = lbIdAt(lb.i);
       if (id != null) lb.grid.vg.setCursor(id);
@@ -2221,6 +2225,7 @@
       if (open("#picker")) closePicker();
       else if (open("#help")) closeHelp();
       else if (lb.open) closeLightbox();
+      else if (open("#person-photos-overlay")) closePersonPhotos();
       else if (!$("#similar-panel").hidden) closeOverlay($("#similar-panel"));
       else if (state.picks.size) clearPicks();
       else document.body.classList.remove("nav-open");
@@ -2690,7 +2695,7 @@
     $("#ppo-close")?.addEventListener("click", closePersonPhotos);
     overlay.querySelector(".ppo-backdrop")?.addEventListener("click", closePersonPhotos);
     overlay.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") closePersonPhotos();
+      if (ev.key === "Escape" && !lb.open) closePersonPhotos();
     });
     $("#ppo-delete")?.addEventListener("click", async () => {
       if (!activePpoPersonId) return;
