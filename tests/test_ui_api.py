@@ -694,7 +694,7 @@ def _seed_face(env, image_id: int, person_id: int | None = None,
 def test_get_people_lists_known_clusters(env):
     pid = _seed_person(env, name="Alice", face_count=3)
     items = env.client.get("/api/people").json()["items"]
-    assert {"id": pid, "name": "Alice", "face_count": 3} in items
+    assert {"id": pid, "name": "Alice", "face_count": 3, "sample_face_id": None} in items
 
 
 def test_rename_person_endpoint_merges_duplicates(env):
@@ -710,6 +710,34 @@ def test_rename_person_endpoint_merges_duplicates(env):
 
     r = env.client.post("/api/people/999999/rename", json={"name": "x"})
     assert r.status_code == 404
+
+
+def test_merge_people_endpoint(env):
+    target = _seed_person(env, name="Target", face_count=2)
+    source = _seed_person(env, name="Source", face_count=3)
+    iid = env.client.get("/api/images").json()["items"][0]["id"]
+    _seed_face(env, iid, person_id=source)
+
+    r = env.client.post(f"/api/people/{source}/merge-into/{target}")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["id"] == target
+    assert data["face_count"] == 3
+
+
+def test_person_photos_endpoint(env):
+    pid = _seed_person(env, name="Alice", face_count=1)
+    iid = env.client.get("/api/images").json()["items"][0]["id"]
+    fid = _seed_face(env, iid, person_id=pid)
+
+    r = env.client.get(f"/api/people/{pid}/photos")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["person"]["id"] == pid
+    assert data["person"]["name"] == "Alice"
+    assert len(data["photos"]) == 1
+    assert data["photos"][0]["id"] == iid
+    assert data["photos"][0]["face_id"] == fid
 
 
 def test_reassign_face_endpoint_moves_one_face(env):

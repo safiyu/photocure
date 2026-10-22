@@ -2525,8 +2525,118 @@
           toast(`Merge failed: ${e.message}`, "err");
         }
       });
+
+      // click → open person photo overlay
+      card.addEventListener("click", (ev) => {
+        if (ev.target.closest(".people-name") || ev.target.closest(".people-drag-handle")) return;
+        if (dragSourceId) return; // ignore stray clicks right after a drag
+        showPersonPhotos(card.dataset.personId);
+      });
     });
   }
+
+
+  // ============================================================================
+  // PERSON PHOTOS OVERLAY
+  // ============================================================================
+
+  const ppoEl       = () => $("#person-photos-overlay");
+  const ppoGrid     = () => $("#ppo-grid");
+  const ppoName     = () => $("#ppo-name");
+  const ppoCount    = () => $("#ppo-count");
+  const ppoAvatar   = () => $("#ppo-avatar");
+
+  async function showPersonPhotos(personId) {
+    const overlay = ppoEl();
+    if (!overlay) return;
+
+    // Show overlay immediately with a loading state
+    ppoName().textContent = "Loading…";
+    ppoCount().textContent = "";
+    ppoAvatar().innerHTML = "";
+    ppoGrid().innerHTML = `<div class="ppo-loading"><span class="spinner"></span></div>`;
+    openOverlay(overlay);
+    document.body.style.overflow = "hidden";
+
+    try {
+      const data = await api(`/api/people/${personId}/photos`);
+      const { person, photos } = data;
+
+      // Header
+      const displayName = person.name || "Unnamed";
+      ppoName().textContent = displayName;
+      ppoCount().textContent = `${fmtN(person.face_count)} ${person.face_count === 1 ? "photo" : "photos"}`;
+
+      // Avatar — use first photo's face crop if available
+      const firstWithFace = photos.find((p) => p.face_url);
+      if (firstWithFace) {
+        ppoAvatar().innerHTML =
+          `<img src="${firstWithFace.face_url}" alt="" loading="lazy"
+                onerror="this.style.display='none'" class="ppo-avatar-img">`;
+      } else {
+        ppoAvatar().innerHTML =
+          `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'>
+             <circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/>
+           </svg>`;
+      }
+
+      if (!photos.length) {
+        ppoGrid().innerHTML = `<p class="ppo-empty">No analysed photos found for this person yet.</p>`;
+        return;
+      }
+
+      // Photo grid — display photos
+      ppoGrid().innerHTML = photos.map((p, i) => `
+        <div class="ppo-thumb" data-image-id="${num(p.id)}"
+             style="--i:${i}" tabindex="0" role="button"
+             aria-label="Open ${esc(p.filename)}">
+          <img class="ppo-thumb-img" src="${p.thumb_url}" alt="${esc(p.filename)}" loading="lazy">
+          ${p.face_url ? `<img class="ppo-thumb-face" src="${p.face_url}" alt="" title="Detected face" loading="lazy">` : ""}
+          <div class="ppo-thumb-info">
+            <span class="ppo-thumb-filename">${esc(p.filename)}</span>
+            ${p.taken_at ? `<span class="ppo-thumb-date">${new Date(p.taken_at).toLocaleDateString()}</span>` : ""}
+          </div>
+        </div>`).join("");
+
+      // Wire photo click → open lightbox with full list of photos so user can browse
+      const allIds = photos.map((p) => num(p.id));
+      $$(".ppo-thumb", ppoGrid()).forEach((thumb) => {
+        const imgId = num(thumb.dataset.imageId);
+        const openPhoto = () => {
+          openLightboxList(allIds, imgId, thumb);
+        };
+        thumb.addEventListener("click", openPhoto);
+        thumb.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter" || ev.key === " ") {
+            ev.preventDefault();
+            openPhoto();
+          }
+        });
+      });
+
+    } catch (e) {
+      ppoGrid().innerHTML = `<p class="ppo-empty">Failed to load photos: ${esc(e.message)}</p>`;
+    }
+  }
+
+  function closePersonPhotos() {
+    const overlay = ppoEl();
+    if (!overlay) return;
+    closeOverlay(overlay);
+    document.body.style.overflow = "";
+  }
+
+  // Wire up close button + backdrop click + Escape
+  function initPpo() {
+    const overlay = ppoEl();
+    if (!overlay) return;
+    $("#ppo-close")?.addEventListener("click", closePersonPhotos);
+    overlay.querySelector(".ppo-backdrop")?.addEventListener("click", closePersonPhotos);
+    overlay.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") closePersonPhotos();
+    });
+  }
+  initPpo();
 
 
   // ============================================================================

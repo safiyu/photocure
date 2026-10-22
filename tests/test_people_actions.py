@@ -35,8 +35,8 @@ def test_list_people_reports_name_and_face_count(cfg, session, repo):
     session.commit()  # people_actions opens its own session, so prior writes must be durable
     items = list_people(cfg.db_path)
     by_id = {it["id"]: it for it in items}
-    assert by_id[a.id] == {"id": a.id, "name": "Alice", "face_count": 5}
-    assert by_id[b.id] == {"id": b.id, "name": None, "face_count": 1}
+    assert by_id[a.id] == {"id": a.id, "name": "Alice", "face_count": 5, "sample_face_id": None}
+    assert by_id[b.id] == {"id": b.id, "name": None, "face_count": 1, "sample_face_id": None}
     assert items[0]["id"] == a.id  # most faces first
 
 

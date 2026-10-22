@@ -3456,3 +3456,176 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .badge.scale[data-scale="action"] { box-shadow: inset 3px 0 0 var(--amber-400); }
 .badge.scale[data-scale="ambient"] { box-shadow: inset 3px 0 0 var(--blue-700); }
 .badge.scale[data-scale="medium"] { box-shadow: inset 3px 0 0 var(--faint); }
+
+/* ── Person photos overlay (photo library by person) ─────────────────────── */
+.ppo {
+  position: fixed; inset: 0; z-index: 120;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px; box-sizing: border-box;
+}
+.ppo:not([hidden]) { animation: ov-fade-in .22s ease-out; }
+.ppo.closing { animation: ov-fade-out .2s ease-in forwards; pointer-events: none; }
+
+.ppo-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, .72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.ppo-panel {
+  position: relative; z-index: 1;
+  width: min(1040px, 100%);
+  max-height: min(88vh, 880px);
+  display: flex; flex-direction: column;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl, 20px);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .45), 0 4px 16px rgba(0, 0, 0, .25);
+  overflow: hidden;
+}
+.ppo:not([hidden]) .ppo-panel {
+  animation: ov-in .24s cubic-bezier(.16, 1, .3, 1);
+}
+.ppo.closing .ppo-panel {
+  animation: ov-out .2s ease-in forwards;
+}
+
+.ppo-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--sheet) 85%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  flex-shrink: 0;
+}
+
+.ppo-identity {
+  display: flex; align-items: center; gap: 14px; min-width: 0;
+}
+
+.ppo-avatar {
+  width: 46px; height: 46px; border-radius: 50%;
+  overflow: hidden; background: var(--well);
+  border: 2px solid var(--focus);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.ppo-avatar-img {
+  width: 100%; height: 100%; object-fit: cover; object-position: center top; display: block;
+}
+.ppo-avatar svg {
+  width: 24px; height: 24px; color: var(--mut);
+}
+
+.ppo-title-group {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+}
+.ppo-name {
+  font-size: 20px; font-weight: 700; margin: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--ink);
+}
+.ppo-count {
+  font-size: 13px; color: var(--mut); font-weight: 500;
+}
+
+.ppo-close {
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--well); border: 1px solid var(--line);
+  color: var(--ink); cursor: pointer;
+  transition: background .15s, border-color .15s, transform .15s;
+  flex-shrink: 0;
+}
+.ppo-close:hover {
+  background: var(--line);
+  transform: scale(1.05);
+}
+.ppo-close svg {
+  width: 18px; height: 18px;
+}
+
+.ppo-body {
+  flex: 1; overflow-y: auto; padding: 20px 24px 28px;
+  overscroll-behavior: contain;
+}
+
+.ppo-loading, .ppo-empty {
+  padding: 48px 20px; text-align: center; color: var(--mut);
+  display: flex; align-items: center; justify-content: center;
+}
+
+.ppo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 16px;
+}
+
+.ppo-thumb {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--r-md, 12px);
+  overflow: hidden;
+  background: #0d0f12;
+  border: 1px solid var(--line);
+  cursor: pointer;
+  outline: none;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  user-select: none;
+}
+.ppo-thumb:hover, .ppo-thumb:focus-visible {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .35);
+  border-color: var(--focus);
+}
+.ppo-thumb:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.ppo-thumb-img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+  transition: transform .22s ease;
+}
+.ppo-thumb:hover .ppo-thumb-img {
+  transform: scale(1.04);
+}
+
+.ppo-thumb-face {
+  position: absolute; top: 8px; right: 8px;
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .4);
+  object-fit: cover; object-position: center top;
+  background: #111;
+  pointer-events: none;
+  transition: transform .18s ease;
+}
+.ppo-thumb:hover .ppo-thumb-face {
+  transform: scale(1.12);
+}
+
+.ppo-thumb-info {
+  position: absolute; bottom: 0; inset-inline: 0;
+  padding: 24px 10px 8px;
+  background: linear-gradient(to top, rgba(0, 0, 0, .78) 0%, rgba(0, 0, 0, .35) 65%, transparent 100%);
+  display: flex; flex-direction: column; gap: 2px;
+  pointer-events: none;
+}
+.ppo-thumb-filename {
+  font-size: 12px; font-weight: 600; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .6);
+}
+.ppo-thumb-date {
+  font-size: 11px; color: rgba(255, 255, 255, .75);
+}
+
+@media (max-width: 640px) {
+  .ppo { padding: 12px; }
+  .ppo-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .ppo-header { padding: 14px 16px; }
+  .ppo-body { padding: 14px 16px; }
+}

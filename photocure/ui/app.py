@@ -1431,6 +1431,52 @@ def create_app(db_path: str | None = None) -> FastAPI:
         except ActionError as e:
             raise HTTPException(e.status, str(e)) from None
 
+    @app.get("/api/people/{person_id}/photos")
+    def person_photos_endpoint(person_id: int):
+        """All distinct photos that contain a face belonging to *person_id*, newest first."""
+        with get_session(dbp) as s:
+            person = s.get(M.PersonCluster, person_id)
+            if person is None:
+                raise HTTPException(404, "person not found")
+            # Fetch all face rows for this person that have a valid crop box
+            faces = s.exec(
+                select(M.FaceDetection)
+                .where(M.FaceDetection.person_id == person_id)
+                .where(M.FaceDetection.x1.isnot(None))
+            ).all()
+            # Deduplicate: keep one face (sharpest) per image
+            best: dict[int, M.FaceDetection] = {}
+            for f in faces:
+                prev = best.get(f.image_id)
+                if prev is None or (f.face_sharpness or 0) > (prev.face_sharpness or 0):
+                    best[f.image_id] = f
+            # Load image records
+            image_ids = list(best.keys())
+            if not image_ids:
+                return {"person": {"id": person.id, "name": person.name, "face_count": person.face_count},
+                        "photos": []}
+            recs = s.exec(
+                select(M.ImageRecord)
+                .where(M.ImageRecord.id.in_(image_ids))
+                .order_by(M.ImageRecord.taken_at.desc())
+            ).all()
+            photos = []
+            for r in recs:
+                face = best.get(r.id)
+                fp = _fingerprint(r)
+                photos.append({
+                    "id": r.id,
+                    "filename": r.filename,
+                    "taken_at": r.taken_at.isoformat() if r.taken_at else None,
+                    "thumb_url": f"/thumbnail/{r.id}?tier=medium&v={fp}",
+                    "face_id": face.id if face else None,
+                    "face_url": f"/api/faces/{face.id}.jpg" if face else None,
+                })
+            return {
+                "person": {"id": person.id, "name": person.name, "face_count": person.face_count},
+                "photos": photos,
+            }
+
     @app.post("/api/faces/{face_id}/reassign", dependencies=auth)
     def reassign_face_endpoint(face_id: int, body: ReassignFaceReq):
         """Move one face to a different (or brand-new) person."""

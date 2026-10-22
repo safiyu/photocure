@@ -711,6 +711,28 @@
     <div id="similar-grid" class="grid"></div>
   </div>
 
+  <!-- person photos overlay -->
+  <div id="person-photos-overlay" class="ppo" hidden role="dialog" aria-modal="true" aria-labelledby="ppo-name">
+    <div class="ppo-backdrop"></div>
+    <div class="ppo-panel">
+      <header class="ppo-header">
+        <div class="ppo-identity">
+          <div class="ppo-avatar" id="ppo-avatar"></div>
+          <div class="ppo-title-group">
+            <h2 class="ppo-name" id="ppo-name">Person</h2>
+            <span class="ppo-count" id="ppo-count"></span>
+          </div>
+        </div>
+        <button class="ppo-close icon-btn" id="ppo-close" aria-label="Close">
+          <svg class="ic" aria-hidden="true"><use href="#i-x"/></svg>
+        </button>
+      </header>
+      <div class="ppo-body">
+        <div id="ppo-grid" class="ppo-grid"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- folder picker -->
   <div id="picker" class="modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="picker-title">
