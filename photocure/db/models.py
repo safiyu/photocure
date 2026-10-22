@@ -271,6 +271,8 @@ class PersonCluster(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str | None = Field(default=None)
     face_count: int = 0
+    # Running-mean embedding (same JSON/float16 encoding as FaceDetection.embedding_json).
+    centroid_json: str | None = Field(default=None)
 
 
 class EventGroup(SQLModel, table=True):

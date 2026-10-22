@@ -224,6 +224,44 @@ class PhotoRepository:
             self.s.add(f)
         self.s.flush()
 
+    def faces_for_image(self, image_id: int) -> list[FaceDetection]:
+        return list(self.s.exec(
+            sselect(FaceDetection).where(FaceDetection.image_id == image_id)
+        ).all())
+
+    # ---------------------------------------------------------------- people
+    def all_person_clusters(self) -> list[PersonCluster]:
+        return list(self.s.exec(sselect(PersonCluster)).all())
+
+    def create_person_cluster(self, embedding: Sequence[float]) -> PersonCluster:
+        p = PersonCluster(name=None, face_count=1, centroid_json=quantize_embedding(embedding))
+        self.s.add(p)
+        self.s.flush()
+        return p
+
+    def update_person_cluster(self, person_id: int, centroid: Sequence[float], face_count: int) -> None:
+        p = self.s.get(PersonCluster, person_id)
+        if p is None:
+            raise ValueError(f"no person cluster with id {person_id}")
+        p.centroid_json = quantize_embedding(centroid)
+        p.face_count = face_count
+        self.s.flush()
+
+    def rename_person(self, person_id: int, name: str | None) -> PersonCluster:
+        p = self.s.get(PersonCluster, person_id)
+        if p is None:
+            raise ValueError(f"no person cluster with id {person_id}")
+        p.name = name
+        self.s.flush()
+        return p
+
+    def find_person_by_name(self, name: str) -> PersonCluster | None:
+        target = name.strip().lower()
+        return self.s.exec(
+            sselect(PersonCluster).where(
+                func.lower(func.trim(PersonCluster.name)) == target)
+        ).first()
+
     # -------------------------------------------------------------- semantic
     def upsert_semantic(self, sem: SemanticScore) -> SemanticScore:
         existing = self.s.exec(
