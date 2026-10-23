@@ -186,9 +186,10 @@ def _candidate_from_record(rec, face_min: float = 0.65, face_sharp_ref: float = 
     aesthetic = getattr(sem, "aesthetic", None) if sem is not None else None
     ts = 0.0
     if rec.taken_at is not None:
-        if rec.taken_at.tzinfo is None:
-            rec.taken_at = rec.taken_at.replace(tzinfo=timezone.utc)
-        ts = rec.taken_at.timestamp()
+        taken = rec.taken_at
+        if taken.tzinfo is None:
+            taken = taken.replace(tzinfo=timezone.utc)
+        ts = taken.timestamp()
     return ShotCandidate(
         image_id=rec.id,
         sharpness_norm=sharp,

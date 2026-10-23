@@ -223,6 +223,14 @@ class CuratorConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="PCUR_", env_file=".env", extra="ignore")
 
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings,
+                                   dotenv_settings, file_secret_settings):
+        def dotenv_safe():
+            # a .env in the working directory must not widen the Host allowlist
+            return {k: v for k, v in dotenv_settings().items() if k != "allowed_hosts"}
+        return init_settings, env_settings, dotenv_safe, file_secret_settings
+
     db_path: Path = Field(default_factory=default_db_path)
     cache_dir: Path = Field(default=Path(".cache"))
 

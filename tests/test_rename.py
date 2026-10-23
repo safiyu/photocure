@@ -23,7 +23,7 @@ def test_package_and_entry_points():
     scripts = meta["project"]["scripts"]
     assert scripts["photocure"] == "photocure.cli:cli"
     assert scripts["photo-curator"] == "photocure.cli:cli"      # old command still works
-    assert meta["tool"]["setuptools"]["package-data"] == {"photocure": ["ui/static/*", "models/*"]}
+    assert meta["tool"]["setuptools"]["package-data"] == {"photocure": ["ui/static/*", "ui/static/fonts/*", "models/*"]}
     assert not (ROOT / "photo_curator").exists()
 
 
@@ -118,7 +118,7 @@ def test_entrypoint_on_a_fresh_volume(tmp_path):
 
 
 # ------------------------------------------------------------------------------ logo
-LOGO_FILES = {"logo.png": (192, 192), "favicon.png": (64, 64), "apple-touch-icon.png": (180, 180)}
+LOGO_FILES = {"icon-192.png": (192, 192), "icon-512.png": (512, 512), "apple-touch-icon.png": (180, 180)}
 
 
 def test_logo_assets_are_transparent_squares():
@@ -147,13 +147,26 @@ def test_page_links_and_serves_the_logo(tmp_path):
     app = create_app(str(tmp_path / "logo.db"))
     c = TestClient(app)
     html = c.get("/").text
-    for ref in ("/static/logo.png", "/static/favicon.png", "/static/apple-touch-icon.png"):
+    expected = {
+        "/static/logo.svg": "image/svg+xml",
+        "/static/favicon.ico": "image/",
+        "/static/icon-192.png": "image/png",
+        "/static/icon-512.png": "image/png",
+        "/static/apple-touch-icon.png": "image/png",
+    }
+    for ref, ctype in expected.items():
         assert ref in html
         r = c.get(ref)
-        assert r.status_code == 200 and r.headers["content-type"] == "image/png", ref
+        assert r.status_code == 200 and r.headers["content-type"].startswith(ctype), ref
     assert "i-aperture" not in html            # the old drawn mark is gone
 
 
 def test_readme_shows_the_logo():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert 'src="docs/logo.png"' in readme and (ROOT / "docs" / "logo.png").exists()
+
+
+def test_bundled_fonts_are_real_woff2():
+    fonts = (ROOT / "photocure" / "ui" / "static" / "fonts").glob("*.woff2")
+    bad = [f.name for f in fonts if f.read_bytes()[:4] != b"wOF2"]
+    assert not bad, f"not woff2 (saved error page?): {bad}"

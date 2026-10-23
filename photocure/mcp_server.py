@@ -155,22 +155,20 @@ class LibraryQueries:
 
     def search(self, query, date_from=None, date_to=None, category=None, limit=10) -> dict:
         from . import search as search_mod
-        from .clustering.similarity import _unit, top_k
         text = " ".join(str(query).split())
         if not text:
             raise ValueError("query is empty")
         limit = max(1, min(int(limit), MAX_RESULTS))
         if self._encoder is None:
             self._encoder = search_mod.default_encoder(self.cfg)
-        try:
-            vec = self._encoder.encode(text)
-        except search_mod.SearchUnavailable as e:
-            raise RuntimeError(f"{e} Use list_photos with a date or category instead.") from None
-        I, S = M.ImageRecord, M.SemanticScore
-        conds = [col(S.backend) != "stub", col(I.is_duplicate) == False,  # noqa: E712
-                 col(I.is_alternate) == False, *self._filters(date_from, date_to, category)]  # noqa: E712
+        I = M.ImageRecord
         with get_session(self.db) as s:
-            pairs = top_k(s, _unit(vec), limit, filters=tuple(conds), join_images=True)
+            try:
+                pairs = search_mod.search_ranked(
+                    s, self._encoder, text, limit,
+                    extra_filters=tuple(self._filters(date_from, date_to, category))).hits
+            except search_mod.SearchUnavailable as e:
+                raise RuntimeError(f"{e} Use list_photos with a date or category instead.") from None
             ids = [i for i, _ in pairs]
             rows = s.exec(select(I).where(col(I.id).in_(ids))).all() if ids else []
             by_id = {r.id: r for r in rows}

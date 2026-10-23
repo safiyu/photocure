@@ -2,7 +2,7 @@
 # Ready to copy-paste directly into Portainer (Stacks > Add stack) or run via:
 #   docker compose -f docker-compose.stack.yml up -d
 #
-# Once started, open http://<your-server-ip>:8080 and enter the PCUR_AUTH_TOKEN below.
+# Once started, open http://127.0.0.1:8080 and enter your PCUR_AUTH_TOKEN (required, set it in the environment or an .env file).
 
 services:
   photocure:
@@ -13,13 +13,13 @@ services:
     # Check your host UID/GID with: id -u && id -g
     user: "1000:1000"
     ports:
-      - "8080:8080"
+      # Loopback only. To expose on the LAN use "8080:8080" and set PCUR_ALLOWED_HOSTS below.
+      - "127.0.0.1:8080:8080"
     environment:
-      # Allow access from any LAN IP, hostname, or reverse proxy.
-      # (Or set a comma-separated list like: 192.168.1.50,photos.home.arpa)
-      - PCUR_ALLOWED_HOSTS=*
+      # Comma-separated hostnames allowed to reach the UI, e.g. 192.168.1.50,photos.home.arpa
+      - PCUR_ALLOWED_HOSTS=${PCUR_ALLOWED_HOSTS:-localhost,127.0.0.1}
       # Access token required to log into the web dashboard.
-      - PCUR_AUTH_TOKEN=change-me-to-a-secure-password
+      - PCUR_AUTH_TOKEN=${PCUR_AUTH_TOKEN:?set PCUR_AUTH_TOKEN}
       # 1 = auto-detect hardware and install AI models into /data on first start
       - PCUR_AUTO_SETUP=1
       # Device selection: auto, cuda, cpu, rocm, xpu
@@ -35,7 +35,8 @@ services:
       - /path/to/photos:/photos:ro
       # Output destination for curated and organized photos
       - /path/to/organized:/output:rw
-      # Named volume for persistent database, cache, and downloaded AI model weights
+      # Persistent database, cache, and AI model weights. A bind mount here must be writable by the
+      # "user:" above (chown it first); the container refuses to start otherwise.
       - curator-data:/data
 
     # Optional: NVIDIA GPU Acceleration

@@ -125,6 +125,9 @@ class RollbackEngine:
                     img.target_path = str(target)
                     img.route_status = "executed"
                 rep.notes.append(f"pending recovered as committed: {target}")
+            elif op == "move" and not os.path.lexists(source):
+                # Source gone: the target may be the only copy, never delete it.
+                rep.notes.append(f"pending move needs manual review (source gone, target differs): {target}")
             else:
                 # Partial copy or interrupted cross-device move: source still holds the data.
                 try:

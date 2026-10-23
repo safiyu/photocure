@@ -328,6 +328,11 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
         # 3. Clear all existing face person assignments
         for f in faces:
             f.person_id = None
+        # Faces without an embedding cannot be reclustered; do not leave them on deleted ids.
+        for f in s.exec(select(M.FaceDetection)
+                        .where(M.FaceDetection.embedding_json.is_(None),
+                               M.FaceDetection.person_id.isnot(None))).all():
+            f.person_id = None
         s.flush()
 
         # Delete all old clusters

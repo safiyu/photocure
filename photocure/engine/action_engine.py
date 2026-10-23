@@ -24,6 +24,7 @@ from pathlib import Path
 from collections.abc import Callable, Iterable, Sequence
 
 from ..config import CuratorConfig
+from ..db.models import ActionLedger, ImageRecord
 from ..db.repository import PhotoRepository
 from ..db.session import get_session
 from ..rules.organizer import PlannedAction
@@ -237,14 +238,30 @@ class ActionEngine:
 
                     # 4. COMMIT ledger row (post-mutation success), durable.
                     action.target = target
-                    repo.ledger_commit(entry)
-                    if img is not None:
-                        img.target_path = str(target)
-                        img.route_status = "executed"
-                        if action.operation == "move":
-                            img.path = str(target)
-                            img.relative_path = _rel(target, root)
-                    session.commit()
+                    entry_id = entry.id
+                    try:
+                        repo.ledger_commit(entry)
+                        if img is not None:
+                            img.target_path = str(target)
+                            img.route_status = "executed"
+                            if action.operation == "move":
+                                self._retire_stale_row(session, str(target), img.id)
+                                img.path = str(target)
+                                img.relative_path = _rel(target, root)
+                        session.commit()
+                    except Exception as e:
+                        # The file already moved: record that so rollback can reverse it.
+                        session.rollback()
+                        try:
+                            done = session.get(ActionLedger, entry_id)
+                            if done is not None:
+                                repo.ledger_commit(done)
+                                done.error = f"moved but image row not updated: {e}"
+                                session.commit()
+                        except Exception:
+                            log.exception("could not record moved-but-unrecorded ledger entry")
+                            session.rollback()
+                        raise
 
                     rep.executed += 1
                     rep.resolved_targets[action.image_id] = str(target)
@@ -275,6 +292,16 @@ class ActionEngine:
         except ValueError:
             rel = Path(action.target.name)
         return trash_root / rel
+
+    @staticmethod
+    def _retire_stale_row(session, target: str, keep_id: int | None) -> None:
+        """Free ``target`` from a stale missing row so UNIQUE(images.path) holds."""
+        from sqlmodel import select
+        for row in session.exec(select(ImageRecord).where(
+                ImageRecord.path == target, ImageRecord.id != keep_id)).all():
+            if row.scan_status == "missing":
+                row.path = f"{target}#retired-{row.id}"
+        session.flush()
 
     @staticmethod
     def _is_in_place(action: PlannedAction, repo) -> bool:
@@ -386,7 +413,7 @@ class ActionEngine:
         if src.is_symlink():
             raise RuntimeError("refusing cross-device move of a symlink source")
         ActionEngine._check_space(src, target)
-        shutil.copy2(str(src), str(target), follow_symlinks=False)
+        _copy_or_cleanup(src, target, follow_symlinks=False)
         want = expected_sha or file_sha256(src)
         if file_sha256(target) != want or file_sha256(src) != want:
             target.unlink(missing_ok=True)
@@ -396,7 +423,7 @@ class ActionEngine:
     @staticmethod
     def _copy(src: Path, target: Path) -> None:
         ActionEngine._check_space(src, target)
-        shutil.copy2(str(src), str(target))
+        _copy_or_cleanup(src, target)
 
     @staticmethod
     def _link_or_copy(src: Path, target: Path, rep: ExecutionReport) -> str:
@@ -410,7 +437,7 @@ class ActionEngine:
             if e.errno not in {errno.EXDEV, errno.EPERM, errno.EMLINK, errno.ENOTSUP, errno.EOPNOTSUPP}:
                 raise  # e.g. ENOSPC: do not mask a real failure with a copy attempt
             ActionEngine._check_space(src, target)
-            shutil.copy2(str(src), str(target))
+            _copy_or_cleanup(src, target)
             rep.copy_fallbacks += 1
             why = {errno.EXDEV: "cross-filesystem (EXDEV)",
                    errno.EPERM: "refused (EPERM, protected_hardlinks or ACL?)"}.get(
@@ -439,6 +466,17 @@ def _cat_value(action: PlannedAction) -> str:
 
 def _is_junk(action: PlannedAction) -> bool:
     return bool(getattr(action.category, "is_junk", False))
+
+
+def _copy_or_cleanup(src: Path, target: Path, follow_symlinks: bool = True) -> None:
+    """copy2, removing a truncated target on failure (never one that pre-existed)."""
+    existed = os.path.lexists(target)
+    try:
+        shutil.copy2(str(src), str(target), follow_symlinks=follow_symlinks)
+    except BaseException:
+        if not existed:
+            Path(target).unlink(missing_ok=True)
+        raise
 
 
 def _rel(target: Path, root: Path | None) -> str:

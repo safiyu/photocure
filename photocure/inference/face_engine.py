@@ -84,6 +84,7 @@ class FaceEngine:
     def __init__(self, config: CuratorConfig | None = None, backend: BackendState | None = None):
         self.cfg = config or CuratorConfig()
         self.bs = backend or detect_backend(self.cfg)
+        self.bs.retry_downgraded()  # a failed load must not stick for the whole process
         self._yunet = None
         self._landmarker = None
         self._landmarker_failed = False
@@ -225,8 +226,11 @@ class FaceEngine:
         if recognizer is None:
             return
         H, W = full_bgr.shape[:2]
+        # Clear blur measures under ~10% of the "fully sharp" reference (30 of 300).
+        min_sharp = 0.1 * self.cfg.burst.face_sharp_ref
         for face in faces:
-            if face.face_sharpness is None:  # too small/blurry; analyze_faces already said so
+            # None: too small (analyze_faces said so); below min_sharp: blurred, would seed junk clusters.
+            if face.face_sharpness is None or face.face_sharpness < min_sharp:
                 continue
             x, y = face.x1 * W, face.y1 * H
             w, h = face.w * W, face.h * H

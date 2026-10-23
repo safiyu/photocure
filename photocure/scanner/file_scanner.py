@@ -307,6 +307,7 @@ class FileScanner:
             modified_ids = {i for _, i in work if i is not None}
             if modified_ids:
                 self._invalidate(session, modified_ids)
+                session.commit()  # release the write lock before the slow reads
             for chunk in _chunks(restored, _IN_CHUNK):
                 for row in session.exec(sselect(ImageRecord).where(
                         ImageRecord.id.in_(chunk))).all():  # type: ignore[attr-defined]
@@ -333,6 +334,7 @@ class FileScanner:
     @staticmethod
     def _invalidate(session: Session, ids: set[int]) -> None:
         """Reset derived state of rows whose files changed on disk."""
+        repo = PhotoRepository(session)
         for chunk in _chunks(sorted(ids), _IN_CHUNK):
             for row in session.exec(sselect(ImageRecord).where(
                     ImageRecord.id.in_(chunk))).all():  # type: ignore[attr-defined]
@@ -353,7 +355,12 @@ class FileScanner:
                 row.city = row.region = row.country_code = ""  # the GPS may have changed
                 row.scan_status = "scanned"
                 row.quality = None
+                for face in row.faces:
+                    if face.person_id is not None:
+                        repo.decrement_person_cluster(face.person_id)
                 row.faces = []
+                row.delete_approved = False  # an old approval must not apply to new content
+                row.manual_bucket = None
                 row.semantic = None
                 row.updated_at = utcnow()
             # Rows that pointed at a changed original no longer match its bytes.
@@ -448,7 +455,8 @@ class FileScanner:
             rec.gps_lat = exif.gps_lat
             rec.gps_lon = exif.gps_lon
             rec.camera_model = exif.camera_model
-            rec.rating = exif.rating
+            if exif.rating is not None:
+                rec.rating = exif.rating
             rec.phash = wr.phash
             rec.file_mtime = wr.mtime
 
@@ -503,7 +511,7 @@ class FileScanner:
                         row.updated_at = utcnow()
                     near_touched.add(dup_id)
             indexable.clear()
-            session.flush()
+            session.commit()  # short write transactions so UI/engine writers are not starved
 
         progress = None
         if show_progress:
@@ -541,7 +549,7 @@ class FileScanner:
                         progress.update(main_task, completed=done)
                     if on_progress:
                         on_progress(done, len(work), str(path))
-                    if len(batch) + len(indexable) >= 500:
+                    if len(batch) + len(indexable) >= 50:
                         flush()
             flush()
         finally:

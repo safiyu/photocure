@@ -4,7 +4,10 @@ set -e
 DATA_DIR="${PCUR_DATA_DIR:-/data}"
 # Libraries live in the data volume so they are installed once and survive restarts.
 export PYTHONUSERBASE="${PYTHONUSERBASE:-$DATA_DIR/pylibs}"
-mkdir -p "$(python -c 'import site; print(site.getusersitepackages())')"
+if ! mkdir -p "$(python -c 'import site; print(site.getusersitepackages())')" 2>/dev/null || [ ! -w "$DATA_DIR" ]; then
+  echo "photocure: $DATA_DIR is not writable by uid $(id -u). Chown it to that user (e.g. chown -R $(id -u) <host path>) or set 'user:' to match its owner." >&2
+  exit 1
+fi
 
 # Volumes created before the app was renamed keep their database and settings.
 if [ -f "$DATA_DIR/photo_curator.db" ] && [ ! -f "$DATA_DIR/photocure.db" ]; then

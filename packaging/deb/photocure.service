@@ -9,6 +9,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 ExecStart=/usr/bin/photocure serve --no-open
+TimeoutStartSec=infinity
 Restart=on-failure
 RestartSec=5s
 Environment=PYTHONUNBUFFERED=1

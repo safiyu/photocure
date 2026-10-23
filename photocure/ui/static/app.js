@@ -14,7 +14,7 @@
   const state = {
     tab: "library", cats: [], junk: new Set(), utility: new Set(), utilityKind: "", byId: {}, busy: false, taskRunning: false,
     inferred: false,
-    triageSel: -1, triageGrid: null, undo: [], picks: new Set(), lastPick: null,
+    triageSel: -1, triageGrid: null, undo: [], picks: new Set(), peoplePicks: new Set(), lastPick: null,
     overview: null, eventId: null,
     backend: null, thresholds: null, manualCount: 0,
     settings: null, draft: { device: "auto", device_index: 0 }, busyBtn: null,
@@ -38,23 +38,44 @@
   };
 
   // ------------------------------------------------------------------ utils
-  function toast(msg, cls) {
+  function toast(msg, cls, action) {
     const box = $("#toasts");
     const el = document.createElement("div");
     el.className = "toast " + (cls || "");
     el.innerHTML = (cls === "err" ? icon("alert", "sm") : cls === "ok" ? icon("check", "sm") : "") +
       `<span>${esc(msg)}</span>`;
+    let timer = null;
+    const dismiss = () => {
+      clearTimeout(timer);
+      el.classList.add("out");
+      afterAnim(el, moMs("--mo-fast", 160) + 100).then(() => el.remove());
+    };
+    if (action) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "toast-action";
+      b.textContent = action.label;
+      b.onclick = async () => {
+        b.disabled = true;
+        try { await action.fn(); } catch (e) { toast(e.message, "err"); }
+        dismiss();
+      };
+      el.append(b);
+    }
     box.appendChild(el);
     while (box.children.length > 4) box.firstChild.remove();
-    setTimeout(() => {
-      el.classList.add("out");
-      afterAnim(el, 260).then(() => el.remove());
-    }, cls === "err" ? 6000 : 3200);
+    timer = setTimeout(dismiss, cls === "err" ? 6000 : action ? 8000 : 3200);
   }
 
   // Motion helpers: every close waits on the animation but never depends on it alone.
   function reducedMotion() {
     return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  // Motion tokens from CSS (ms), so JS timings track the stylesheet.
+  function moMs(name, fallback) {
+    const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+    return v > 0 ? v : fallback;
   }
 
   function afterAnim(el, fallbackMs) {
@@ -86,7 +107,7 @@
     if (!el || el.hidden || el.classList.contains("closing")) return;
     const seq = el._closeSeq = (el._closeSeq || 0) + 1;
     el.classList.add("closing");
-    await afterAnim(el, 260);
+    await afterAnim(el, moMs("--mo-fast", 160) + 100);
     if (el._closeSeq !== seq) return;
     el.hidden = true;
     el.classList.remove("closing");
@@ -358,7 +379,7 @@
   const catKey = (c) => String(c || "unrouted").replace(/[^a-z_]/g, "") || "unknown";
   // Most useful first, so the number keys 1-9 cover the categories people assign most.
   const CAT_ORDER = ["people", "food", "scenery", "animal", "screenshot", "document", "graphic",
-    "illustration", "slide", "utility", "architecture", "vehicle", "plant", "product", "accidental",
+    "illustration", "slide", "utility", "architecture", "vehicle", "plant", "product", "event", "accidental",
     "uncertain", "duplicate", "near_duplicate", "burst_alternate", "unreadable", "custom", "unknown"];
   const TRIAGE_SKIP = new Set(["unknown", "duplicate", "near_duplicate", "uncertain",
     "burst_alternate", "unreadable", "custom"]);
@@ -369,6 +390,7 @@
   const catStyle = (c) => `--cat:var(--c-${catKey(c)}, var(--c-unknown))`;
   const catLabel = (c) => {
     if (c === "utility") return "Label or sign";
+    if (c === "slide") return "Notes and slides";
     const t = String(c || "Not sorted yet").replace(/_/g, " ");
     return t.charAt(0).toUpperCase() + t.slice(1);
   };
@@ -446,20 +468,19 @@
   // ------------------------------------------------------------------ cards
   function flagList(it) {
     const out = [];
-    const add = (cls, text) => out.push({ cls, text });
-    if (it.locked) add("lock", "Locked");
-    if (num(it.rating) === -1) add("warn", "Rejected");
-    if (it.is_favorite) add("fav", "\u2665 Favourite");
-    if (num(it.rating) > 0) add("", "\u2605" + num(it.rating));
-    if (it.is_best_shot) add("best", "Best shot");
-
-    if (it.is_duplicate) add("warn", "Duplicate");
-    if (it.near_dup_of != null) add("warn", "Near duplicate");
-    if (it.is_alternate) add("", "Alternate");
-    if (it.has_blinks) add("warn", "Blink");
-    if (it.is_blurry) add("", "Blurry");
-    if (it.is_too_dark) add("", "Dark");
-    if (it.is_overexposed) add("", "Overexposed");
+    const add = (k, ic, g, text) => out.push({ k, ic, g, text });
+    if (num(it.rating) === -1) add("bad", "\u2715", "Rating", "Rejected");
+    if (it.is_favorite) add("fav", "\u2665", "Rating", "\u2665 Favourite");
+    if (num(it.rating) > 0) add("", "\u2605", "Rating", "\u2605" + num(it.rating));
+    if (it.has_blinks) add("warn", "\u25d0", "Quality", "Blink");
+    if (it.is_blurry) add("warn", "\u2248", "Quality", "Blurry");
+    if (it.is_too_dark) add("warn", "\u263e", "Quality", "Dark");
+    if (it.is_overexposed) add("warn", "\u2600", "Quality", "Overexposed");
+    if (it.locked) add("lock", "\u25a3", "Status", "Locked");
+    if (it.is_best_shot) add("good", "\u25ce", "Status", "Best shot");
+    if (it.is_duplicate) add("bad", "\u29c9", "Status", "Duplicate");
+    if (it.near_dup_of != null) add("bad", "\u29c9", "Status", "Near duplicate");
+    if (it.is_alternate) add("", "\u2194", "Status", "Alternate");
     return out;
   }
 
@@ -516,13 +537,16 @@
     img.onerror = () => { img.style.opacity = ".15"; };
     const thumb = el("div", { class: "thumb photo", title: "View photo" }, img);
     const showReason = it.uncertain_reason && !it.manual_bucket;
-    // Every flag lives in a single "+N" pill beside the category; hovering shows the full list.
+    // Flags collapse into a "+N" pill (hover or tap for the list); the full text stays in the DOM for screen readers.
     const allFlags = flagList(it);
-    const flagPill = allFlags.length ? el("span", {
-      class: "cat-tag-pill tag-overflow-pill",
-      text: "+" + allFlags.length,
-      "data-overflow-tags": JSON.stringify(allFlags),
-    }) : null;
+    const flagPill = allFlags.length ? el("span", { class: "flags" },
+      el("span", {
+        class: "cat-tag-pill tag-overflow-pill",
+        text: "+" + allFlags.length,
+        "aria-hidden": "true",
+        "data-overflow-tags": JSON.stringify(allFlags),
+      }),
+      el("span", { class: "sr-only", text: allFlags.map((f) => f.text).join(", ") })) : null;
     const cap = el("figcaption", { class: "caption info" },
       el("div", { class: "fn name", title: it.relative_path || it.filename, text: it.filename }),
       showReason ? el("div", { class: "reason", title: it.uncertain_reason.text, text: shortReason(it) }) : null,
@@ -708,6 +732,7 @@
         else if (rt !== "") p.set("rating", rt);
         if (val("f-country")) p.set("country", val("f-country"));
         if (chk("f-fav")) p.set("favorite", "true");
+        if (val("f-issue")) p.set("issue", val("f-issue"));
         scrubParams(p);
         p.set("sort", "taken");  // oldest first, so the date scrubber means something
         return p.toString();
@@ -716,6 +741,7 @@
         if (val("catfilter") && eff(it) !== val("catfilter")) return false;
         if (chk("manualonly") && !it.manual_bucket) return false;
         if (chk("f-fav") && !it.is_favorite) return false;
+        if (val("f-issue") && !hasIssue(it, val("f-issue"))) return false;
         const rt = val("f-rating");
         if (rt.startsWith("min:") && num(it.rating) < num(rt.slice(4))) return false;
         if (rt === "0" && num(it.rating) !== 0) return false;
@@ -823,6 +849,7 @@
     if (val("f-rating")) return true;
     if (val("f-country")) return true;
     if (chk("f-fav")) return true;
+    if (val("f-issue")) return true;
     const box = $("#scrubber");
     if (box && !box.hidden && scrub.days > 0) {
       const a = num($("#scrub-from").value), b = num($("#scrub-to").value);
@@ -918,7 +945,7 @@
     $("#catfilter").value = "";
     $("#manualonly").checked = false;
     $("#neardup").checked = false;
-    ["f-camera", "f-rating", "f-country"].forEach((id) => { const el = $("#" + id); if (el) el.value = ""; });
+    ["f-camera", "f-rating", "f-country", "f-issue"].forEach((id) => { const el = $("#" + id); if (el) el.value = ""; });
     $("#f-fav").checked = false;
     resetScrubber();
     setDatePreset("all", false);
@@ -942,7 +969,23 @@
   }
 
   // Bounds come from the library itself, never from hard-coded years.
+  const ISSUE_ALL = "blurry,dark,overexposed,blink,duplicate";
+  const ISSUE_ROWS = [["blurry", "Blurry"], ["dark", "Too dark"], ["overexposed", "Overexposed"], ["blink", "Blink"], ["duplicate", "Duplicate"]];
+
+  // Mirrors the server's issue filter so an edited card leaves the grid when it no longer matches.
+  function hasIssue(it, names) {
+    const hit = {
+      blurry: !!it.is_blurry, dark: !!it.is_too_dark, overexposed: !!it.is_overexposed,
+      blink: !!it.has_blinks, duplicate: !!it.is_duplicate || it.near_dup_of != null,
+    };
+    return names.split(",").some((n) => hit[n]);
+  }
+
   function applyFacets(f) {
+    if (f.issues) {
+      fillSelect($("#f-issue"), "Any quality", [{ value: ISSUE_ALL, text: `Possible junk, any problem (${fmtN(f.issues.any)})` }]
+        .concat(ISSUE_ROWS.map(([k, label]) => ({ value: k, text: `${label} (${fmtN(f.issues[k])})` }))));
+    }
     fillSelect($("#f-camera"), "All cameras", f.cameras.map((c) => ({ value: c.name, text: `${c.name} (${fmtN(c.count)})` })));
     fillSelect($("#f-country"), "All countries",
       f.countries.map((c) => ({ value: c.code, text: `${countryName(c.code)} (${fmtN(c.count)})` })));
@@ -976,7 +1019,7 @@
       updateResetFiltersButton();
       t = setTimeout(() => grids.cat.reset(), 200);
     };
-    ["f-camera", "f-rating", "f-country", "f-fav"].forEach((id) => $("#" + id).addEventListener("change", again));
+    ["f-camera", "f-rating", "f-country", "f-fav", "f-issue"].forEach((id) => $("#" + id).addEventListener("change", again));
     const from = $("#scrub-from"), to = $("#scrub-to");
     from.addEventListener("input", () => {
       if (num(from.value) > num(to.value)) to.value = from.value;
@@ -1027,13 +1070,140 @@
         if (lbl) lbl.textContent = on ? "Selected" : "Select";
       }
     });
-    const n = state.picks.size;
+    syncPeopleSel();
+    const pn = state.tab === "people" ? state.peoplePicks.size : 0;
+    const n = pn || state.picks.size;
     document.body.classList.toggle("has-picks", n > 0);
+    const bi = pn ? null : burstPickInfo();
+    $("#bulkbar").classList.toggle("burst-ctx", !!bi);
+    $("#bulkbar").classList.toggle("people-ctx", pn > 0);
     if (n === 0) closeOverlay($("#bulkbar")); else openOverlay($("#bulkbar"));
-    $("#bulk-count").textContent = `${fmtN(n)} selected`;
+    if (pn) {
+      $("#bulk-count").textContent = `${fmtN(pn)} ${pn === 1 ? "person" : "people"}`;
+      $("#bulk-sub").textContent = pn >= 2 ? "will become one person" : "select 2 or more to merge";
+      $("#bulk-merge").disabled = pn < 2;
+      $("#bulk-name").disabled = pn !== 1;
+      $("#bulk-del-people").lastChild.textContent = pn === 1 ? "Delete person" : "Delete people";
+    } else if (bi) {
+      $("#bulk-count").textContent = `${fmtN(n)} frame${n === 1 ? "" : "s"} to keep`;
+      $("#bulk-sub").textContent = (bi.rest.length ? `${fmtN(bi.rest.length)} will be marked for delete` : "nothing else to delete") +
+        (bi.rest.length && bi.bestKept ? ", best shot kept" : "");
+      $("#bulk-best").disabled = !(bi.picked.length === 1 && !bi.picked[0].is_best_shot);
+      $("#bulk-rest").disabled = !bi.rest.length;
+      $("#bulk-rest-n").textContent = fmtN(bi.rest.length);
+    } else {
+      $("#bulk-count").textContent = `${fmtN(n)} selected`;
+      $("#bulk-sub").textContent = pickSummary();
+    }
   }
 
-  function clearPicks() { state.picks.clear(); state.lastPick = null; applyPicks(); }
+  function syncPeopleSel() {
+    $$("#peoplegrid .people-card").forEach((c) => {
+      const on = state.peoplePicks.has(num(c.dataset.personId));
+      c.classList.toggle("picked", on);
+      const b = $(".people-card-select", c);
+      if (b) b.setAttribute("aria-pressed", String(on));
+    });
+  }
+
+  // Name wins when exactly one is named; otherwise the biggest cluster (ties: lowest id).
+  function pickMergeTarget(list) {
+    const named = list.filter((p) => p.name);
+    const pool = named.length === 1 ? named : list;
+    return pool.slice().sort((a, b) => (b.face_count - a.face_count) || (a.id - b.id))[0];
+  }
+  window.pickMergeTarget = pickMergeTarget;
+
+  function selectedPeople() {
+    return $$("#peoplegrid .people-card").filter((c) => state.peoplePicks.has(num(c.dataset.personId))).map((c) => ({
+      id: num(c.dataset.personId),
+      name: $(".people-name-pill-wrapper", c).dataset.currentName || "",
+      face_count: num(c.dataset.faceCount),
+      card: c,
+    }));
+  }
+
+  async function bulkMergePeople() {
+    const sel = selectedPeople();
+    if (sel.length < 2) return;
+    const target = pickMergeTarget(sel);
+    const tname = target.name || `Person #${target.id}`;
+    const ok = await showConfirmDialog({
+      title: `Merge ${fmtN(sel.length)} people?`,
+      message: `They will become one person named "${tname}". Photos stay in your library.`,
+      confirmText: "Merge", variant: "primary",
+    });
+    if (!ok) return;
+    let added = 0;
+    try {
+      for (const src of sel.filter((p) => p !== target)) {
+        await post(`/api/people/${src.id}/merge-into/${target.id}`, {});
+        added += src.face_count;
+        state.peoplePicks.delete(src.id);
+        await rippleDeleteCard(src.card, src.id);
+      }
+      toast(`Merged into ${tname} ✓`, "ok");
+    } catch (e) {
+      toast(`Merge failed: ${e.message}`, "err");
+    }
+    if (added && target.card.isConnected) {
+      const n = target.face_count + added;
+      target.card.dataset.faceCount = n;
+      const badge = $(".people-card-count-badge", target.card);
+      if (badge) badge.textContent = fmtN(n);
+    }
+    state.peoplePicks.clear();
+    applyPicks();
+  }
+
+  async function bulkDeletePeople() {
+    const sel = selectedPeople();
+    if (!sel.length) return;
+    const who = sel.length === 1 ? `"${sel[0].name || `Person #${sel[0].id}`}"` : `${fmtN(sel.length)} people`;
+    const ok = await showConfirmDialog({
+      title: sel.length === 1 ? "Delete person cluster?" : "Delete person clusters?",
+      message: `Delete cluster for ${who}? Photos will remain in your library, but face assignments will be cleared.`,
+      confirmText: "Delete", variant: "danger",
+    });
+    if (!ok) return;
+    try {
+      for (const p of sel) {
+        await api(`/api/people/${p.id}`, { method: "DELETE" });
+        state.peoplePicks.delete(p.id);
+        await rippleDeleteCard(p.card, p.id);
+      }
+      toast(sel.length === 1 ? "Person deleted" : "People deleted", "ok");
+    } catch (e) {
+      toast(`Delete failed: ${e.message}`, "err");
+    }
+    state.peoplePicks.clear();
+    applyPicks();
+  }
+
+  // In a burst, the selection means "frames to keep"; the best shot is never deleted by "delete the rest".
+  function burstPickInfo() {
+    const d = state.burst;
+    if (state.tab !== "bursts" || !d || !d.members || !state.picks.size) return null;
+    const picked = d.members.filter((m) => state.picks.has(num(m.id)));
+    if (!picked.length) return null;
+    const rest = d.members.filter((m) => !state.picks.has(num(m.id)) && !m.is_best_shot && !m.delete_approved);
+    const bestKept = d.members.some((m) => m.is_best_shot && !state.picks.has(num(m.id)));
+    return { picked, rest, bestKept };
+  }
+
+  function pickSummary() {
+    const cats = new Set();
+    let unseen = false;
+    state.picks.forEach((id) => {
+      const it = state.byId[id];
+      if (it) cats.add(eff(it)); else unseen = true;
+    });
+    if (cats.size === 1 && !unseen) return catLabel([...cats][0]);
+    if (cats.size) return `${cats.size}${unseen ? "+" : ""} categories`;
+    return "";
+  }
+
+  function clearPicks() { state.picks.clear(); state.peoplePicks.clear(); state.lastPick = null; applyPicks(); }
 
   async function togglePick(id, shift) {
     const card = $(`.card[data-id="${id}"]`);
@@ -1066,24 +1236,38 @@
 
   async function bulkReassign(bucket) {
     const ids = Array.from(state.picks);
-    let ok = 0;
+    const moved = [];
     for (const id of ids) {
       try {
         const prev = await reassign(id, bucket);
         state.undo.push({ id, prev });
-        ok++;
+        moved.push({ id, prev });
       } catch (e) { toast(e.message, "err"); break; }
     }
-    if (ok) toast(`Moved ${fmtN(ok)} photo${ok === 1 ? "" : "s"} to ${catLabel(bucket)}`, "ok");
+    if (moved.length) {
+      const undo = async () => {
+        for (const m of moved) await reassign(m.id, m.prev);
+        toast(`Moved ${fmtN(moved.length)} back`, "ok");
+        resetVisibleGrids();
+        loadStats();
+      };
+      toast(`Moved ${fmtN(moved.length)} photo${moved.length === 1 ? "" : "s"} to ${catLabel(bucket)}`, "ok", { label: "Undo", fn: undo });
+    }
     clearPicks();
     loadStats();
   }
+
+  const bulkJunk = () => bulkReassign("accidental");
 
   async function bulkMarkDelete() {
     const ids = Array.from(state.picks);
     try {
       await post("/api/deletes/approve", { ids, approved: true });
-      toast(`Marked ${fmtN(ids.length)} photo${ids.length === 1 ? "" : "s"} for delete. They will be left out of the result.`, "ok");
+      const undo = async () => {
+        await post("/api/deletes/approve", { ids, approved: false });
+        resetVisibleGrids();
+      };
+      toast(`Marked ${fmtN(ids.length)} photo${ids.length === 1 ? "" : "s"} for delete. They will be left out of the result.`, "ok", { label: "Undo", fn: undo });
       clearPicks();
       resetVisibleGrids();
     } catch (e) { toast(e.message, "err"); }
@@ -1094,7 +1278,7 @@
     for (const id of ids) {
       try { await setLock(id, true); } catch (e) { toast(e.message, "err"); break; }
     }
-    toast(`Locked ${fmtN(ids.length)} photos`, "ok");
+    toast(`Kept ${fmtN(ids.length)} photo${ids.length === 1 ? "" : "s"}. Re-analysis will not change them.`, "ok");
     clearPicks();
   }
 
@@ -1657,7 +1841,10 @@
     } catch (e) { toast(e.message, "err"); }
   }
 
+  let activityBound = false;
   function bindActivity() {
+    if (activityBound) return;
+    activityBound = true;
     document.addEventListener("click", (ev) => {
       const filter = ev.target.closest && ev.target.closest("[data-act-filter]");
       if (filter) {
@@ -1703,7 +1890,7 @@
   // ------------------------------------------------------------------ search
   let searchSeq = 0;
 
-  async function runSearch() {
+  async function runSearch(weak = false) {
     const q = $("#searchq").value.trim();
     const host = $("#searchgrid");
     const count = $("#searchcount");
@@ -1718,13 +1905,23 @@
     host.replaceChildren(...Array.from({ length: 12 }, () => el("div", { class: "skel" })));
     try {
       const dups = $("#search-dups").checked ? "&duplicates=true" : "";
-      const data = await api(`/api/search?q=${encodeURIComponent(q)}&k=120${dups}`);
+      const data = await api(`/api/search?q=${encodeURIComponent(q)}&k=120${dups}${weak === true ? "&strict=false" : ""}`);
       if (seq !== searchSeq) return;
       data.items.forEach((x) => { state.byId[x.id] = x; });
-      count.textContent = `${fmtN(data.items.length)} photo${data.items.length === 1 ? "" : "s"}`;
-      host.replaceChildren(...(data.items.length ? data.items.map(cardNode)
+      const n = data.items.length;
+      const parts = data.parts && data.parts.length ? ` with ${data.parts.join(" and ")}` : "";
+      const note = data.more > 0 ? ", best matches only" : (weak === true ? ", including weaker matches" : "");
+      count.textContent = `${fmtN(n)} photo${n === 1 ? "" : "s"}${parts}${note}`;
+      const nodes = n ? data.items.map(cardNode)
         : [emptyNode({ icon: "search", title: "Nothing matched",
-          text: "Try other words, or analyze your photos first so they can be searched." })]));
+          text: "Try other words, or analyze your photos first so they can be searched." })];
+      if (data.more > 0) {
+        const more = el("button", { class: "btn ghost search-more", type: "button",
+          text: `Show ${fmtN(data.more)} weaker match${data.more === 1 ? "" : "es"}` });
+        more.onclick = () => runSearch(true);
+        nodes.push(more);
+      }
+      host.replaceChildren(...nodes);
     } catch (e) {
       if (seq !== searchSeq) return;
       count.textContent = "";
@@ -1743,7 +1940,10 @@
     if (state.overview) renderComp(state.overview);
   }
 
+  let delegatesBound = false;
   function bindDelegates() {
+    if (delegatesBound) return;
+    delegatesBound = true;
     document.addEventListener("click", async (ev) => {
       const t = ev.target.closest && ev.target.closest(
         "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-similar],[data-faces],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
@@ -1762,7 +1962,7 @@
           closeLightbox();
           await showSimilar(num(t.dataset.similar));
         } else if (t.dataset.faces) {
-          await openBiometricProjection(null, num(t.dataset.faces));
+          await openBiometricProjection(t.dataset.burst ? num(t.dataset.burst) : null, num(t.dataset.faces));
         } else if (t.dataset.more) {
           const g = grids[t.dataset.more];
           if (g) await g.loadMore();
@@ -1782,69 +1982,71 @@
         }
       } catch (e) { toast(e.message, "err"); }
     });
-    // ── +N overflow-tag tooltip handling ───────────────────────────────────────
-(function () {
-  const tip   = document.getElementById("card-tags-tooltip");
-  const tlist = document.getElementById("card-tags-tooltip-list");
-  if (!tip || !tlist) return;
-  let curPill = null;
+    // +N flags tooltip: a grouped card anchored under the pill (hover on mouse, tap on touch)
+    (function () {
+      const tip = document.getElementById("card-tags-tooltip");
+      const body = document.getElementById("card-tags-tooltip-list");
+      if (!tip || !body) return;
+      const GROUPS = ["Rating", "Quality", "Status"];
+      let curPill = null;
 
-  function showTip(pill, ev) {
-    let tags = [];
-    try { tags = JSON.parse(pill.dataset.overflowTags || "[]"); } catch (_) {}
-    if (!tags.length) return;
-    tlist.innerHTML = "";
-    tags.forEach(({ cls, text }) => {
-      const item = document.createElement("div");
-      item.className = "tag-tooltip-item" + (cls ? " " + cls : "");
-      const dot = document.createElement("span");
-      dot.className = "tag-dot";
-      item.append(dot, document.createTextNode(text));
-      tlist.appendChild(item);
-    });
-    positionTip(ev);
-    tip.removeAttribute("hidden");
-    tip.setAttribute("aria-hidden", "false");
-  }
+      function build(tags) {
+        body.textContent = "";
+        GROUPS.forEach((g) => {
+          const items = tags.filter((t) => t.g === g);
+          if (!items.length) return;
+          body.append(el("div", { class: "tt-group" },
+            el("em", { text: g }),
+            el("div", { class: "tt-chips" }, items.map((t) =>
+              el("span", { class: "tt-chip" + (t.k ? " " + t.k : "") }, el("u", { text: t.ic }), t.text)))));
+        });
+      }
 
-  function positionTip(ev) {
-    const GAP = 8;
-    const tw = tip.offsetWidth  || 160;
-    const th = tip.offsetHeight || 80;
-    let x = ev.clientX + GAP;
-    let y = ev.clientY + GAP;
-    if (x + tw > window.innerWidth - GAP) x = ev.clientX - tw - GAP;
-    if (y + th > window.innerHeight - GAP) y = ev.clientY - th - GAP;
-    tip.style.left = x + "px";
-    tip.style.top  = y + "px";
-  }
+      function show(pill) {
+        let tags = [];
+        try { tags = JSON.parse(pill.dataset.overflowTags || "[]"); } catch (_) {}
+        if (!tags.length) return;
+        curPill = pill;
+        build(tags);
+        const GAP = 9, M = 8;
+        const r = pill.getBoundingClientRect();
+        const w = tip.offsetWidth, h = tip.offsetHeight;
+        const left = Math.max(M, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - M));
+        const above = r.bottom + GAP + h > window.innerHeight - M && r.top - GAP - h > M;
+        const ax = (r.left + r.width / 2 - left) + "px";
+        tip.style.left = left + "px";
+        tip.style.top = (above ? r.top - GAP - h : r.bottom + GAP) + "px";
+        tip.style.setProperty("--ax", ax);
+        tip.classList.toggle("above", above);
+        tip.classList.add("open");
+        tip.setAttribute("aria-hidden", "false");
+      }
 
-  function hideTip() {
-    tip.setAttribute("hidden", "");
-    tip.setAttribute("aria-hidden", "true");
-    curPill = null;
-  }
+      function hide() {
+        tip.classList.remove("open");
+        tip.setAttribute("aria-hidden", "true");
+        curPill = null;
+      }
 
-  document.addEventListener("mouseover", (ev) => {
-    const pill = ev.target.closest(".tag-overflow-pill");
-    if (!pill) return;
-    curPill = pill;
-    showTip(pill, ev);
-  });
-  document.addEventListener("mousemove", (ev) => {
-    if (!curPill) return;
-    positionTip(ev);
-  });
-  document.addEventListener("mouseout", (ev) => {
-    if (!curPill) return;
-    const to = ev.relatedTarget;
-    if (to && (curPill.contains(to) || tip.contains(to))) return;
-    hideTip();
-  });
-})();
+      document.addEventListener("mouseover", (ev) => {
+        const pill = ev.target.closest && ev.target.closest(".tag-overflow-pill");
+        if (pill && pill !== curPill) show(pill);
+      });
+      document.addEventListener("mouseout", (ev) => {
+        if (!curPill) return;
+        const to = ev.relatedTarget;
+        if (to && curPill.contains(to)) return;
+        if (ev.target.closest && ev.target.closest(".tag-overflow-pill")) hide();
+      });
+      document.addEventListener("click", (ev) => {
+        const pill = ev.target.closest && ev.target.closest(".tag-overflow-pill");
+        if (!pill) { if (curPill) hide(); return; }
+        if (curPill === pill && ev.pointerType !== "mouse") hide(); else show(pill);
+      });
+      document.addEventListener("scroll", () => { if (curPill) hide(); }, { capture: true, passive: true });
+    })();
 
-// Existing keydown listener
-document.addEventListener("keydown", (ev) => {
+    document.addEventListener("keydown", (ev) => {
       if (ev.key === "Enter" || ev.key === " ") {
         const goto = ev.target.closest && ev.target.closest("[data-goto]");
         if (goto && goto.dataset.goto) {
@@ -2177,7 +2379,10 @@ document.addEventListener("keydown", (ev) => {
     }
   }
 
+  let pickerBound = false;
   function bindPicker() {
+    if (pickerBound) return;
+    pickerBound = true;
     $("#picker-close").onclick = closePicker;
     $("#picker-cancel").onclick = closePicker;
     $("#picker").addEventListener("click", (e) => { if (e.target.id === "picker") closePicker(); });
@@ -2259,10 +2464,10 @@ document.addEventListener("keydown", (ev) => {
   }
 
   const isTriage = (g) => g === grids.uncertain || g === grids.junk;
-  const MODALS = ["#picker", "#help"];
+  const MODALS = ["#picker", "#help", "#facepanel", "#person-photos-overlay", "#similar-panel"];
   const SELF_MANAGED = ["#confirm-modal", "#auth-modal", "#restart-overlay"];  // they handle their own keys
   const open = (sel) => { const e = $(sel); return !!(e && !e.hidden); };
-  const anyModal = () => MODALS.some(open);
+  const anyModal = () => MODALS.some(open) || !!catPicker;
 
   let helpOpener = null;
   let helpReleaseTrap = null;
@@ -2307,10 +2512,11 @@ document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") {
       if (open("#picker")) closePicker();
       else if (open("#help")) closeHelp();
+      else if (open("#facepanel")) { if (!closeFaceRename()) closeBiometricProjection(); }
       else if (lb.open) closeLightbox();
       else if (open("#person-photos-overlay")) closePersonPhotos();
       else if (!$("#similar-panel").hidden) closeOverlay($("#similar-panel"));
-      else if (state.picks.size) clearPicks();
+      else if (state.picks.size || state.peoplePicks.size) clearPicks();
       else document.body.classList.remove("nav-open");
       return;
     }
@@ -2416,10 +2622,10 @@ document.addEventListener("keydown", (ev) => {
   }
 
   // Runs after sorting when "Approve all proposed deletions" was ticked before analysing.
-  async function approveProposedDeletes() {
+  async function approveProposedDeletes(onlyNew) {
     if (!$("#approve-all-deletes").checked) return;
     try {
-      const r = await post("/api/deletes/approve", {});
+      const r = await post("/api/deletes/approve", onlyNew ? { only_new: true } : {});
       libLog(`Approved ${fmtN(r.changed)} proposed deletions`, "ok");
       resetVisibleGrids();
     } catch (e) { libLog(`Could not approve deletions: ${e.message}`, "warn"); }
@@ -2502,12 +2708,14 @@ document.addEventListener("keydown", (ev) => {
 
     // 3. Animate the deleted card: shrink, fade out, and blur
     card.style.pointerEvents = "none";
-    card.style.transition = "transform .22s cubic-bezier(0.4, 0, 1, 1), opacity .2s ease, filter .2s ease";
+    const fastMs = moMs("--mo-fast", 160), slowMs = moMs("--mo-slow", 380), staggerMs = moMs("--mo-stagger", 28);
+    const soft = getComputedStyle(document.documentElement).getPropertyValue("--ease-soft").trim() || "cubic-bezier(.22, 1, .36, 1)";
+    card.style.transition = `transform ${fastMs}ms ${soft}, opacity ${fastMs}ms ${soft}, filter ${fastMs}ms ${soft}`;
     card.style.transform = "scale(0.72)";
     card.style.opacity = "0";
     card.style.filter = "blur(4px)";
 
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, fastMs));
 
     // 4. Last: Remove the deleted card from the DOM
     card.remove();
@@ -2529,8 +2737,8 @@ document.addEventListener("keydown", (ev) => {
     // 6. Play: Animate from inverted position back to natural (0,0) with a ripple wave delay
     requestAnimationFrame(() => {
       subsequent.forEach((el, i) => {
-        const rippleDelay = Math.min(i * 14, 140);
-        el.style.transition = `transform .34s cubic-bezier(0.16, 1, 0.3, 1) ${rippleDelay}ms`;
+        const rippleDelay = Math.min(i, 8) * staggerMs;
+        el.style.transition = `transform ${slowMs}ms ${soft} ${rippleDelay}ms`;
         el.style.transform = "";
         const clean = (e) => {
           if (e.target === el) {
@@ -2548,6 +2756,7 @@ document.addEventListener("keydown", (ev) => {
   function _finalizeDelete(host, pid) {
     const remaining = host.querySelectorAll(".people-card");
     const count = remaining.length;
+    if (state.peoplePicks.delete(num(pid))) applyPicks();
     const sumEl = $("#people-summary");
     if (sumEl) sumEl.textContent = `${fmtN(count)} ${count === 1 ? "person" : "people"}`;
 
@@ -2566,6 +2775,10 @@ document.addEventListener("keydown", (ev) => {
     const data = await api(`/api/people?sort=${encodeURIComponent(sort)}`);
     const items = data.items || [];
     const fp = _peopleFP(items);
+    const live = new Set(items.map((p) => num(p.id)));
+    let pruned = false;
+    state.peoplePicks.forEach((id) => { if (!live.has(id)) { state.peoplePicks.delete(id); pruned = true; } });
+    if (pruned) applyPicks();
 
     // ── Cache hit: data unchanged, DOM already built → just scroll-restore ────
     if (!force && sort === _pc.sort && fp === _pc.fp && host && host.children.length > 0) {
@@ -2650,6 +2863,10 @@ document.addEventListener("keydown", (ev) => {
 
         <!-- Dark Bottom Gradient Vignette -->
         <div class="people-card-vignette"></div>
+
+        <button class="people-card-select" type="button" aria-pressed="${state.peoplePicks.has(num(p.id))}" aria-label="Select ${esc(p.name || 'Person #' + p.id)}">
+          <svg class="ic" aria-hidden="true"><use href="#i-check"/></svg>
+        </button>
 
         <!-- Top-Left Hover Dismiss Button -->
         <button class="people-card-dismiss" type="button" title="Not a person / Delete cluster" aria-label="Delete person">
@@ -2750,6 +2967,7 @@ document.addEventListener("keydown", (ev) => {
               _pc.fp = null; await renderPeople(true);
             } catch (e) {
               toast(e.message, "err");
+              saved = false;
               restore();
             }
           };
@@ -2782,10 +3000,11 @@ document.addEventListener("keydown", (ev) => {
             }
           });
 
-          input.addEventListener("blur", () => {
-            setTimeout(() => {
-              if (!saved && pillWrapper.contains(input)) save();
-            }, 180);
+          // Leaving the field cancels; only Enter or the check button commits.
+          form.addEventListener("focusout", (e) => {
+            if (saved || (e.relatedTarget && form.contains(e.relatedTarget))) return;
+            saved = true;
+            restore();
           });
         });
       }
@@ -2846,6 +3065,17 @@ document.addEventListener("keydown", (ev) => {
             preview.classList.remove("visible");
           });
         }
+      }
+
+      // ── Multi-select ───────────────────────────────────────────────────────
+      const selBtn = card.querySelector(".people-card-select");
+      if (selBtn) {
+        selBtn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          const id = num(pid);
+          if (state.peoplePicks.has(id)) state.peoplePicks.delete(id); else state.peoplePicks.add(id);
+          applyPicks();
+        });
       }
 
       // ── Dismiss / Delete Cluster ───────────────────────────────────────────
@@ -2965,7 +3195,8 @@ document.addEventListener("keydown", (ev) => {
       card.addEventListener("click", (ev) => {
         if (ev.target.closest(".people-name-pill-wrapper") ||
             ev.target.closest(".people-merge-pill") ||
-            ev.target.closest(".people-card-dismiss")) {
+            ev.target.closest(".people-card-dismiss") ||
+            ev.target.closest(".people-card-select")) {
           return;
         }
         if (dragSourceId) return; // ignore stray clicks right after a drag
@@ -3031,7 +3262,7 @@ document.addEventListener("keydown", (ev) => {
              style="--i:${i}" tabindex="0" role="button"
              aria-label="Open ${esc(p.filename)}">
           <img class="ppo-thumb-img" src="${p.thumb_url}" alt="${esc(p.filename)}" loading="lazy">
-          ${p.face_url ? `<img class="ppo-thumb-face" src="${p.face_url}" alt="" title="Detected face" loading="lazy">` : ""}
+          ${p.face_url ? `<img class="ppo-thumb-face" src="${p.face_url}" alt="Detected face" loading="lazy">` : ""}
           <div class="ppo-thumb-info">
             <span class="ppo-thumb-filename">${esc(p.filename)}</span>
             ${p.taken_at ? `<span class="ppo-thumb-date">${new Date(p.taken_at).toLocaleDateString()}</span>` : ""}
@@ -3059,9 +3290,35 @@ document.addEventListener("keydown", (ev) => {
     }
   }
 
+  function hidePpoFaceZoom() {
+    const z = $("#ppo-face-zoom");
+    if (z) z.hidden = true;
+  }
+
+  function showPpoFaceZoom(avatar) {
+    let z = $("#ppo-face-zoom");
+    if (!z) {
+      z = el("div", { id: "ppo-face-zoom", class: "ppo-face-zoom", hidden: true, "aria-hidden": "true" }, el("img", { alt: "" }));
+      document.body.append(z);
+    }
+    const img = z.firstElementChild;
+    if (img.getAttribute("src") !== avatar.src) img.src = avatar.src;
+    z.hidden = false;
+    const r = avatar.getBoundingClientRect();
+    const w = z.offsetWidth || 240;
+    const h = z.offsetHeight || 240;
+    const gap = 10;
+    const left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8);
+    let top = r.bottom + gap;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - gap);
+    z.style.left = left + "px";
+    z.style.top = top + "px";
+  }
+
   function closePersonPhotos() {
     const overlay = ppoEl();
     if (!overlay) return;
+    hidePpoFaceZoom();
     activePpoPersonId = null;
     closeOverlay(overlay);
     document.body.style.overflow = "";
@@ -3072,9 +3329,20 @@ document.addEventListener("keydown", (ev) => {
     const overlay = ppoEl();
     if (!overlay) return;
     $("#ppo-close")?.addEventListener("click", closePersonPhotos);
+    const grid = ppoGrid();
+    if (grid) {
+      grid.addEventListener("mouseover", (ev) => {
+        const a = ev.target.closest && ev.target.closest(".ppo-thumb-face");
+        if (a) showPpoFaceZoom(a);
+      });
+      grid.addEventListener("mouseout", (ev) => {
+        if (ev.target.closest && ev.target.closest(".ppo-thumb-face")) hidePpoFaceZoom();
+      });
+      grid.addEventListener("scroll", hidePpoFaceZoom, { passive: true });
+    }
     overlay.querySelector(".ppo-backdrop")?.addEventListener("click", closePersonPhotos);
     overlay.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape" && !lb.open) closePersonPhotos();
+      if (ev.key === "Escape" && !lb.open) { ev.stopPropagation(); closePersonPhotos(); }
     });
     $("#ppo-delete")?.addEventListener("click", async () => {
       if (!activePpoPersonId) return;
@@ -3127,13 +3395,33 @@ document.addEventListener("keydown", (ev) => {
   let hoveredFaceId = null;
   let selectedFaceId = null;
   let currentBurstId = null;
+  let overlayReq = 0;                // bumped on every open/close so a late response cannot revive a dismissed overlay
+
+  let facePanelRelease = null;
+  let facePanelOpener = null;
+
+  function enterFacePanel(overlay) {
+    if (!facePanelRelease) {
+      facePanelOpener = document.activeElement;
+      facePanelRelease = trapFocus(overlay, closeBiometricProjection);
+    }
+    if (!overlay.contains(document.activeElement)) {
+      const first = overlay.querySelector("button, input, [tabindex]");
+      if (first) first.focus({ preventScroll: true });
+    }
+  }
 
   function closeBiometricProjection() {
+    overlayReq++;
     const overlay = $("#facepanel");
+    if (facePanelRelease) { facePanelRelease(); facePanelRelease = null; }
     if (overlay) {
       overlay.hidden = true;
       overlay.replaceChildren();
     }
+    if (facePanelOpener && document.contains(facePanelOpener)) facePanelOpener.focus({ preventScroll: true });
+    facePanelOpener = null;
+    closeFaceRename();
     activeOverlayBurstId = null;
     activeOverlayImageId = null;
     activeOverlayBurstData = null;
@@ -3163,17 +3451,73 @@ document.addEventListener("keydown", (ev) => {
   function setHoveredFace(faceId) {
     if (hoveredFaceId === faceId) return;
     hoveredFaceId = faceId;
-    if (faceId) selectedFaceId = faceId;
     updateBiometricSpotlight();
   }
 
-  function selectFaceInOverlay(faceId) {
+  function selectFaceInOverlay(faceId, anchor) {
     selectedFaceId = faceId;
     hoveredFaceId = faceId;
     updateBiometricSpotlight();
+    openFaceRename(faceId, anchor);
+  }
+
+  function closeFaceRename() {
+    const pop = $("#face-rename-pop");
+    if (!pop) return false;
+    pop.remove();
+    return true;
+  }
+
+  function openFaceRename(faceId, anchor) {
+    const overlay = $("#facepanel");
+    const face = activeOverlayFaces.find((f) => f.id === faceId);
+    if (!overlay || !face || !anchor) return;
+    closeFaceRename();
+    const current = face.personId != null ? face.name : "";
+    const input = el("input", {
+      type: "text", id: "face-rename-input", class: "face-rename-input", list: "face-rename-names",
+      placeholder: "Who is this?", maxlength: 80, autocomplete: "off", "aria-label": "Person name",
+    });
+    input.value = current;
+    const ok = el("button", {
+      type: "submit", class: "face-rename-ok", title: "Save name", "aria-label": "Save name",
+      html: icon("check", "sm"),
+    });
+    const names = el("datalist", { id: "face-rename-names" },
+      activeOverlayPeopleNames.map((n) => el("option", { value: n })));
+    const pop = el("form", { id: "face-rename-pop", class: "face-rename-pop" }, input, ok, names);
+    pop.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const name = input.value.trim();
+      if (!name || name === current) { closeFaceRename(); return; }
+      ok.disabled = true;
+      await reassignFace(faceId, { new_name: name });
+      ok.disabled = false;
+    });
+    overlay.append(pop);
+    const o = overlay.getBoundingClientRect();
+    const a = anchor.getBoundingClientRect();
+    const w = pop.offsetWidth || 220;
+    const h = pop.offsetHeight || 40;
+    const left = Math.min(Math.max(8, a.left + a.width / 2 - o.left - w / 2), o.width - w - 8);
+    let top = a.bottom - o.top + 8;
+    if (top + h > o.height - 8) top = Math.max(8, a.top - o.top - h - 8);
+    pop.style.left = left + "px";
+    pop.style.top = top + "px";
+    input.focus();
+    input.select();
+  }
+
+  if (!window._faceRenameBound) {
+    window._faceRenameBound = true;
+    document.addEventListener("mousedown", (ev) => {
+      if (!ev.target.closest) return;
+      if (!ev.target.closest("#face-rename-pop, .bio-face-reticle, .enlarged-face-node")) closeFaceRename();
+    });
   }
 
   async function openBiometricProjection(burstId, imageId, initialLayout) {
+    const req = ++overlayReq;
     activeOverlayBurstId = burstId;
     activeOverlayImageId = imageId;
     if (initialLayout) {
@@ -3192,7 +3536,7 @@ document.addEventListener("keydown", (ev) => {
       overlay.className = "bio-overlay bg-cyber-grid";
       overlay.replaceChildren();
     }
-    const reveal = () => { overlay.hidden = false; };
+    const reveal = () => { overlay.hidden = false; enterFacePanel(overlay); };
 
     try {
       const [burstData, faceData, peopleData] = await Promise.all([
@@ -3200,6 +3544,7 @@ document.addEventListener("keydown", (ev) => {
         api(`/api/images/${num(imageId)}/faces`),
         api("/api/people").catch(() => ({ items: [] })),
       ]);
+      if (req !== overlayReq) return;
 
       activeOverlayBurstData = burstData;
       activeOverlayMembers = (burstData && burstData.members) || [];
@@ -3272,7 +3617,9 @@ document.addEventListener("keydown", (ev) => {
 
       reveal();
       renderBiometricOverlay();
+      enterFacePanel(overlay);
     } catch (e) {
+      if (req !== overlayReq) return;
       reveal();
       overlay.innerHTML = `
         <div class="bio-backdrop" onclick="closeBiometricProjection()"></div>
@@ -3685,6 +4032,7 @@ document.addEventListener("keydown", (ev) => {
           style="left:${sourceBox.x}px; top:${sourceBox.y}px; width:${sourceBox.w}px; height:${sourceBox.h}px;"
           class="bio-source-box"
         >
+          <div class="bio-scan" aria-hidden="true"></div>
           <img 
             src="${thumbUrl(curMember.id, "preview")}" 
             alt="${esc(curMember.filename)}"
@@ -3704,8 +4052,8 @@ document.addEventListener("keydown", (ev) => {
                 data-reticle-id="${f.id}"
                 onmouseenter="setHoveredFace(${f.id})"
                 onmouseleave="setHoveredFace(null)"
-                onclick="selectFaceInOverlay(${f.id})"
-                style="left:${f.x - f.w/2}%; top:${f.y - f.h/2}%; width:${f.w}%; height:${f.h}%; border-color:${f.color}; box-shadow:0 0 ${isHovered ? '24px' : '10px'} ${f.color}; animation-delay:${idx * 40}ms;"
+                onclick="selectFaceInOverlay(${f.id}, this)"
+                style="left:${f.x - f.w/2}%; top:${f.y - f.h/2}%; width:${f.w}%; height:${f.h}%; border-color:${f.color}; box-shadow:0 0 ${isHovered ? '24px' : '10px'} ${f.color}; animation-delay:calc(${(f.y / 100).toFixed(3)} * 0.35s / var(--speed, 0.5) - 60ms);"
               >
                 <span class="tick tick-tl"></span>
                 <span class="tick tick-tr"></span>
@@ -3730,10 +4078,10 @@ document.addEventListener("keydown", (ev) => {
               data-node-id="${f.id}"
               onmouseenter="setHoveredFace(${f.id})"
               onmouseleave="setHoveredFace(null)"
-              onclick="selectFaceInOverlay(${f.id})"
+              onclick="selectFaceInOverlay(${f.id}, this)"
               style="left:${node.cx}px; top:${node.cy}px; width:${diam}px; height:${diam}px; transform:translate(-50%, -50%);"
             >
-              <div class="bio-node-enter" style="animation-delay:${idx * 40}ms;">
+              <div class="bio-node-enter" style="animation-delay:calc(0.35s / var(--speed, 0.5) + ${60 + idx * 40}ms);">
                 <!-- Outer Rotating Ring -->
                 <svg class="hud-ring-spin" viewBox="0 0 120 120">
                   <circle cx="60" cy="60" r="56" fill="none" stroke="${f.color}" stroke-width="${isHovered ? '2.4' : '1.4'}" stroke-dasharray="20 10 6 10" stroke-opacity="${isHovered ? '1' : '0.65'}"/>
@@ -3807,7 +4155,8 @@ document.addEventListener("keydown", (ev) => {
 
     const activeFace = activeOverlayFaces.find((f) => f.id === selectedFaceId) || activeOverlayFaces[0];
     const drawerEl = $("#selected-face-drawer");
-    if (drawerEl && activeFace) {
+    if (drawerEl && activeFace && drawerEl.dataset.faceId !== String(activeFace.id)) {
+      drawerEl.dataset.faceId = String(activeFace.id);
       drawerEl.innerHTML = `
         <div style="display:flex; align-items:center; gap:12px;">
           <div
@@ -3826,26 +4175,8 @@ document.addEventListener("keydown", (ev) => {
               ${esc(activeFace.eyeStatusText)}${activeFace.sharpness ? ` • Sharpness ${num(activeFace.sharpness).toFixed(1)}` : ''}
             </div>
           </div>
-          <div style="flex:none;">
-            <input type="text" id="overlay-reassign-input" list="overlay-people-names"
-                   placeholder="Who is this?" value="${activeFace.personId != null ? esc(activeFace.name) : ''}"
-                   style="font:inherit; font-size:12px; padding:5px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.25); background:rgba(0,0,0,0.3); color:#fff; width:140px;">
-            <datalist id="overlay-people-names">
-              ${activeOverlayPeopleNames.map((n) => `<option value="${esc(n)}"></option>`).join('')}
-            </datalist>
-          </div>
         </div>
       `;
-      const reassignInput = $("#overlay-reassign-input", drawerEl);
-      if (reassignInput) {
-        const faceId = activeFace.id;
-        reassignInput.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); reassignInput.blur(); } };
-        reassignInput.onchange = () => {
-          const name = reassignInput.value.trim();
-          if (!name) return;
-          reassignFace(faceId, { new_name: name });
-        };
-      }
     }
 
     $$(".enlarged-face-node", overlay).forEach((node) => {
@@ -3865,18 +4196,15 @@ document.addEventListener("keydown", (ev) => {
   }
 
   // Window listeners for projection
-  window.addEventListener("resize", () => {
-    const overlay = $("#facepanel");
-    if (overlay && !overlay.hidden && activeOverlayImageId) {
-      renderBiometricOverlay();
-    }
-  });
-
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && activeOverlayImageId) {
-      closeBiometricProjection();
-    }
-  });
+  if (!window._bioResizeBound) {
+    window._bioResizeBound = true;
+    window.addEventListener("resize", () => {
+      const overlay = $("#facepanel");
+      if (overlay && !overlay.hidden && activeOverlayImageId) {
+        renderBiometricOverlay();
+      }
+    });
+  }
 
   async function makeOverlayBestShot(imageId) {
     if (!activeOverlayBurstId) return;
@@ -3963,6 +4291,7 @@ document.addEventListener("keydown", (ev) => {
     star: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></svg>',
     check: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg>',
     trash: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>',
+    pick: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
     face: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>',
   };
 
@@ -3972,12 +4301,14 @@ document.addEventListener("keydown", (ev) => {
   async function showBurst(id) {
     currentBurstId = id;
     closeBiometricProjection();
+    clearPicks();
     $$(".burstrow", $("#burstlist")).forEach((r) => {
       const on = num(r.dataset.burst) === id;
       r.classList.toggle("on", on);
       r.classList.toggle("is-active", on);
     });
     const data = await api("/api/burst/" + num(id));
+    state.burst = data;
     const group = data.group;
     const gmById = {};
     ((group && group.frames) || []).forEach((f) => { gmById[f.id] = f; });
@@ -4044,11 +4375,12 @@ document.addEventListener("keydown", (ev) => {
               </div>
             </div>
             <div class="actions actions-icon">
+              <button class="btn btn-pick" data-pick="${num(m.id)}" aria-pressed="false" title="Select to keep" aria-label="Select ${esc(m.filename)} to keep">${BURST_ICONS.pick}</button>
               ${m.is_best_shot
                 ? `<button class="btn btn-best is-best" disabled title="This is the best shot" aria-label="This is the best shot">${BURST_ICONS.check}</button>`
                 : `<button class="btn btn-best" data-makebest="${num(m.id)}" title="Set as best shot" aria-label="Set as best shot">${BURST_ICONS.star}</button>`}
               <button class="btn btn-del${m.delete_approved ? " is-del" : ""}${m.is_best_shot ? " warn-best" : ""}" data-markdelete="${num(m.id)}" data-is-best="${m.is_best_shot ? "1" : "0"}" aria-pressed="${m.delete_approved ? "true" : "false"}" title="${m.delete_approved ? "Marked for delete (click to unmark)" : (m.is_best_shot ? "Mark the best shot for delete" : "Mark this frame for delete")}" aria-label="${m.delete_approved ? "Marked for delete (click to unmark)" : "Mark this frame for delete"}">${BURST_ICONS.trash}</button>
-              ${m.face_count ? `<button class="btn btn-faces" data-faces="${num(m.id)}" data-count="${num(m.face_count)}" title="Inspect faces" aria-label="Inspect faces">${BURST_ICONS.face}</button>` : ""}
+              ${m.face_count ? `<button class="btn btn-faces" data-faces="${num(m.id)}" data-burst="${num(id)}" data-count="${num(m.face_count)}" title="Inspect faces" aria-label="Inspect faces">${BURST_ICONS.face}</button>` : ""}
             </div>
           </figure>
         </article>`;
@@ -4077,13 +4409,6 @@ document.addEventListener("keydown", (ev) => {
     if (marked.length) addBtn(`Clear ${fmtN(marked.length)} delete mark${marked.length === 1 ? "" : "s"}`, () => markBurstDeletes(id, marked, false));
     if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
     if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
-    $$("[data-faces]", $("#burstdetail")).forEach((b) => {
-      b.onclick = async (ev) => {
-        ev.stopPropagation(); // the global [data-faces] delegate would open the overlay a second time
-        const imgId = num(b.dataset.faces);
-        await openBiometricProjection(id, imgId);
-      };
-    });
     $$("[data-makebest]", $("#burstdetail")).forEach((b) => {
       b.onclick = () => makeBestShot(id, num(b.dataset.makebest));
     });
@@ -4105,9 +4430,13 @@ document.addEventListener("keydown", (ev) => {
   async function markBurstDeletes(burstId, ids, approved) {
     try {
       await post("/api/deletes/approve", { ids, approved });
+      const undo = approved ? { label: "Undo", fn: async () => {
+        await post("/api/deletes/approve", { ids, approved: false });
+        await showBurst(burstId);
+      } } : undefined;
       toast(approved
         ? `Marked ${fmtN(ids.length)} for delete. They are moved to the trash folder when you apply with the trash option.`
-        : `Delete mark cleared on ${fmtN(ids.length)}`, "ok");
+        : `Delete mark cleared on ${fmtN(ids.length)}`, "ok", undo);
       await showBurst(burstId);
     } catch (e) { toast(e.message, "err"); }
   }
@@ -4766,7 +5095,7 @@ document.addEventListener("keydown", (ev) => {
         e.classList.remove("tick");
         void e.offsetWidth;
         e.classList.add("tick");
-        afterAnim(e, 700).then(() => e.classList.remove("tick"));
+        afterAnim(e, moMs("--mo-slow", 380) * 2).then(() => e.classList.remove("tick"));
       }
     };
     const junk = Object.entries(ov.by_category).reduce((a, [c, n]) => a + (state.junk.has(c) ? n : 0), 0);
@@ -4867,7 +5196,7 @@ document.addEventListener("keydown", (ev) => {
       void entering.offsetWidth;
       entering.classList.add("enter");
       const seq = entering._enterSeq = (entering._enterSeq || 0) + 1;
-      afterAnim(entering, 260).then(() => { if (entering._enterSeq === seq) entering.classList.remove("enter"); });
+      afterAnim(entering, moMs("--mo-std", 260) + 40).then(() => { if (entering._enterSeq === seq) entering.classList.remove("enter"); });
     }
     positionNavIndicator();
     const [title, sub] = TITLES[name] || [name, ""];
@@ -5328,8 +5657,27 @@ document.addEventListener("keydown", (ev) => {
     renderBanner();
     updateLearn();
     $("#bulk-clear").onclick = clearPicks;
+    $("#bulk-merge").onclick = bulkMergePeople;
+    $("#bulk-name").onclick = () => {
+      const [p] = selectedPeople();
+      if (p) $(".people-name-pill-wrapper", p.card).click();
+    };
+    $("#bulk-del-people").onclick = bulkDeletePeople;
     $("#bulk-lock").onclick = () => bulkLock();
     $("#bulk-delete").onclick = () => bulkMarkDelete();
+    $("#bulk-junk").onclick = bulkJunk;
+    $("#bulk-best").onclick = async () => {
+      const bi = burstPickInfo();
+      if (!bi || bi.picked.length !== 1) return;
+      const bid = currentBurstId, imageId = num(bi.picked[0].id);
+      clearPicks();
+      await makeBestShot(bid, imageId);
+    };
+    $("#bulk-rest").onclick = async () => {
+      const bi = burstPickInfo();
+      if (!bi || !bi.rest.length) return;
+      await markBurstDeletes(currentBurstId, bi.rest.map((m) => num(m.id)), true);
+    };
     $("#bulk-clean").onclick = openCleanExport;
     $("#ce-scan").onclick = ceScan;
     $("#ce-go").onclick = ceExport;
@@ -5416,19 +5764,60 @@ document.addEventListener("keydown", (ev) => {
       const r = await runTask(`Analyzing photos (${device})`, async () => {
         const inferred = await post("/api/infer", { device });
         if (inferred && inferred.stopped) return inferred;
+        if (!inferred.new_ids_count) return { inferred, grouped: null };
+        const grouped = await post("/api/cluster", { only_new: true });
+        if (grouped && grouped.stopped) return grouped;
+        return { inferred, grouped };
+      });
+      if (!r) return;
+      if (!r.grouped) {
+        libLog("Nothing new to analyze", "ok");
+        toast("Nothing new to analyze. Use Reanalyse to re-check photos you already analyzed.", "ok");
+        await afterTask();
+        return;
+      }
+      libLog(`Analysis finished: ${fmtN(r.inferred.processed)} photos, ${fmtN(r.inferred.faces_total)} faces in ${r.inferred.duration_s}s`, "ok");
+      libLog(`Grouping finished: ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
+      toast(`Analyzed ${fmtN(r.inferred.processed)} new photos`, "ok");
+      markGrouped();
+      const sorted = await afterTask(true);
+      libLog(sorted ? "Photos sorted into categories" : "Could not sort photos into categories", sorted ? "ok" : "warn");
+      if (sorted) await approveProposedDeletes(true);
+    };
+    $("#btn-recheck").onclick = async () => {
+      const r = await runTask("Re-checking rules", async () => {
+        const job = await post("/api/rescore", {});
+        if (job.note) return { note: job.note };
+        const res = await followJob(job.job_id, "Re-check");
+        await sortNow(true);
+        return res;
+      });
+      if (!r) return;
+      if (r.note) { toast(r.note, "err"); return; }
+      toast(`Re-checked ${fmtN(r.updated)} photos`, "ok");
+      libLog(`Re-checked ${fmtN(r.updated)} photos and re-sorted them`, "ok");
+      grids.utility.reset();
+    };
+    $("#btn-reanalyse-all").onclick = async () => {
+      const total = state.overview ? state.overview.total : 0;
+      const ok = await showConfirmDialog({
+        title: "Reanalyse everything?",
+        message: `This runs the AI on all ${fmtN(total)} photos again and can take a long time. Photos you already sorted by hand are kept.`,
+        confirmText: "Reanalyse", variant: "warning" });
+      if (!ok) return;
+      const device = $("#infer-device").value;
+      const r = await runTask(`Reanalysing photos (${device})`, async () => {
+        const inferred = await post("/api/infer", { device, reanalyze: true });
+        if (inferred && inferred.stopped) return inferred;
         const grouped = await post("/api/cluster", {});
         if (grouped && grouped.stopped) return grouped;
         return { inferred, grouped };
       });
-      if (r) {
-        libLog(`Analysis finished: ${fmtN(r.inferred.processed)} photos, ${fmtN(r.inferred.faces_total)} faces in ${r.inferred.duration_s}s`, "ok");
-        libLog(`Grouping finished: ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
-        toast(`Analyzed ${fmtN(r.inferred.processed)} photos, found ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
-        markGrouped();
-        const sorted = await afterTask(true);
-        libLog(sorted ? "Photos sorted into categories" : "Could not sort photos into categories", sorted ? "ok" : "warn");
-        if (sorted) await approveProposedDeletes();
-      }
+      if (!r) return;
+      libLog(`Reanalysis finished: ${fmtN(r.inferred.processed)} photos, ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
+      toast(`Reanalysed ${fmtN(r.inferred.processed)} photos`, "ok");
+      markGrouped();
+      await afterTask(true);
     };
     $("#btn-ingest-all").onclick = async () => {
       const path = needPath();

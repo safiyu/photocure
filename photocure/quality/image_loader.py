@@ -84,7 +84,10 @@ def _bgr_from_pil(im: Image.Image) -> np.ndarray:
         im = im.convert("RGB")
     arr = np.asarray(im, dtype=np.uint8)
     if im.mode == "RGBA":
-        arr = cv2.cvtColor(arr, cv2.COLOR_RGBA2BGR)
+        # Transparent pixels are often (0,0,0): flatten onto grey so they do not read as black.
+        alpha = arr[..., 3:4].astype(np.float32) / 255.0
+        flat = arr[..., :3].astype(np.float32) * alpha + 128.0 * (1.0 - alpha)
+        arr = cv2.cvtColor(flat.round().astype(np.uint8), cv2.COLOR_RGB2BGR)
     elif im.mode == "RGB":
         arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
     elif im.mode == "L":

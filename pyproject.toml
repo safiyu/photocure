@@ -65,7 +65,7 @@ include = ["photocure*"]
 version = { attr = "photocure.__version__" }
 
 [tool.setuptools.package-data]
-photocure = ["ui/static/*", "models/*"]
+photocure = ["ui/static/*", "ui/static/fonts/*", "models/*"]
 
 [tool.ruff]
 target-version = "py311"

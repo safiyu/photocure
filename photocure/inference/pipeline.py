@@ -46,6 +46,7 @@ from ..config import CuratorConfig
 from ..db.models import (
     FaceDetection,
     ImageRecord,
+    PersonCluster,
     QualityMetric,
     SemanticScore,
 )
@@ -71,6 +72,8 @@ log = logging.getLogger("photocure.pipeline")
 # Statuses that still need work. "faces_done" rows only need Phase B. Inferred rows whose
 # faces_schema_version is old also need Phase A again (and stay "inferred" meanwhile).
 _PENDING_STATUSES = ("pending", "faces_done")
+# Decoded 1600 px frames are ~6 MB each; cap how many Phase A holds at once (~400 MB).
+_PHASE_A_MAX_FRAMES = 64
 # SQLite's host-parameter limit is 999 on old builds.
 _IN_BATCH = 500
 
@@ -89,7 +92,16 @@ class InferResult:
     aesthetic_synced: int = 0
     preference_scored: int = 0
     oom_retries: int = 0
+    processed_ids: list[int] = field(default_factory=list)
     errors: list = field(default_factory=list)
+
+
+@dataclass
+class _PeopleUndo:
+    """What one image's person assignment changed, so a later failure can revert it."""
+    cache: dict = field(default_factory=dict)
+    restore: dict = field(default_factory=dict)   # pid -> (centroid, face_count) before
+    created: list = field(default_factory=list)
 
 
 @dataclass
@@ -165,6 +177,7 @@ class InferencePipeline:
                  backend: BackendState | None = None):
         self.cfg = config or CuratorConfig()
         self.bs = backend or detect_backend(self.cfg)
+        self.bs.retry_downgraded()
         self.quality = QualityEngine(self.cfg.quality)
 
     def _faces_stale(self, rec: ImageRecord) -> bool:
@@ -336,6 +349,8 @@ class InferencePipeline:
         face_batch = max(1, int(dev.face_batch_size))
         face_engine = FaceEngine(self.cfg, backend=self.bs)
         done = 0
+        cap = min(max(1, int(dev.infer_chunk_size)), _PHASE_A_MAX_FRAMES)
+        chunks = [c[i:i + cap] for c in chunks for i in range(0, len(c), cap)]
         # Loaded once so a cluster created or grown earlier in this run is visible to later
         # images, without re-reading every centroid from the DB on each face.
         centroids: dict[int, ClusterCentroid] = {
@@ -381,15 +396,20 @@ class InferencePipeline:
                             result.errors.append(f"{rec.path}: face detection failed")
                             continue
                         result.faces_total += len(faces)
+                        undo = _PeopleUndo()
                         try:
-                            self._analyze_crops(face_engine, rec, fr, faces)
+                            emb_ok = self._analyze_crops(face_engine, rec, fr, faces)
                             counts = classify_group([faces], self.cfg.face)
                             q = self.quality.score(fr.bgr)
                             repo.upsert_quality(QualityMetric(
                                 image_id=fr.image_id,
                                 **{k: v for k, v in q.items() if k != "needs_review"},
                             ))
-                            person_ids = self._assign_people(repo, centroids, fr.image_id, faces)
+                            if emb_ok:
+                                person_ids = self._assign_people(
+                                    repo, centroids, fr.image_id, faces, undo)
+                            else:
+                                person_ids = self._keep_people(repo, fr.image_id, faces)
                             repo.replace_faces(
                                 fr.image_id,
                                 [self._face_row(fr.image_id, f, fr.scale, fr.bgr.shape,
@@ -409,6 +429,7 @@ class InferencePipeline:
                                 rec.infer_status = "faces_done"
                         except Exception as e:
                             log.warning("persist failed for %s: %s", rec.path, e)
+                            self._undo_people(repo, centroids, undo)
                             rec.infer_status = "failed"
                             result.failures += 1
                             result.errors.append(f"{rec.path}: {e}")
@@ -489,6 +510,7 @@ class InferencePipeline:
                         result.quality_computed += 1
                         result.semantic_computed += 1
                         result.processed += 1
+                        result.processed_ids.append(int(rec.id))
                         if on_progress:
                             on_progress(n_todo + done, total_steps,
                                         f"Phase 2/2 (CLIP Semantics): {Path(rec.path).name}")
@@ -504,28 +526,87 @@ class InferencePipeline:
             gc.collect()
             empty_cuda_cache(self.bs)
 
-    def _analyze_crops(self, engine: FaceEngine, rec: ImageRecord, fr: _LoadedFrame, faces: list) -> None:
+    def _analyze_crops(self, engine: FaceEngine, rec: ImageRecord, fr: _LoadedFrame,
+                       faces: list) -> bool:
         """Stage 2: measure faces and compute identity embeddings on the full-resolution photo
-        (or the frame if it already is)."""
+        (or the frame if it already is). False when embeddings could not be computed at all."""
         if not faces:
-            return
+            return True
         if fr.scale >= 0.999:
             engine.analyze_faces(fr.bgr, faces)
             engine.compute_embeddings(fr.bgr, faces)
-            return
+            return engine._ensure_recognizer_loaded() is not None
         try:
             full = load_image(rec.path, max_side=None, orientation=rec.orientation)
         except Exception as e:
             log.warning("full-resolution decode failed for %s (%s); eye state stays unknown", rec.path, e)
-            return
+            return False
         try:
             engine.analyze_faces(full.bgr, faces)
             engine.compute_embeddings(full.bgr, faces)
         finally:
             del full
+        return engine._ensure_recognizer_loaded() is not None
+
+    @staticmethod
+    def _keep_people(repo: PhotoRepository, image_id: int, faces: Sequence) -> list[int | None]:
+        """Carry person ids and embeddings over by box overlap when none could be computed."""
+        old = [o for o in repo.faces_for_image(image_id) if o.person_id is not None]
+        out: list[int | None] = [None] * len(faces)
+        taken: set[int] = set()
+        for i, f in enumerate(faces):
+            best, best_iou = None, 0.5
+            for o in old:
+                if o.id in taken:
+                    continue
+                iw = min(f.x2, o.x2) - max(f.x1, o.x1)
+                ih = min(f.y2, o.y2) - max(f.y1, o.y1)
+                if iw <= 0 or ih <= 0:
+                    continue
+                inter = iw * ih
+                union = (f.x2 - f.x1) * (f.y2 - f.y1) + (o.x2 - o.x1) * (o.y2 - o.y1) - inter
+                if union > 0 and inter / union >= best_iou:
+                    best, best_iou = o, inter / union
+            if best is not None:
+                taken.add(best.id)
+                out[i] = best.person_id
+                if f.embedding is None and best.embedding_json:
+                    f.embedding = dequantize_embedding(best.embedding_json)
+        return out
+
+    @staticmethod
+    def _live_cluster(repo: PhotoRepository, centroids: dict[int, ClusterCentroid],
+                      pid: int) -> ClusterCentroid | None:
+        """Refresh a cached cluster from its DB row; None (and uncached) if merged or deleted."""
+        p = repo.s.get(PersonCluster, pid, populate_existing=True)
+        if p is None or not p.centroid_json:
+            centroids.pop(pid, None)
+            return None
+        c = ClusterCentroid(pid, dequantize_embedding(p.centroid_json) or [], p.face_count)
+        centroids[pid] = c
+        return c
+
+    @staticmethod
+    def _undo_people(repo: PhotoRepository, centroids: dict[int, ClusterCentroid],
+                     undo: _PeopleUndo) -> None:
+        """Revert the cluster changes one failed image made, in the DB and the cache."""
+        try:
+            for pid in undo.created:
+                p = repo.s.get(PersonCluster, pid)
+                if p is not None:
+                    repo.s.delete(p)
+            for pid, (centroid, count) in undo.restore.items():
+                if repo.s.get(PersonCluster, pid) is not None:
+                    repo.update_person_cluster(pid, centroid, count)
+        except Exception as e:
+            log.warning("could not revert person clusters: %s", e)
+        if undo.cache:
+            centroids.clear()
+            centroids.update(undo.cache)
 
     def _assign_people(self, repo: PhotoRepository, centroids: dict[int, ClusterCentroid],
-                       image_id: int, faces: Sequence) -> list[int | None]:
+                       image_id: int, faces: Sequence,
+                       undo: _PeopleUndo | None = None) -> list[int | None]:
         """Resolve a person for each face (same order as ``faces``), mutating ``centroids``.
 
         A face that remaps to one of this same photo's previous faces keeps that person's
@@ -545,23 +626,31 @@ class InferencePipeline:
         new = [NewFace(i, f.embedding) for i, f in enumerate(faces) if f.embedding is not None]
         remap = remap_person_ids(old, new, self.cfg.face.cluster_remap_threshold)
 
+        undo = undo if undo is not None else _PeopleUndo()
+        undo.cache = dict(centroids)
         result: list[int | None] = [None] * len(faces)
         claimed_in_image: set[int] = set()
         resolved_person_ids: set[int] = set()
         for i, f in enumerate(faces):
             if f.embedding is None:
                 continue
-            if i in remap:
+            if i in remap and self._live_cluster(repo, centroids, remap[i]) is not None:
                 pid = remap[i]
             else:
-                candidates = [c for c in centroids.values() if c.person_id not in claimed_in_image]
-                pid = assign_cluster(f.embedding, candidates, self.cfg.face.cluster_join_threshold)
+                while True:
+                    candidates = [c for c in centroids.values() if c.person_id not in claimed_in_image]
+                    pid = assign_cluster(f.embedding, candidates, self.cfg.face.cluster_join_threshold)
+                    # A cluster merged or deleted mid-run is dropped from the cache and skipped.
+                    if pid is None or self._live_cluster(repo, centroids, pid) is not None:
+                        break
                 if pid is None:
                     created = repo.create_person_cluster(f.embedding)
                     pid = created.id
+                    undo.created.append(pid)
                     centroids[pid] = ClusterCentroid(pid, list(f.embedding), 1)
                 else:
                     c = centroids[pid]
+                    undo.restore.setdefault(pid, (c.centroid, c.face_count))
                     new_centroid = update_centroid(c.centroid, c.face_count, f.embedding)
                     # A person this photo already had keeps their count: this is the same
                     # occurrence continuing (remap's stricter threshold just missed it), not a
@@ -574,13 +663,14 @@ class InferencePipeline:
             resolved_person_ids.add(pid)
 
         for lost_pid in old_person_ids - resolved_person_ids:
-            c = centroids.get(lost_pid)
+            c = self._live_cluster(repo, centroids, lost_pid)
             if c is not None:
+                undo.restore.setdefault(lost_pid, (c.centroid, c.face_count))
                 new_count = max(0, c.face_count - 1)
                 centroids[lost_pid] = ClusterCentroid(lost_pid, c.centroid, new_count)
                 repo.update_person_cluster(lost_pid, c.centroid, new_count)
             else:
-                repo.decrement_person_cluster(lost_pid)
+                repo.decrement_person_cluster(lost_pid)  # no centroid cached; no-op if gone
         return result
 
     @staticmethod

@@ -98,7 +98,7 @@ def test_the_expected_scenarios_all_ran(outcome):
         "one-time code", "sign-in box", "DOM stays within 100 cards", "recycled",
         "arrow keys move", "keys rate", "XMP sidecar", "edited elsewhere", "page boundary",
         "filters agree", "date scrubber", "resize", "WebP", "Reject all blinks", "Inspect faces",
-        "category label", "lightbox focus restoration", "in-app prompt dialog",
+        "category label", "selection bar summarises", "burst selection bar", "Quality filter finds", "lightbox focus restoration", "in-app prompt dialog",
         "persistent reset-filters", "version badge button", "touch swipe navigation",
         "date presets", "roving focus", "picker and help modals", "no script errors",
         "rapid tab switching", "reduced motion closes", "reopening a dialog that is closing",

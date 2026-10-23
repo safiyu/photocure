@@ -140,7 +140,7 @@ If the page asks you to sign in, paste the one-time code that Photocure printed 
 **A typical first session:**
 
 1. **Import:** pick your photo folder and press **Scan**. Photocure lists your photos without changing them.
-2. **Analyze:** press **Analyze Now**. It reads each photo, groups burst shots and sorts everything into categories. This is the slow step, and you can keep browsing while it runs.
+2. **Analyze:** press **Analyze Now**. It reads each photo, groups burst shots and sorts everything into categories. This is the slow step, and you can keep browsing while it runs. Analyze only reads photos that were never analyzed. After changing categories use **Re-check rules** (fast), or **Reanalyse everything** to run the AI again on every photo.
 3. **Look around:** open Library, Bursts, Duplicates, Utility and Highlights to see what it found.
 4. **Tidy up:** fix anything it was unsure about in Finalize, and decide which duplicates to keep.
 5. **Organize:** in Apply and undo, choose where the organized photos go, preview, and apply.
@@ -262,6 +262,25 @@ photocure geocode
 ```
 
 The lookup is done offline.
+
+**Your own categories.** The built-in categories (People, Events, Food, Scenery and so on) can be extended or reworded with a small file. Point Photocure at it, then press **Re-check my photos** so the new rules apply to photos you already analyzed (it does not read your photos again):
+
+```bash
+export PCUR_TAXONOMY_FILE=/full/path/to/my_categories.yaml
+```
+
+```yaml
+classes:
+  - name: concert
+    folder: Events/Concerts        # where its photos are filed
+    group: people                  # look-alike classes share a group
+    date_grouped: true             # add year/month/day folders
+    prompts:                       # what the AI should look for, in plain words
+      - a concert with a stage and bright lights
+      - a crowd of people at a music festival
+```
+
+A JSON file works the same way. Describe what is in the photo with a few different sentences; avoid "no people", because the AI reads the words, not the negation.
 
 **Ask an AI agent about your photos.** Photocure can run an MCP server so an agent such as Claude can search your library, look at the photos and do two jobs for you, for example "find the router label I photographed last month and read me the default password", "fix the blinks in my group shots" or "make a clean copy of the beach photos I can share". It runs on your computer. It can only add new files (a fixed photo, a layered file, a clean export folder): no tool can change, move or delete a photo you already have.
 

@@ -5,12 +5,15 @@ import logging
 import os
 import secrets
 import socket
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 log = logging.getLogger("photocure.auth")
 
 COOKIE_NAME = "pcur_session"
+COOKIE_MAX_AGE = 30 * 24 * 3600
+_MAX_FAILURES, _FAIL_WINDOW = 10, 60.0
 
 
 def token_file_path(cache_dir: Path | str) -> Path:
@@ -35,6 +38,8 @@ class AuthManager:
         # The CLI generates the OTC and hands it over via the environment, never via HTML.
         self._otc: str | None = os.environ.pop("PCUR_OTC", None) or None
         self.token = self._env_token or self._load_or_create()
+        self.token_explicit = bool(self._env_token)
+        self._failures: dict[str, list[float]] = {}
 
     def _load_or_create(self) -> str:
         try:
@@ -66,6 +71,20 @@ class AuthManager:
         if _same(code, self.token):
             return self.token
         return None
+
+    def locked_out(self, client: str) -> bool:
+        now = time.monotonic()
+        recent = [t for t in self._failures.get(client, []) if now - t < _FAIL_WINDOW]
+        if recent:
+            self._failures[client] = recent
+        else:
+            self._failures.pop(client, None)
+        return len(recent) >= _MAX_FAILURES
+
+    def record_failure(self, client: str) -> None:
+        if len(self._failures) > 1000:
+            self._failures.clear()
+        self._failures.setdefault(client, []).append(time.monotonic())
 
     def validate(self, token: str | None) -> bool:
         return bool(token) and _same(token, self.token)
@@ -107,15 +126,18 @@ def build_allowed_hosts(host: str, port: int, extra: str = "") -> set[str]:
     return allowed
 
 
-def origin_allowed(origin: str, allowed_hosts: set[str]) -> bool:
-    """True when the Origin/Referer authority is in the Host allowlist."""
+def origin_allowed(origin: str, allowed_hosts: set[str], host: str | None = None) -> bool:
+    """True when the Origin/Referer matches the request Host or an allowlisted host:port."""
     if "*" in allowed_hosts:
         return True
     try:
-        netloc = urlparse(origin).netloc
+        parsed = urlparse(origin)
+        netloc, port = parsed.netloc.lower(), parsed.port
     except ValueError:
         return False
     if not netloc:
         return False
-    netloc_no_port = netloc.split(":")[0]
-    return netloc in allowed_hosts or netloc_no_port in allowed_hosts
+    if host and netloc == host.lower():
+        return True
+    # a portless origin is only trusted via the Host match above, never by hostname alone
+    return port is not None and netloc in {h.lower() for h in allowed_hosts}

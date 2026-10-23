@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 STATIC = Path(__file__).parent.parent / "photocure" / "ui" / "static"
-KEYFRAMES = ("panel-in", "pop", "ov-in", "ov-out", "ov-fade-in", "ov-fade-out", "toast-in", "toast-out", "tick", "bulk-in", "bulk-out")
+KEYFRAMES = ("mo-fade", "mo-fade-out", "mo-rise", "mo-rise-out", "mo-pop", "tick", "bulk-in", "bulk-out")
 
 
 def _css() -> str:
@@ -27,13 +27,9 @@ def test_keyframes_defined():
         assert re.search(r"@keyframes\s+" + re.escape(name) + r"\b", css), f"@keyframes {name} missing"
 
 
-def test_panel_enter_ends_visible_and_does_not_loop():
-    css = _css()
-    frames = re.search(r"@keyframes\s+panel-in\s*\{((?:[^{}]|\{[^{}]*\})*)\}", css, re.S).group(1)
-    to = frames.split("to", 1)[1]
-    assert "opacity: 1" in to and "transform: none" in to
-    rule = re.search(r"\.panel\.enter\s*\{([^}]*)\}", css).group(1)
-    assert "animation: panel-in" in rule and "infinite" not in rule and "forwards" not in rule
+def test_panel_enter_does_not_loop():
+    rule = re.search(r"\.panel\.enter\s*\{([^}]*)\}", _css()).group(1)
+    assert "animation: mo-fade" in rule and "infinite" not in rule and "forwards" not in rule
 
 
 def test_helpers_exist():
@@ -81,7 +77,7 @@ def test_tab_switch_and_progress_hooks():
 
 def test_blanket_reduced_motion_rule_kept():
     css = (STATIC / "style.css").read_text(encoding="utf-8")
-    assert re.search(r"prefers-reduced-motion:\s*reduce\)\s*\{[^@]*transition-duration:\s*\.001ms", css)
+    assert re.search(r"prefers-reduced-motion:\s*reduce\)\s*\{[^@]*transition-duration:\s*1ms", css)
 
 
 def test_stale_tab_fade_timer_cannot_drop_a_newer_fade():

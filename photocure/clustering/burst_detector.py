@@ -86,9 +86,10 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 def _ts(v: datetime | None) -> float | None:
     if v is None:
         return None
-    if v.tzinfo is None:
-        v = v.replace(tzinfo=timezone.utc)
-    return v.timestamp()
+    if v.tzinfo is not None:
+        # Drop the zone (as naive stamps have none) so both kinds share one wall-clock convention.
+        v = v.replace(tzinfo=None)
+    return v.replace(tzinfo=timezone.utc).timestamp()
 
 
 class BurstDetector:
@@ -120,6 +121,11 @@ class BurstDetector:
         if len(usable) < self.t.min_group_size:
             return []
 
+        dims = [len(items[i].embedding) for i in usable]
+        common = max(set(dims), key=dims.count)
+        usable = [i for i, d in zip(usable, dims) if d == common]
+        if len(usable) < self.t.min_group_size:
+            return []
         embs = np.array([np.asarray(items[i].embedding, dtype=np.float32)
                          for i in usable], dtype=np.float32)
         norms = np.linalg.norm(embs, axis=1, keepdims=True)
