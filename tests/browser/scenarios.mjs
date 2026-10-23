@@ -898,7 +898,7 @@ try {
     await page.eval("document.querySelector('#sidebar-version').click(); true");
     await page.waitFor("document.querySelector('.tab.active').dataset.tab === 'settings'", 5000, "settings opens");
     await page.waitFor("(() => { const r = document.querySelector('#sect-about').getBoundingClientRect(); return r.top < innerHeight - 100 && r.bottom > 0 && window.scrollY > 0; })()", 5000, "About scrolled into view");
-    check(await page.eval("document.querySelector('#about-card .about-name').textContent === 'Photocure' && /^v/.test(document.querySelector('#about-card .about-ver').textContent)"), "About card is not rendered");
+    check(await page.eval("document.querySelector('#about-card .about-name').textContent === 'Photocure Studio' && /^v/.test(document.querySelector('#about-card .about-ver').textContent)"), "About card is not rendered");
   });
 
   await scenario("empty states sit near the vertical middle of the page", async () => {

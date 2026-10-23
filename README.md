@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/logo.png" width="140" alt="Photocure logo"></p>
 
-# Photocure
+# Photocure Studio
 
 **Sort, cull and tidy your photo library, privately, on your own computer.**
 

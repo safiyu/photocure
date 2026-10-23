@@ -5202,7 +5202,7 @@
     const [title, sub] = TITLES[name] || [name, ""];
     $("#page-title").textContent = title;
     $("#page-sub").textContent = sub;
-    document.title = title + " - Photocure";
+    document.title = title + " - Photocure Studio";
     document.body.classList.remove("nav-open");
     try { history.replaceState(null, "", "#" + name); } catch (e) { /* ignore */ }
     window.scrollTo(0, 0);
@@ -5475,7 +5475,7 @@
           <div class="about">
             <img class="about-logo" src="/static/logo.svg" alt="" width="64" height="64">
             <div class="about-main">
-              <div class="about-title"><span class="about-name">Photocure</span><span class="about-ver">v${esc(about.version || "0.0.0")}</span></div>
+              <div class="about-title"><span class="about-name">Photocure Studio</span><span class="about-ver">v${esc(about.version || "0.0.0")}</span></div>
               <p class="about-tag">Offline photo curation. Your photos never leave this computer.</p>
               <dl class="about-facts">
                 <div><dt>Acceleration</dt><dd>${esc(about.device || "CPU")}</dd></div>
