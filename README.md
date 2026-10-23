@@ -7,8 +7,8 @@
 Photocure looks at every photo, works out what it shows, finds the best shot in each burst, spots duplicates and clutter, and files everything into a clean folder structure. Nothing is uploaded anywhere, and nothing on your disk changes until you say so. Every change can be undone.
 
 <p align="center">
-  <img src="docs/shot_light.png" width="48%" alt="Photocure Import page, light theme">
-  <img src="docs/shot_dark.png" width="48%" alt="Photocure Import page, dark theme">
+  <img src="docs/shot_light.png" width="48%" alt="Photocure Studio Pipeline page, light theme">
+  <img src="docs/shot_dark.png" width="48%" alt="Photocure Studio Pipeline page, dark theme">
 </p>
 
 ## Contents
