@@ -214,6 +214,7 @@ def resolve_group(session, keep_id: int, discard_ids: list[int], kind: str) -> d
         keeper.near_dup_of = None
     if keeper.manual_bucket in DUP_BUCKETS:
         keeper.manual_bucket = None
+    keeper.delete_approved = False
     keeper.updated_at = now
     session.flush()
     return {"kept": keep_id, "discarded": discard_ids,

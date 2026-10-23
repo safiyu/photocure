@@ -138,7 +138,7 @@ def test_old_topbar_pill_is_gone_everywhere():
 
 def test_hero_is_not_sticky_and_reduced_motion_covers_transitions():
     css = _css()
-    assert re.search(r"prefers-reduced-motion:\s*reduce\)\s*\{[^@]*transition-duration:\s*\.001ms", css), (
+    assert re.search(r"prefers-reduced-motion:\s*reduce\)\s*\{[^@]*transition-duration:\s*1ms", css), (
         "the blanket reduced-motion rule must cover transitions"
     )
     topbar = re.search(r"\.topbar\s*\{([^}]*)\}", css)

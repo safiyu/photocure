@@ -12,6 +12,11 @@ case "$USER_VENV" in
         exit 1 ;;
 esac
 
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
+    echo "photocure: Python 3.11 or newer is required (Debian 12+, Ubuntu 24.04+)." >&2
+    exit 1
+fi
+
 # First run, or an earlier install that never finished (the marker is written last).
 if [ ! -x "$VENV_CLI" ] || [ ! -f "$VENV_VERSION" ]; then
     exec python3 /opt/photocure/bootstrap.py "$@"

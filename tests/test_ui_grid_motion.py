@@ -27,11 +27,11 @@ def test_number_key_shortcuts_keep_the_original_category_order():
 
 def test_card_and_image_fade_keyframes_play_once_and_only_after_a_reset():
     css = _css()
-    for name in ("card-in", "img-in"):
+    for name in ("mo-rise", "mo-fade"):
         assert re.search(r"@keyframes\s+" + name + r"\b", css), name
     card = re.search(r"\.grid\.anim-in\s+\.card\s*\{([^}]*)\}", css).group(1)
     img = re.search(r"\.grid\.anim-in\s+\.thumb img\s*\{([^}]*)\}", css).group(1)
-    assert "card-in" in card and "img-in" in img
+    assert "mo-rise" in card and "mo-fade" in img
     assert "infinite" not in card + img
     assert not re.search(r"(?m)^\.card\s*\{[^}]*animation", css), "plain edits must not replay the fade"
 

@@ -39,33 +39,12 @@ def compute_quick_hash(path: Path | str,
 
 
 def compute_sha256(path: Path | str, chunk_size: int = _READ_CHUNK) -> str:
-    """Tier-2 definitive hash via memory-mapped streaming.
-
-    Uses an ``mmap`` when the file is non-empty (the OS pages it in on demand
-    and releases it as we advance); falls back to chunked reads for empty
-    files or mmap-unfriendly filesystems.
-    """
-    path = Path(path)
-    size = path.stat().st_size
-    if size == 0:
-        return hashlib.sha256(b"").hexdigest()
-
-    try:
-        with open(path, "rb", buffering=0) as f:
-            import mmap
-            mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-            digest = hashlib.sha256()
-            for off in range(0, size, chunk_size):
-                digest.update(mm[off:off + chunk_size])
-            mm.close()
-            return digest.hexdigest()
-    except (ValueError, OSError, BufferError):
-        # Fall back to plain chunked reading (e.g. /proc or network quirks).
-        digest = hashlib.sha256()
-        with open(path, "rb", buffering=chunk_size) as f:
-            for chunk in iter(lambda: f.read(chunk_size), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+    """Tier-2 definitive hash via chunked reads (mmap risks SIGBUS if the file shrinks)."""
+    digest = hashlib.sha256()
+    with open(Path(path), "rb", buffering=chunk_size) as f:
+        for chunk in iter(lambda: f.read(chunk_size), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def is_same_quick_hash(a: str, b: str) -> bool:

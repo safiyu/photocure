@@ -77,7 +77,7 @@ def test_groups():
                                               "illustration", "slide", "utility"}
     assert set(t.group_members("nature")) == {"scenery", "plant", "animal"}
     assert set(t.group_members("objects")) == {"food", "vehicle", "product", "architecture"}
-    assert t.group_members("people") == ["people"]
+    assert set(t.group_members("people")) == {"people", "event"}
     assert t.group_of("slide") == "screen"
     assert t.group_of("unknown_custom") == "unknown_custom"
 

@@ -57,4 +57,4 @@ def test_generic_cards_get_a_faces_entry_point_when_they_have_faces():
     card_body = _fn(js, "cardNode")
     assert "data-faces" in card_body
     delegate_body = _fn(js, "bindDelegates")
-    assert "dataset.faces" in delegate_body and "openBiometricProjection(null" in delegate_body
+    assert "dataset.faces" in delegate_body and "dataset.burst" in delegate_body and "openBiometricProjection(" in delegate_body

@@ -30,7 +30,8 @@ class CategoryType(str, Enum):
     SCENERY = "scenery"
     PEOPLE = "people"
     ILLUSTRATION = "illustration"  # diagrams, charts, infographics, artwork
-    SLIDE = "slide"                # presentation slides, whiteboards, notes
+    SLIDE = "slide"                # photographed slides, whiteboards, notes
+    EVENT = "event"                # parties, concerts, fireworks, conference rooms (no faces found)
     VEHICLE = "vehicle"
     ARCHITECTURE = "architecture"  # buildings, streets, skylines
     PLANT = "plant"                # flowers, trees, gardens
@@ -57,6 +58,7 @@ class CategoryType(str, Enum):
             CategoryType.ANIMAL: "Non-Human/Animals",
             CategoryType.SCENERY: "Non-Human/Scenery",
             CategoryType.PEOPLE: "People",
+            CategoryType.EVENT: "Events",
             CategoryType.ILLUSTRATION: "Non-Human/Art_and_Diagrams",
             CategoryType.SLIDE: "Utility_Reference/Notes_and_Whiteboards",
             CategoryType.UTILITY: "Utility_Reference/Labels_and_Signs",
@@ -93,7 +95,7 @@ class CategoryType(str, Enum):
     def is_date_grouped(self) -> bool:
         """Photographic classes get YYYY/MM/DD date subfolders."""
         return self in (
-            CategoryType.PEOPLE, CategoryType.FOOD,
+            CategoryType.PEOPLE, CategoryType.EVENT, CategoryType.FOOD,
             CategoryType.SCENERY, CategoryType.ANIMAL,
             CategoryType.VEHICLE, CategoryType.ARCHITECTURE, CategoryType.PLANT,
         )
@@ -200,11 +202,11 @@ TAXONOMY: tuple[TaxonomyEntry, ...] = (
         "a photo of a contract, letter or form on a desk",
         "a photo of a passport, ID card or ticket",
         "a page of a book or a printed article",
+        "a poster, flyer or printed sign",
     ),
     _entry(
         CategoryType.GRAPHIC, "screen",
         "a meme with text over an image",
-        "a poster or flyer with graphic design",
         "a logo or icon on a plain background",
         "a cartoon or comic",
         "a flat colored digital graphic or banner",
@@ -223,7 +225,7 @@ TAXONOMY: tuple[TaxonomyEntry, ...] = (
         "a presentation slide with a title and bullet points",
         "a photo of a whiteboard with handwriting",
         "a photo of handwritten notes in a notebook",
-        "a photo of a projector screen in a meeting room",
+        "a close-up photo of a projector screen showing a slide",
         "a slide deck page with text and a chart",
     ),
     _entry(
@@ -249,7 +251,8 @@ TAXONOMY: tuple[TaxonomyEntry, ...] = (
         "a photo of a pet cat",
         "a photo of a wild animal in nature",
         "a photo of a bird",
-        "a close-up photo of an animal's face",
+        "a photo of a horse, cow or farm animal",
+        "a close-up photo of an insect, a butterfly or a fish",
     ),
     _entry(
         CategoryType.SCENERY, "nature",
@@ -257,7 +260,8 @@ TAXONOMY: tuple[TaxonomyEntry, ...] = (
         "a photo of a beach, sea or lake",
         "a photo of a sunset or sky with clouds",
         "a photo of a forest, field or countryside",
-        "a scenic nature view with no people",
+        "a photo of a waterfall, river or snowy mountains",
+        "a photo of a night sky with stars",
     ),
     _entry(
         CategoryType.PLANT, "nature",
@@ -271,8 +275,18 @@ TAXONOMY: tuple[TaxonomyEntry, ...] = (
         "a portrait photo of a person",
         "a selfie of a person smiling",
         "a group photo of people posing together",
-        "a photo of friends or family at an event",
-        "a photo of a person standing outdoors",
+        "a photo of friends or family at a party or celebration",
+        "a photo of a person giving a talk or presentation to an audience",
+        "a photo of a child or a baby",
+    ),
+    _entry(
+        CategoryType.EVENT, "people",
+        "a birthday cake with candles",
+        "fireworks in the night sky",
+        "a concert with a stage and bright lights",
+        "a conference room or auditorium with rows of seats",
+        "party decorations, balloons and streamers",
+        "a wedding or festival with decorations",
     ),
     _entry(
         CategoryType.VEHICLE, "objects",
@@ -337,6 +351,12 @@ def category_to_folder(cat: CategoryType, folder_override: str | None = None) ->
 # ---------------------------------------------------------------------------
 # User-editable taxonomy file (YAML or JSON)
 # ---------------------------------------------------------------------------
+# Buckets only rules may assign; a model class must never route into them.
+_RULE_ONLY = frozenset({
+    CategoryType.CUSTOM, CategoryType.UNKNOWN, CategoryType.ACCIDENTAL,
+    CategoryType.UNCERTAIN, CategoryType.DUPLICATE, CategoryType.NEAR_DUPLICATE,
+    CategoryType.UNREADABLE, CategoryType.BURST_ALTERNATE, CategoryType.JUNK_BLINKS,
+})
 _RESERVED = re.compile(r'[\\:*?"<>|\x00-\x1f]+')
 
 
@@ -398,7 +418,7 @@ def parse_taxonomy(data: object, source: str = "inline") -> Taxonomy:
         folder = item.get("folder")
         try:
             category = CategoryType(name)
-            if category in (CategoryType.CUSTOM, CategoryType.UNKNOWN):
+            if category in _RULE_ONLY:
                 raise ValueError(f"{name!r} is reserved")
             custom = False
         except ValueError:

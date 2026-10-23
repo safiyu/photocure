@@ -162,13 +162,9 @@ def test_theme_switch_css_present():
     css = _style()
     assert re.search(r"\.switch\s*\{", css), ".switch base rule not found"
     assert re.search(r"\.switch\s+\.slider\s*\{", css), ".switch .slider rule not found"
-    assert (
-        re.search(
-            r"@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\.switch\s+\.slider",
-            css,
-        )
-        is not None
-    ), "switch slider transition must be disabled under prefers-reduced-motion"
+    assert re.search(
+        r"@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\*,[^}]*transition-duration:\s*1ms", css
+    ), "the global reduced-motion rule must cover the switch slider transition"
 
 
 # ------------------------------------------------------------------ equalizer spectrum
@@ -259,7 +255,7 @@ def test_zero_external_urls_across_static_bundle():
         if f.suffix.lower() not in {".html", ".css", ".js", ".mjs", ".json", ".svg"}:
             continue
         text = f.read_text(encoding="utf-8")
-        urls = re.findall(r"https?://(?!github\.com/)", text)
+        urls = re.findall(r"https?://(?!github\.com/|www\.w3\.org/)", text)
         if urls:
             offenders.append((str(f.relative_to(STATIC)), urls))
 

@@ -10,6 +10,7 @@ import datetime as dt
 import logging
 import os
 import re
+import shutil
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -135,6 +136,8 @@ _RDF = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}"
 _XMP = "{http://ns.adobe.com/xap/1.0/}"
 _DC = "{http://purl.org/dc/elements/1.1/}"
 OWNED_TAG_PREFIX = "photocure-"
+_XPACKET_BEGIN = re.compile(rb"<\?xpacket begin=[^?]*\?>")
+_XPACKET_END = re.compile(rb"<\?xpacket end=[^?]*\?>")
 
 
 def _writer_sidecar(photo: Path) -> Path | None:
@@ -205,9 +208,17 @@ def update_xmp_sidecar(photo_path: Path | str, *, rating: int | None = None,
     sidecar = _writer_sidecar(photo)
     if sidecar is None:
         return False, "sidecar_skipped_dual"
+    head = tail = b""
     if sidecar.exists():
         try:
             root = _safe_parse(sidecar)
+            raw = sidecar.read_bytes()
+            m = _XPACKET_BEGIN.search(raw)
+            if m:
+                head = m.group(0)
+            m = _XPACKET_END.search(raw)
+            if m:
+                tail = m.group(0)
         except Exception as e:
             log.warning("sidecar_skipped (%s): %s", sidecar, e)
             return False, "sidecar_skipped"
@@ -276,7 +287,13 @@ def update_xmp_sidecar(photo_path: Path | str, *, rating: int | None = None,
 
     tmp = sidecar.with_name(f"{sidecar.name}.tmp.{os.getpid()}")
     try:
-        tmp.write_bytes(etree.tostring(root, encoding="UTF-8", xml_declaration=True))
+        if head:
+            body = etree.tostring(root, encoding="UTF-8", xml_declaration=False)
+            tmp.write_bytes(head + b"\n" + body + b"\n" + (tail or b'<?xpacket end="w"?>'))
+        else:
+            tmp.write_bytes(etree.tostring(root, encoding="UTF-8", xml_declaration=True))
+        if sidecar.exists():
+            shutil.copymode(sidecar, tmp)
         os.replace(tmp, sidecar)
     except OSError as e:
         tmp.unlink(missing_ok=True)
