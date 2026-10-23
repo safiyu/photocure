@@ -221,9 +221,15 @@ button { cursor: pointer; }
 }
 .brand { display: flex; align-items: center; gap: 2px; padding: 0 6px; }
 .brand .logo { width: 42px; height: 42px; flex: none; display: block; }
+.brand .wordmark { display: flex; flex-direction: column; margin-left: 6px; line-height: 1; min-width: 0; }
 .brand b {
-  font: 400 32px/1.15 var(--font-brand); letter-spacing: 0.02em;
+  font: 400 27px/1 var(--font-brand); letter-spacing: 0.02em;
   color: var(--ink);
+}
+.brand em {
+  font: 400 17px/1 var(--font-brand); letter-spacing: 0.02em; font-style: normal; margin-top: 3px;
+  background: linear-gradient(90deg, #fd1c80, #fe9f27 55%, #1f93fb);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .brand span { display: block; font-size: 12px; color: var(--mut); margin-top: 2px; }
 

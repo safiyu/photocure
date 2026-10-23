@@ -44,7 +44,8 @@ def test_no_old_name_left_in_source_files():
 def test_ui_uses_the_new_display_name():
     html = (ROOT / "photocure" / "ui" / "static" / "index.html").read_text(encoding="utf-8")
     js = (ROOT / "photocure" / "ui" / "static" / "app.js").read_text(encoding="utf-8")
-    assert "<title>Photocure Studio</title>" in html and "<b>Photocure Studio</b>" in html
+    assert "<title>Photocure Studio</title>" in html
+    assert '<div class="wordmark"><b>Photocure</b><em>Studio</em></div>' in html
     assert "<h2>About Photocure Studio</h2>" in html
     assert '<span class="about-name">Photocure Studio</span>' in js
     assert 'document.title = title + " - Photocure Studio"' in js
