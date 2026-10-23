@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "photocure"
 dynamic = ["version"]
-description = "Intelligent image curator. Offline, GPU-accelerated, transactionally reversible photo library curation engine."
+description = "Photocure Studio: local-first photo curation engine. Offline, GPU-accelerated, transactionally reversible."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

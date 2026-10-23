@@ -6,8 +6,8 @@ Architecture: amd64
 Maintainer: Safiyu Vattaparambil <dheensafiyu@gmail.com>
 Depends: python3 (>= 3.11), python3-venv, python3-pip, ca-certificates
 Recommends: python3-dev, build-essential
-Description: Intelligent offline photo library curation engine
- Photocure is a local, GPU-accelerated photo library curation engine.
+Description: Photocure Studio, local-first photo curation engine
+ Photocure Studio is a local, GPU-accelerated photo library curation engine.
  It scores image quality, detects faces, classifies photos with OpenCLIP,
  groups bursts, and organizes photos with 100% reversible undo.
  Requires Python 3.11 or newer (Debian 12+, Ubuntu 24.04+).
