@@ -816,13 +816,13 @@ def search(
     cfg = _config(db)
     encoder = search_mod.default_encoder(cfg)
     try:
-        try:
-            vec = encoder.encode(query)
-        except (ValueError, search_mod.SearchUnavailable) as e:
-            console.print(f"[red]{e}[/red]")
-            raise typer.Exit(1) from None
         with get_session(cfg.db_path) as s:
-            hits = search_mod.search_embeddings(s, vec, limit, include_duplicates=duplicates)
+            try:
+                hits = search_mod.search_ranked(s, encoder, query, limit, include_duplicates=duplicates,
+                                                strict=False).hits
+            except (ValueError, search_mod.SearchUnavailable) as e:
+                console.print(f"[red]{e}[/red]")
+                raise typer.Exit(1) from None
             repo = PhotoRepository(s)
             t = Table(title=f"Photos matching: {query}")
             t.add_column("Match", justify="right")
@@ -1099,7 +1099,9 @@ def serve(
     os.environ["PCUR_OTC"] = otc  # read once by the app, never written to disk
     shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
     if host not in ("127.0.0.1", "localhost", "::1"):
-        console.print(f"[bold yellow]Initial authentication token:[/bold yellow] {auth.token}")
+        if not auth.token_explicit:
+            console.print(f"[bold yellow]Authentication token[/bold yellow] "
+                          f"({auth.token[:4]}...{auth.token[-4:]}) stored in {auth.token_path}")
     if open_browser:
         sc.open_browser_when_ready(host, free, code=otc)
     else:

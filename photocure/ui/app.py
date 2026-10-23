@@ -53,12 +53,13 @@ from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, or_
+from sqlalchemy import update as sa_update
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
 
 from .. import __version__
-from ..auth import COOKIE_NAME, AuthManager, build_allowed_hosts, origin_allowed
+from ..auth import COOKIE_MAX_AGE, COOKIE_NAME, AuthManager, build_allowed_hosts, origin_allowed
 from ..clustering.group_shots import burst_face_matrix, group_matrix_payload
 from ..config import CuratorConfig, default_db_path
 from ..db import models as M
@@ -145,11 +146,13 @@ class ScanReq(RunOverrides):
 
 class InferReq(RunOverrides):
     batch_size: int = 32
+    reanalyze: bool = False
 
 
 class ClusterReq(BaseModel):
     window_seconds: int = 30
     similarity_threshold: float = 0.88
+    only_new: bool = False
 
 
 class EventClusterReq(BaseModel):
@@ -316,6 +319,18 @@ def validate_output_dir(raw: str, dbp: Path, in_place: bool) -> Path:
         bp = Path(b)
         if p == bp or bp in p.parents:
             raise HTTPException(400, f"output_dir is inside a system directory: {p}")
+    try:
+        hidden = p.relative_to(Path.home().resolve()).parts[:1]
+    except ValueError:
+        hidden = ()
+    if hidden and hidden[0].startswith("."):
+        raise HTTPException(400, f"output_dir is inside a hidden home folder: {p}")
+    if _confined() and not _within(p, _browse_roots()):
+        raise HTTPException(403, "output_dir is outside the allowed locations")
+    from ..auth import token_file_path
+    tdir = token_file_path(CuratorConfig.load(dbp).cache_dir).parent.resolve()
+    if p == tdir or (tdir.name == "photocure" and tdir in p.parents):
+        raise HTTPException(400, "output_dir must not be the photocure data directory")
     if not in_place:
         root = _library_root(dbp)
         if root is not None and (p == root or root in p.parents):
@@ -408,12 +423,86 @@ def _item(r: M.ImageRecord, cfg: CuratorConfig | None = None) -> dict:
     return out
 
 
+_QUALITY_ISSUES = ("blurry", "dark", "overexposed")
+_ISSUES = _QUALITY_ISSUES + ("blink", "duplicate")
+
+
+def _issue_clause(issue: str):
+    """Photos with any of the comma-separated problems (blurry, dark, overexposed, blink, duplicate)."""
+    I, Q = M.ImageRecord, M.QualityMetric
+    names = [n.strip() for n in issue.split(",") if n.strip()]
+    bad = [n for n in names if n not in _ISSUES]
+    if not names or bad:
+        raise HTTPException(422, f"issue must be a comma-separated list of {', '.join(_ISSUES)}")
+    flag = {"blurry": Q.is_blurry, "dark": Q.is_too_dark, "overexposed": Q.is_overexposed}
+    clauses = []
+    for n in dict.fromkeys(names):
+        if n in flag:
+            clauses.append(I.id.in_(select(Q.image_id).where(flag[n] == True)))  # noqa: E712
+        elif n == "blink":
+            clauses.append(I.has_blinks == True)  # noqa: E712
+        else:
+            clauses.append(or_(I.is_duplicate == True, I.near_dup_of.is_not(None)))  # noqa: E712
+    return or_(*clauses)
+
+
+def _by_ids(s, ids, stmt_fn=None, chunk: int = 500) -> list:
+    """ImageRecord rows for ids, queried in chunks to stay under SQLite's variable limit."""
+    ids = list(ids)
+    rows: list = []
+    for i in range(0, len(ids), chunk):
+        stmt = select(M.ImageRecord).where(M.ImageRecord.id.in_(ids[i:i + chunk]))
+        rows += s.exec(stmt_fn(stmt) if stmt_fn else stmt).all()
+    return rows
+
+
+def _burst_neighbourhood(s, new_ids, window_s: float) -> tuple[list, list]:
+    """Records and burst groups that clustering the given new photos can change.
+
+    Each new photo's time is widened by the burst window; bursts touching those
+    intervals are pulled in with their own span widened too, until none more join.
+    """
+    I, B = M.ImageRecord, M.BurstGroup
+    new = _by_ids(s, new_ids)
+    wd = timedelta(seconds=window_s)
+    spans = [(r.taken_at - wd, r.taken_at + wd) for r in new if r.taken_at is not None]
+    records = {r.id: r for r in new}
+    bursts: dict[int, M.BurstGroup] = {}
+    while spans:
+        spans.sort()
+        merged = [list(spans[0])]
+        for lo, hi in spans[1:]:
+            if lo <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], hi)
+            else:
+                merged.append([lo, hi])
+        spans = [tuple(m) for m in merged]
+        grew = False
+        for lo, hi in spans:
+            for r in s.exec(select(I).where(I.taken_at >= lo, I.taken_at <= hi)).all():
+                records[r.id] = r
+                if r.burst_id is not None and r.burst_id not in bursts:
+                    b = s.get(B, r.burst_id)
+                    if b is not None:
+                        bursts[b.id] = b
+                        for t in (b.start_time, b.end_time):
+                            if t is not None:
+                                spans.append((t - wd, t + wd))
+                                grew = True
+        if not grew:
+            break
+    for bid in bursts:
+        for r in s.exec(select(I).where(I.burst_id == bid)).all():
+            records[r.id] = r
+    return list(records.values()), list(bursts.values())
+
+
 def _load_items(s, ids: list[int], cfg: CuratorConfig | None = None) -> list[dict]:
     if not ids:
         return []
-    rows = s.exec(select(M.ImageRecord).where(M.ImageRecord.id.in_(ids)).options(
+    rows = _by_ids(s, ids, lambda st: st.options(
         selectinload(M.ImageRecord.quality), selectinload(M.ImageRecord.semantic),
-        selectinload(M.ImageRecord.faces))).all()
+        selectinload(M.ImageRecord.faces)))
     by_id = {r.id: r for r in rows}
     return [_item(by_id[i], cfg) for i in ids if i in by_id]
 
@@ -492,6 +581,7 @@ class ApproveDeleteReq(BaseModel):
 class ApproveDeletesReq(BaseModel):
     ids: list[int] | None = Field(default=None, max_length=5000)  # omitted: every proposed deletion
     approved: bool = True
+    only_new: bool = False  # with no ids: only junk among the photos the last Analyze processed
 
 
 # --------------------------------------------------------------- folder browser
@@ -613,7 +703,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 return JSONResponse({"detail": "missing or invalid token"}, status_code=401)
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
             origin = request.headers.get("origin") or request.headers.get("referer")
-            if origin and not origin_allowed(origin, app.state.allowed_hosts):
+            if origin:
+                if not origin_allowed(origin, app.state.allowed_hosts, host):
+                    return JSONResponse({"detail": "cross-origin request rejected"},
+                                        status_code=403)
+            elif (not request.headers.get("x-pcur-token")
+                  and request.headers.get("sec-fetch-site", "same-origin")
+                  not in ("same-origin", "none")):
                 return JSONResponse({"detail": "cross-origin request rejected"}, status_code=403)
         return await call_next(request)
 
@@ -637,7 +733,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
                "log": [], "result": None, "error": None}
         jobs[job["id"]] = job
         while len(jobs) > 20:
-            jobs.pop(next(iter(jobs)))
+            old = next((k for k, j in list(jobs.items()) if j["status"] not in ("running", "stopping")),
+                       None)
+            if old is None:
+                break
+            jobs.pop(old, None)
 
         def run():
             try:
@@ -761,11 +861,19 @@ def create_app(db_path: str | None = None) -> FastAPI:
             code = (await request.json()).get("code")
         except Exception:
             raise HTTPException(400, "invalid request body")
-        token = app.state.auth_mgr.exchange(code if isinstance(code, str) else None)
+        mgr = app.state.auth_mgr
+        client = request.client.host if request.client else ""
+        if mgr.locked_out(client):
+            raise HTTPException(429, "too many attempts, try again later")
+        token = mgr.exchange(code if isinstance(code, str) else None)
         if not token:
+            mgr.record_failure(client)
             raise HTTPException(401, "invalid or expired code")
         resp = Response(status_code=204)
-        resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="strict", path="/")
+        secure = (request.url.scheme == "https"
+                  or request.headers.get("x-forwarded-proto", "").lower() == "https")
+        resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="strict", path="/",
+                        secure=secure, max_age=COOKIE_MAX_AGE)
         return resp
 
     @app.get("/api/config")
@@ -905,6 +1013,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         min_rating: int | None = Query(None, ge=1, le=5),
         country: str | None = Query(None, min_length=2, max_length=2),
         favorite: bool | None = Query(None),
+        issue: str | None = Query(None, max_length=100),
         date_from: date | None = Query(None),
         date_to: date | None = Query(None),
         sort: Literal["id", "taken"] = Query("id"),
@@ -914,6 +1023,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
         I = M.ImageRecord
         eff = func.coalesce(I.manual_bucket, I.category)
         conds = []
+        if issue:
+            conds.append(_issue_clause(issue))
         if category:
             conds.append(eff == category)
         if categories:
@@ -1075,6 +1186,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
         path = (body.path or load_features(dbp)["watch_path"]).strip()
         if not path:
             raise HTTPException(400, "Choose a folder to watch.")
+        if _confined() and not _within(Path(path).expanduser(), _browse_roots()):
+            raise HTTPException(403, "that folder is outside the allowed locations")
         try:
             status = app.state.watch.start(path)
         except FileNotFoundError as e:
@@ -1224,8 +1337,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
                             .where(I.taken_at.is_not(None))).one()
             favs = s.exec(select(func.count()).select_from(I).where(I.is_favorite == True)).one()  # noqa: E712
             total = s.exec(select(func.count()).select_from(I)).one()
+            issues = {n: int(s.exec(select(func.count()).select_from(I).where(_issue_clause(n))).one())
+                      for n in _ISSUES}
+            issues["any"] = int(s.exec(select(func.count()).select_from(I).where(
+                _issue_clause(",".join(_ISSUES)))).one())
         return {
-            "total": int(total), "favorites": int(favs),
+            "total": int(total), "favorites": int(favs), "issues": issues,
             "cameras": [{"name": n, "count": int(c)} for n, c in cams],
             "ratings": {str(k): int(rated.get(k, 0)) for k in (-1, 0, 1, 2, 3, 4, 5)},
             "countries": [{"code": c, "count": int(n)} for c, n in places],
@@ -1292,12 +1409,17 @@ def create_app(db_path: str | None = None) -> FastAPI:
         """Mark every junk photo for deletion, or exactly the given ids."""
         I = M.ImageRecord
         with exclusive(), get_session(dbp) as s:
-            if body.ids is None:
-                stmt = select(I).where(func.coalesce(I.manual_bucket, I.category).in_(JUNK_VALUES))
+            if body.ids is None and body.only_new:
+                junk = func.coalesce(I.manual_bucket, I.category).in_(JUNK_VALUES)
+                recs = _by_ids(s, getattr(app.state, "last_analyzed_ids", ()),
+                               lambda st: st.where(junk))
+            elif body.ids is None:
+                recs = s.exec(select(I).where(
+                    func.coalesce(I.manual_bucket, I.category).in_(JUNK_VALUES))).all()
             else:
-                stmt = select(I).where(I.id.in_(body.ids))
+                recs = _by_ids(s, body.ids)
             changed = 0
-            for rec in s.exec(stmt).all():
+            for rec in recs:
                 if rec.delete_approved != body.approved:
                     rec.delete_approved = body.approved
                     changed += 1
@@ -1323,7 +1445,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.get("/api/search")
     def search_photos(q: str = Query(..., max_length=300), k: int = Query(60, ge=1, le=300),
-                      duplicates: bool = Query(False)):
+                      duplicates: bool = Query(False), strict: bool = Query(True)):
         from .. import search as search_mod
         text = " ".join(q.split())
         if not text:
@@ -1333,16 +1455,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
             if encoder is None:
                 encoder = app.state.text_encoder = search_mod.default_encoder(run_cfg())
         try:
-            vec = encoder.encode(text)
+            with get_session(dbp) as s:
+                res = search_mod.search_ranked(s, encoder, text, k, include_duplicates=duplicates, strict=strict)
+                items = _load_items(s, [i for i, _ in res.hits], app.state.cfg)
+                score = dict(res.hits)
+                for it in items:
+                    it["score"] = round(float(score.get(it["id"], 0.0)), 4)
         except search_mod.SearchUnavailable as e:
             raise HTTPException(503, str(e))
-        with get_session(dbp) as s:
-            pairs = search_mod.search_embeddings(s, vec, k, include_duplicates=duplicates)
-            items = _load_items(s, [i for i, _ in pairs], app.state.cfg)
-            score = dict(pairs)
-            for it in items:
-                it["score"] = round(float(score.get(it["id"], 0.0)), 4)
-        return {"query": text, "items": items}
+        return {"query": text, "items": items, "strong": res.strong, "more": res.more, "parts": res.parts}
 
     @app.get("/thumbnail/{image_id}")
     def thumbnail(image_id: int, tier: Literal["micro", "medium", "preview"] = Query("micro"),
@@ -1370,7 +1491,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
         try:
             data = render_tier(path, ext or Path(path).suffix, orientation, tier)
         except Exception as e:
-            raise HTTPException(500, f"thumbnail decode failed: {e}")
+            logging.getLogger("photocure.ui").warning("thumbnail decode failed: %s", e)
+            raise HTTPException(500, "thumbnail decode failed")
         tier_dir.mkdir(parents=True, exist_ok=True)
         tmp = cache.with_suffix(f".{uuid.uuid4().hex[:6]}.tmp")
         tmp.write_bytes(data)
@@ -1408,7 +1530,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             }
 
     @app.get("/api/people")
-    def list_people_endpoint(sort: str = "similarity"):
+    def list_people_endpoint(sort: Literal["similarity", "count", "name"] = "similarity"):
         """Known people clusters, arranged by similarity (default), count, or name."""
         from ..people_actions import list_people
         return {"items": list_people(dbp, sort=sort)}
@@ -1441,7 +1563,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             raise HTTPException(e.status, str(e)) from None
 
     @app.post("/api/people/recluster", dependencies=auth)
-    def recluster_people_endpoint(threshold: float = 0.64):
+    def recluster_people_endpoint(threshold: float = Query(0.64, ge=0.0, le=1.0)):
         """Recluster all detected faces with strict identity threshold (default 0.64)."""
         from ..people_actions import recluster_people
         return recluster_people(dbp, threshold=threshold)
@@ -1470,11 +1592,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             if not image_ids:
                 return {"person": {"id": person.id, "name": person.name, "face_count": person.face_count},
                         "photos": []}
-            recs = s.exec(
-                select(M.ImageRecord)
-                .where(M.ImageRecord.id.in_(image_ids))
-                .order_by(M.ImageRecord.taken_at.desc())
-            ).all()
+            recs = sorted(_by_ids(s, image_ids), key=lambda r: (r.taken_at is not None, r.taken_at),
+                          reverse=True)
             photos = []
             for r in recs:
                 face = best.get(r.id)
@@ -1541,7 +1660,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             if not ok:
                 raise RuntimeError("could not encode the crop")
         except Exception as e:
-            raise HTTPException(500, f"face crop failed: {e}")
+            logging.getLogger("photocure.ui").warning("face crop failed: %s", e)
+            raise HTTPException(500, "face crop failed")
         faces_dir.mkdir(parents=True, exist_ok=True)
         tmp = cache.with_suffix(f".{uuid.uuid4().hex[:6]}.tmp")
         tmp.write_bytes(buf.tobytes())
@@ -1597,8 +1717,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         def work(job: dict) -> dict:
             with get_session(dbp) as s:
-                recs = [(r.id, r.filename, r.path, r.target_path, r.orientation) for r in s.exec(
-                    select(M.ImageRecord).where(M.ImageRecord.id.in_(body.ids))).all()]
+                recs = [(r.id, r.filename, r.path, r.target_path, r.orientation)
+                        for r in _by_ids(s, body.ids)]
             try:
                 scanner = PiiScanner(c, backend=detect_for(c))
             except PiiUnavailable as e:
@@ -1647,7 +1767,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 items = [ExportItem(
                     r.id, next((x for x in (r.path, r.target_path) if x and os.path.exists(x)), r.path),
                     r.orientation, r.extension, r.taken_at.isoformat() if r.taken_at else None)
-                    for r in s.exec(select(M.ImageRecord).where(M.ImageRecord.id.in_(body.ids))).all()]
+                    for r in _by_ids(s, body.ids)]
             progress_mgr.start("Clean export", "Writing clean copies", len(items), "Exporting...")
 
             def on_prog(done, total, name):
@@ -1923,6 +2043,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
         finally:
             _BUSY.release()
 
+    def cleanup():
+        app.state.watch.stop()
+        app.state.sidecars.close()  # write anything still waiting out its debounce
+        _pid_file(cfg.port).unlink(missing_ok=True)
+
     @app.post("/api/restart", dependencies=auth)
     def restart_server(force: bool = Query(False)):
         if _LEDGER_WRITING.locked():
@@ -1936,6 +2061,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
         def restart_daemon():
             import sys
             time.sleep(0.25)
+            if _BUSY.locked():
+                progress_mgr.request_stop()  # let a forced restart wind the job down first
+                deadline = time.monotonic() + 15
+                while _BUSY.locked() and time.monotonic() < deadline:
+                    time.sleep(0.2)
+            if _LEDGER_WRITING.locked():
+                return
+            cleanup()
             os.execv(sys.executable, [sys.executable, *_restart_args(sys.orig_argv)])
         threading.Thread(target=restart_daemon, daemon=True).start()
         return {"ok": True, "message": "Server restarting..."}
@@ -1955,6 +2088,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
         target = Path(body.path).expanduser().resolve()
         if not target.exists() or not target.is_dir():
             raise HTTPException(400, f"Directory does not exist: {body.path}")
+        if _confined() and not _within(target, _browse_roots()):
+            raise HTTPException(403, "that folder is outside the allowed locations")
         progress_mgr.start("Scanning", f"Scanning directory: {target.name}", 0,
                            "Discovering image files...")
         from ..scanner.file_scanner import FileScanner
@@ -1995,6 +2130,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         try:
             pipeline = InferencePipeline(c, backend=detect_for(c))
+            if body.reanalyze:
+                with get_session(dbp) as s:
+                    I = M.ImageRecord
+                    upd = {"faces_schema_version": 0}
+                    if pipeline.bs.face_backend == "stub" or not c.face.enabled:
+                        upd["infer_status"] = "pending"  # the stale-face path is off, so redo from scratch
+                    s.exec(sa_update(I).where(I.infer_status == "inferred").values(**upd))
             res = pipeline.run(db_path=dbp, on_progress=on_prog, show_progress=False,
                                cancel_check=progress_mgr.is_stopped)
         except InterruptedError:
@@ -2003,10 +2145,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
         except Exception as e:
             progress_mgr.error(str(e))
             raise
+        app.state.last_analyzed_ids = set(getattr(res, "processed_ids", ()))
         if finish:
             progress_mgr.finish(f"Inference complete: {res.processed} processed, "
                                 f"{res.faces_total} faces in {res.duration_s:.1f}s")
         return {"ok": True, "processed": res.processed, "faces_total": res.faces_total,
+                "new_ids_count": len(app.state.last_analyzed_ids),
                 "quality_computed": res.quality_computed,
                 "semantic_computed": res.semantic_computed, "failures": res.failures,
                 "duration_s": round(res.duration_s, 2)}
@@ -2022,33 +2166,42 @@ def create_app(db_path: str | None = None) -> FastAPI:
         try:
             with get_session(dbp) as s:
                 repo = PhotoRepository(s)
-                records = repo.all_images()
+                new_ids = getattr(app.state, "last_analyzed_ids", None)
+                if body.only_new and new_ids:
+                    records, bursts = _burst_neighbourhood(
+                        s, new_ids, float(c.burst.window_seconds))
+                else:
+                    records, bursts = repo.all_images(), repo.all_bursts()
+                old_best = {b.best_shot_id for b in bursts if b.best_shot_id}
                 for r in records:
                     r.burst_id = None
                     r.is_best_shot = False
                     r.is_alternate = False
-                for b in repo.all_bursts():
+                for b in bursts:
                     repo.s.delete(b)
                 s.flush()
                 results = BurstDetector(c).cluster_records(records)
                 by_id = {r.id: r for r in records}
                 sel = BestShotSelector(c)
-                n = 0
+                n = seq = 0
                 for res in results:
-                    if progress_mgr.is_stopped():
-                        s.commit()
+                    if progress_mgr.is_stopped():  # the session rolls back, keeping the old groups
                         raise InterruptedError("Clustering stopped by user")
                     members = [by_id[m] for m in res.image_ids if m in by_id]
                     if len(members) < c.burst.min_group_size:
                         continue
-                    best_id = sel.pick_best_shot(
+                    kept = [m.id for m in members if m.id in old_best]
+                    best_id = kept[0] if len(kept) == 1 else sel.pick_best_shot(
                         [_candidate_from_record(m) for m in members]).image_id
                     earliest = min(members, key=lambda m: (m.taken_at is None,
                                                            m.taken_at or epoch))
                     stamp = (earliest.taken_at.strftime("%Y%m%d")
                              if earliest.taken_at else "Unknown")
+                    while s.exec(select(M.BurstGroup.id).where(  # kept groups own their names
+                            M.BurstGroup.name == f"Burst_{stamp}_{seq:04d}")).first() is not None:
+                        seq += 1
                     bg = repo.upsert_burst(M.BurstGroup(
-                        name=f"Burst_{stamp}_{n:04d}", image_count=len(members),
+                        name=f"Burst_{stamp}_{seq:04d}", image_count=len(members),
                         best_shot_id=best_id, start_time=earliest.taken_at,
                         end_time=max((m.taken_at for m in members), default=earliest.taken_at),
                     ))
@@ -2057,6 +2210,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                         m.is_best_shot = (m.id == best_id)
                         m.is_alternate = (m.id != best_id)
                     n += 1
+                    seq += 1
         except InterruptedError:
             progress_mgr.stop("Clustering stopped by user")
             return {"ok": False, "stopped": True, "message": "Clustering stopped by user"}
@@ -2097,7 +2251,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 if progress_mgr.is_stopped() or (isinstance(infer_res, dict) and infer_res.get("stopped")):
                     progress_mgr.stop("Ingest stopped by user")
                     return {"ok": False, "stopped": True, "message": "Ingest stopped by user"}
-                cluster_res = do_cluster(c, ClusterReq(), finish=False)
+                cluster_res = do_cluster(c, ClusterReq(only_new=bool(infer_res.get("new_ids_count"))),
+                                         finish=False)
                 if progress_mgr.is_stopped() or (isinstance(cluster_res, dict) and cluster_res.get("stopped")):
                     progress_mgr.stop("Ingest stopped by user")
                     return {"ok": False, "stopped": True, "message": "Ingest stopped by user"}
@@ -2113,7 +2268,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.post("/api/stop", dependencies=auth)
     def stop_current_task():
         progress_mgr.request_stop()
-        for j in jobs.values():
+        for j in list(jobs.values()):
             if j.get("status") == "running":
                 j["status"] = "stopping"
                 jlog(j, "stop requested by user", "warn")
@@ -2439,22 +2594,21 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.on_event("shutdown")
     async def shutdown_event():
-        app.state.watch.stop()
-        app.state.sidecars.close()  # write anything still waiting out its debounce
+        cleanup()
         encoder = getattr(app.state, "text_encoder", None)
         if encoder is not None:
             encoder.close()
-        _pid_file(cfg.port).unlink(missing_ok=True)
+
+    try:
+        _stamp = max(int(p.stat().st_mtime) for p in STATIC_DIR.iterdir() if p.suffix in (".js", ".mjs", ".css"))
+    except (OSError, ValueError):
+        _stamp = 0
+    _asset_v = f"{__version__}.{_stamp}" if _stamp else __version__
 
     @app.get("/", response_class=HTMLResponse)
     def index():
         html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
-        try:
-            stamp = max(int(p.stat().st_mtime) for p in STATIC_DIR.iterdir() if p.suffix in (".js", ".mjs", ".css"))
-        except (OSError, ValueError):
-            stamp = 0
-        asset_v = f"{__version__}.{stamp}" if stamp else __version__
-        html = html.replace("?v={{VERSION}}", f"?v={asset_v}")
+        html = html.replace("?v={{VERSION}}", f"?v={_asset_v}")
         html = html.replace(TOKEN_PLACEHOLDER, "").replace("{{VERSION}}", __version__)
         return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 

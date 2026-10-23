@@ -34,10 +34,16 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def cluster_events(session, gap_hours: float = 2.0, gps_km: float | None = None,
                    min_images: int = 2) -> int:
     """Rebuild every :class:`EventGroup`; returns the number of events written."""
+    # User renames survive the rebuild: label of each old event that is not the default.
+    custom_labels: dict[int, str] = {}
     for g in session.exec(sselect(EventGroup)).all():
+        if g.label and g.label != f"Event{g.id}":
+            custom_labels[g.id] = g.label
         session.delete(g)
+    old_event_of: dict[int, int] = {}
     for img in session.exec(
             sselect(ImageRecord).where(col(ImageRecord.event_id).is_not(None))).all():
+        old_event_of[img.id] = img.event_id
         img.event_id = None
     session.flush()
 
@@ -72,6 +78,7 @@ def cluster_events(session, gap_hours: float = 2.0, gps_km: float | None = None,
         groups.append(cur)
 
     written = 0
+    used_labels: set[int] = set()
     for members in groups:
         if len(members) < max(1, min_images):
             continue
@@ -80,6 +87,15 @@ def cluster_events(session, gap_hours: float = 2.0, gps_km: float | None = None,
         session.add(ev)
         session.flush()
         ev.label = f"Event{ev.id}"
+        overlap: dict[int, int] = {}
+        for m in members:
+            old_id = old_event_of.get(m.id)
+            if old_id in custom_labels and old_id not in used_labels:
+                overlap[old_id] = overlap.get(old_id, 0) + 1
+        if overlap:
+            best = max(overlap, key=lambda k: overlap[k])
+            used_labels.add(best)
+            ev.label = custom_labels[best]
         for m in members:
             m.event_id = ev.id
         written += 1

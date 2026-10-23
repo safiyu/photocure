@@ -55,6 +55,8 @@ class SemanticEngine:
                  backend: BackendState | None = None):
         self.cfg = config or CuratorConfig()
         self.bs = backend or detect_backend(self.cfg)
+        # A transient load failure only downgrades the previous run; try the real model again.
+        self.bs.retry_downgraded()
         self._model = None
         self._preprocess = None
         self._tokenize = None
@@ -106,7 +108,7 @@ class SemanticEngine:
                      quick_gelu)
             return True
         except Exception as e:
-            log.warning("OpenCLIP load failed (%s)", e.__class__.__name__)
+            log.warning("OpenCLIP load failed (%s: %s)", e.__class__.__name__, e)
             return False
 
     def _encode_texts(self) -> None:

@@ -185,6 +185,7 @@ def test_api_search_returns_ranked_items_with_scores(env):
     assert [it["id"] for it in items][:2] == [env.ids[2], env.ids[1]]
     assert items[0]["score"] > items[1]["score"] > items[2]["score"]
     assert r.json()["query"] == "anything"
+    assert {"strong", "more", "parts"} <= set(r.json())
 
 
 def test_api_search_validates_input(env):

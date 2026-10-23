@@ -1,56 +1,49 @@
-# generate_favicons.py
-"""Render the logo SVG into a multi-size favicon set."""
-from pathlib import Path
+"""Render the logo SVG into the favicon and app icon set (needs resvg-py or cairosvg)."""
 import io
+from pathlib import Path
 
 from PIL import Image
 
-# Adjust these paths if you move the logo or static folder.
-SVG_FILE = Path("photocure/ui/static/logo.svg")
-OUT_DIR = Path("photocure/ui/static")  # static assets folder
+ROOT = Path(__file__).resolve().parent
+OUT_DIR = ROOT / "photocure" / "ui" / "static"
+SVG_FILE = OUT_DIR / "logo.svg"
+MASTER = 1024
 
-def render_svg_to_pil(svg_path: Path, size: int = 1024) -> Image.Image:
-    """Render an SVG to a square RGBA Pillow image."""
+
+def render_svg(svg_path: Path, height: int) -> Image.Image:
     svg_bytes = svg_path.read_bytes()
-
-    # Try the lightweight, pure-Python renderer first.
     try:
         import resvg_py
-        png_bytes = resvg_py.svg_to_bytes(svg_string=svg_bytes.decode("utf-8"), width=size, height=size)
-        return Image.open(io.BytesIO(png_bytes)).convert("RGBA")
-    except Exception:
-        # Fallback to cairosvg if resvg-py isn’t available.
+        png = resvg_py.svg_to_bytes(svg_string=svg_bytes.decode("utf-8"), height=height)
+    except ImportError:
         import cairosvg
-        png_bytes = cairosvg.svg2png(bytestring=svg_bytes, output_width=size, output_height=size)
-        return Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+        png = cairosvg.svg2png(bytestring=svg_bytes, output_height=height)
+    return Image.open(io.BytesIO(png)).convert("RGBA")
 
-def save_multisize_ico(master: Image.Image, path: Path) -> None:
-    sizes = [(16, 16), (32, 32), (48, 48), (64, 64)]
-    master.save(path, format="ICO", sizes=sizes)
+
+def square(img: Image.Image, size: int, background=(0, 0, 0, 0), pad: float = 0.0) -> Image.Image:
+    """Fit img inside a size x size canvas without distorting it."""
+    inner = int(size * (1 - 2 * pad))
+    scale = min(inner / img.width, inner / img.height)
+    fitted = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))), Image.LANCZOS)
+    canvas = Image.new("RGBA", (size, size), background)
+    canvas.alpha_composite(fitted, ((size - fitted.width) // 2, (size - fitted.height) // 2))
+    return canvas
+
 
 def main() -> None:
-    master = render_svg_to_pil(SVG_FILE, size=1024)
+    logo = render_svg(SVG_FILE, MASTER)
+    master = square(logo, MASTER)
 
-    # 1️⃣ Favicon (ICO with several sizes)
-    save_multisize_ico(master, OUT_DIR / "favicon.ico")
+    master.save(OUT_DIR / "favicon.ico", format="ICO", sizes=[(16, 16), (32, 32), (48, 48), (64, 64)])
 
-    # 2️⃣ Apple touch icon – 180 × 180 (PNG)
-    master.resize((180, 180), Image.LANCZOS).save(
-        OUT_DIR / "apple-touch-icon.png", format="PNG"
-    )
+    # iOS fills transparency with black, so the touch icon is a flat white tile
+    touch = square(logo, 180, background=(255, 255, 255, 255), pad=0.12).convert("RGB")
+    touch.save(OUT_DIR / "apple-touch-icon.png", format="PNG")
 
-    # 3️⃣ PWA icons – 192 × 192 and 512 × 512 (PNG)
-    master.resize((192, 192), Image.LANCZOS).save(
-        OUT_DIR / "icon-192.png", format="PNG"
-    )
-    master.resize((512, 512), Image.LANCZOS).save(
-        OUT_DIR / "icon-512.png", format="PNG"
-    )
+    for size in (192, 512):
+        master.resize((size, size), Image.LANCZOS).save(OUT_DIR / f"icon-{size}.png", format="PNG")
 
-    print(f"Created {OUT_DIR / 'favicon.ico'} (16‑64 px)")
-    print(f"Created {OUT_DIR / 'apple-touch-icon.png'} (180 px)")
-    print(f"Created {OUT_DIR / 'icon-192.png'} (192 px)")
-    print(f"Created {OUT_DIR / 'icon-512.png'} (512 px)")
 
 if __name__ == "__main__":
     main()

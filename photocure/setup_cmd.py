@@ -247,9 +247,16 @@ def verify_model(runner: Runner = subprocess.run, python: str | None = None) -> 
 def pick_port(host: str, port: int, tries: int = 20) -> int:
     """First free port at or above ``port`` (so a running server does not block setup)."""
     bind = "127.0.0.1" if host in ("0.0.0.0", "") else host
+    try:
+        family = socket.getaddrinfo(bind, None, type=socket.SOCK_STREAM)[0][0]
+    except OSError:
+        family = socket.AF_INET
     for p in range(port, port + tries):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        with socket.socket(family, socket.SOCK_STREAM) as s:
+            if os.name == "nt":  # SO_REUSEADDR would let bind succeed on a busy port here
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind((bind, p))
                 return p

@@ -290,7 +290,7 @@ try {
   });
 
   await scenario("the grid lays out cleanly after a resize", async () => {
-    await sleep(250);
+    await sleep(900);
     await settle();
     const layout = () => page.eval(`(() => {
       const cs = [...document.querySelectorAll('#grid .vg-window .card')].map((c) => c.getBoundingClientRect());
@@ -313,6 +313,7 @@ try {
       throw new Error(e.message + " " + JSON.stringify(d));
     }
     await settle();
+    await page.waitFor("!document.querySelector('#grid').classList.contains('anim-in')", 4000, "entrance fade finished");
     const narrow = await layout();
     check(narrow.ok && narrow.widths === 1, "narrow layout overlaps or has uneven cards");
     check(narrow.cols < wide.cols && narrow.n <= 100, `columns ${wide.cols}->${narrow.cols}, ${narrow.n} cards`);
@@ -359,6 +360,33 @@ try {
     const text = await page.eval("document.querySelector('#facepanel figcaption').textContent");
     check(/Eyes/.test(text), "no eye state shown: " + text);
     await shot("10-faces");
+    await press("Escape");
+    await page.waitFor("document.querySelector('#facepanel').hidden", 5000, "face panel closes with Escape");
+  });
+
+  await scenario("burst selection bar protects the best shot and Delete the other frames can be undone", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"bursts\"]').click()");
+    await page.waitFor("document.querySelectorAll('#burstdetail .card').length === 4", 10000, "burst photos");
+    const marked = async () => (await api(`/api/burst/${meta.burst_id}`)).members.filter((m) => m.delete_approved).length;
+    const bestMarked = async () => (await api(`/api/burst/${meta.burst_id}`)).members.some((m) => m.is_best_shot && m.delete_approved);
+    const before = await marked();
+    const keepId = await page.eval("Number(document.querySelector('#burstdetail .card-wrap:not(.is-best) .card').dataset.id)");
+    await page.eval(`document.querySelector('#burstdetail .card[data-id="${keepId}"] [data-pick]').click()`);
+    await page.waitFor("!document.querySelector('#bulkbar').hidden", 5000, "bar shows in a burst");
+    check(await page.eval("document.getElementById('bulkbar').classList.contains('burst-ctx')"), "bar did not switch to the burst context");
+    check((await page.eval("document.getElementById('bulk-count').textContent")) === "1 frame to keep", "burst count is wrong");
+    check((await page.eval("document.getElementById('bulk-sub').textContent")).includes("best shot kept"), "summary does not say the best shot is kept");
+    const rest = Number(await page.eval("document.getElementById('bulk-rest-n').textContent"));
+    check(rest >= 1, "nothing offered for deletion");
+    await shot("13-burst-selection-bar");
+    await page.eval("document.getElementById('bulk-rest').click()");
+    await page.waitFor("!!document.querySelector('#toasts .toast-action')", 8000, "Undo toast appears");
+    check((await marked()) === before + rest, "Delete the other frames marked the wrong number");
+    check(!(await bestMarked()), "the best shot was marked for delete");
+    await page.eval("document.querySelector('#toasts .toast-action').click()");
+    let after = await marked();
+    for (let i = 0; i < 20 && after !== before; i++) { await sleep(200); after = await marked(); }
+    check(after === before, "Undo left delete marks behind");
   });
 
   await scenario("clicking a card's category label moves that photo, or the whole selection, from the grid", async () => {
@@ -405,6 +433,46 @@ try {
     await page.waitFor(`document.querySelector('#grid .card[data-id="${b}"] .catline .tag') && document.querySelector('#grid .card[data-id="${c}"] .catline .tag')`, 8000, "both selected photos edited");
     await page.waitFor("document.querySelector('#bulkbar').hidden", 2000, "selection is cleared");
     check(!(await menuOpen()), "picker is still open");
+  });
+
+  await scenario("the selection bar summarises the selection, marks junk, and Undo puts it back", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click()");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length >= 5", 15000, "category cards");
+    await settle();
+    const junkTotal = async () => (await api("/api/images?category=accidental&limit=1")).total;
+    const before = await junkTotal();
+    const ids = await page.eval("[...document.querySelectorAll('#grid .vg-window .card')].filter((c) => (c.querySelector('.catpick .t') || {}).textContent !== 'Accidental').slice(0, 2).map((c) => Number(c.dataset.id))");
+    check(ids.length === 2, "need two photos outside the Accidental bucket");
+    for (const id of ids) await page.eval(`document.querySelector('#grid .card[data-id="${id}"] [data-pick]').click()`);
+    await page.waitFor("!document.querySelector('#bulkbar').hidden", 5000, "bulk bar shows");
+    check((await page.eval("document.getElementById('bulk-count').textContent")) === "2 selected", "count is wrong");
+    check((await page.eval("document.getElementById('bulk-sub').textContent")).length > 0, "no summary line under the count");
+    await shot("12-selection-bar");
+    await page.eval("document.getElementById('bulk-junk').click()");
+    await page.waitFor("!!document.querySelector('#toasts .toast-action')", 8000, "Undo toast appears");
+    check((await junkTotal()) === before + 2, "Mark junk did not move both photos");
+    await page.eval("document.querySelector('#toasts .toast-action').click()");
+    await page.waitFor("!document.querySelector('#toasts .toast-action')", 8000, "Undo toast closes");
+    await page.waitFor("true", 1000);
+    let after = await junkTotal();
+    for (let i = 0; i < 20 && after !== before; i++) { await sleep(200); after = await junkTotal(); }
+    check(after === before, `Undo left ${after - before} photos in junk`);
+  });
+
+  await scenario("the Quality filter finds problem photos and can be reset", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click()");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length >= 3", 15000, "category cards");
+    check(await page.eval("document.querySelectorAll('#f-issue option').length >= 6"), "Quality filter has no problem options");
+    check(await page.eval("[...document.querySelectorAll('#f-issue option')].slice(1).every((o) => /\\(\\d/.test(o.textContent))"), "options do not show counts");
+    await page.eval("(() => { const s = document.getElementById('f-issue'); s.value = s.options[1].value; s.dispatchEvent(new Event('change')); })()");
+    await page.waitFor("!document.querySelector('#reset-filters').hidden", 5000, "reset button appears for the Quality filter");
+    const val = await page.eval("document.getElementById('f-issue').value");
+    const want = (await api("/api/images?issue=" + encodeURIComponent(val) + "&limit=1")).total;
+    await page.waitFor("document.getElementById('grid').getAttribute('aria-busy') !== 'true'", 8000, "grid reloads").catch(() => {});
+    await settle();
+    if (want === 0) check(await page.eval("document.querySelectorAll('#grid .vg-window .card').length === 0"), "photos still shown although none match");
+    await page.eval("document.querySelector('#reset-filters').click()");
+    await page.waitFor("document.querySelector('#reset-filters').hidden && document.getElementById('f-issue').value === ''", 5000, "filter resets");
   });
 
   await scenario("lightbox focus restoration and focus trap", async () => {
@@ -830,7 +898,7 @@ try {
     await page.eval("document.querySelector('#sidebar-version').click(); true");
     await page.waitFor("document.querySelector('.tab.active').dataset.tab === 'settings'", 5000, "settings opens");
     await page.waitFor("(() => { const r = document.querySelector('#sect-about').getBoundingClientRect(); return r.top < innerHeight - 100 && r.bottom > 0 && window.scrollY > 0; })()", 5000, "About scrolled into view");
-    check(await page.eval("document.querySelector('#about-card .about-name').textContent === 'Photocure' && /^v/.test(document.querySelector('#about-card .about-ver').textContent)"), "About card is not rendered");
+    check(await page.eval("document.querySelector('#about-card .about-name').textContent === 'Photocure Studio' && /^v/.test(document.querySelector('#about-card .about-ver').textContent)"), "About card is not rendered");
   });
 
   await scenario("empty states sit near the vertical middle of the page", async () => {
@@ -868,7 +936,7 @@ try {
     check(JSON.stringify(labels) === JSON.stringify([...labels].sort((a, b) => a.localeCompare(b))), "categories are not alphabetical: " + labels.join(", "));
     check((await page.eval("document.querySelector('#catfilter option').textContent")) === "All categories", "All categories must stay first");
     await page.eval("document.querySelector('#catfilter').dispatchEvent(new Event('change')); true");
-    await page.waitFor("[...document.querySelectorAll('#grid .vg-window .card')].some((c) => getComputedStyle(c).animationName === 'card-in')", 4000, "cards fade in after the filter changed");
+    await page.waitFor("[...document.querySelectorAll('#grid .vg-window .card')].some((c) => getComputedStyle(c).animationName === 'mo-rise')", 4000, "cards fade in after the filter changed");
   });
 
   await scenario("toolbar and sliders stay put whether or not the page scrolls", async () => {

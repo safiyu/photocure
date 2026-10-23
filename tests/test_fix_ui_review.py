@@ -67,7 +67,7 @@ def test_reset_removes_webp_thumbnail_pyramid(app, tmp_path):
     for p in [*mine, other]:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"x")
-    assert c.post("/api/reset", headers={"Origin": "http://127.0.0.1"}).status_code == 200
+    assert c.post("/api/reset", headers={"Origin": "http://testserver"}).status_code == 200
     assert not any(p.exists() for p in mine)
     assert other.exists()
 
@@ -90,7 +90,7 @@ def test_learn_job_is_done_even_if_stop_pressed(app, monkeypatch):
         return {"updated": 2, "moved_out_of_uncertain": 1}
 
     monkeypatch.setattr(Planner, "learn_from_corrections", slow_learn, raising=False)
-    c = TestClient(app, headers={"X-PCUR-Token": app.state.token, "Origin": "http://127.0.0.1"})
+    c = TestClient(app, headers={"X-PCUR-Token": app.state.token, "Origin": "http://testserver"})
     job_id = c.post("/api/learn").json()["job_id"]
     c.post("/api/stop")
     j = _wait(c, job_id)

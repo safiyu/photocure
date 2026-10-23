@@ -351,9 +351,16 @@ export class VirtualGrid {
     this.inflight.clear();
     this.items.splice(idx, 1);
     this.total = Math.max(0, this.total - 1);
+    const active = this.win.document && this.win.document.activeElement;
+    const hadFocus = !!(active && active.dataset && active.dataset.idx !== undefined
+      && [...this.cards.values()].includes(active));
     this._clearCards();
     this.onChange(this);
     this.update();
+    if (hadFocus) {  // the removed card took focus with it; keep keyboard navigation going
+      const next = this.cards.get(Math.min(idx, this.total - 1));
+      if (next && typeof next.focus === "function") next.focus({ preventScroll: true });
+    }
   }
 
   setCursor(id) { this.cursorId = id; this.applyCursor(); }

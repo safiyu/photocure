@@ -113,8 +113,18 @@ class BackendState:
     torch_threads: int = 0
     decode_workers: int = 0
     probes: dict = field(default_factory=dict)
+    # Detected backends; engines restore these after a transient load failure downgraded them.
+    face_wanted: str = ""
+    semantic_wanted: str = ""
 
     def __post_init__(self) -> None:
+        self.face_wanted = self.face_wanted or self.face_backend
+        self.semantic_wanted = self.semantic_wanted or self.semantic_backend
+
+    def retry_downgraded(self) -> None:
+        """Undo a downgrade to stub caused by a failed model load, so it is tried again."""
+        self.face_backend = self.face_wanted
+        self.semantic_backend = self.semantic_wanted
         if not self.accelerator:
             self.accelerator = self.device if self.device in _DEVICE_ORDER else (
                 "cpu" if self.device == "cpu" else self.device)
@@ -404,6 +414,8 @@ def detect_backend(config: CuratorConfig | None = None) -> BackendState:
         index = int(getattr(ds, "device_index", 0) or 0)
         probes = {p["id"]: p for p in list_accelerators(torch, index)}
         requested = (ds.device or "auto").strip().lower()
+        if _force_env() in ("cpu", "cuda"):
+            requested = _force_env()  # falls back to cpu when cuda is missing
         accelerator, fallback_reason = _resolve_accelerator(requested, probes)
         device = _device_string(accelerator, torch)
         _apply_device_index(accelerator, torch, index)

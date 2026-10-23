@@ -7,6 +7,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 import math
 from math import ceil
 
@@ -26,6 +27,7 @@ class FaceObs:
     person_id: int | None = None
     face_id: int | None = None
     is_blink: bool | None = None
+    emb: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,64 @@ def _bridge(groups: list[dict[int, FaceObs]], max_gap: int = 2,
     return out
 
 
+# Same-person embedding similarity across frames of one burst: at or above SAME is one person,
+# at or below DIFFERENT is two people, in between falls back to position.
+_SAME = 0.50
+_DIFFERENT = 0.35
+
+
+def _emb_of(face) -> tuple[float, ...] | None:
+    raw = getattr(face, "embedding_json", None)
+    if not raw:
+        return None
+    try:
+        v = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return tuple(float(x) for x in v) if isinstance(v, list) and v else None
+
+
+def _cos(a: Sequence[float], b: Sequence[float]) -> float | None:
+    if len(a) != len(b):
+        return None
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(x * x for x in b))
+    if na < 1e-9 or nb < 1e-9:
+        return None
+    return sum(x * y for x, y in zip(a, b)) / (na * nb)
+
+
+def _verdict(sim: float | None) -> bool | None:
+    if sim is None:
+        return None
+    if sim >= _SAME:
+        return True
+    return False if sim <= _DIFFERENT else None
+
+
+def _same_person(a: FaceObs, b: FaceObs) -> bool | None:
+    """True when two faces are the same person, False when they are not, None when unknown."""
+    if a.person_id is not None and b.person_id is not None:
+        return a.person_id == b.person_id
+    if a.emb is not None and b.emb is not None:
+        return _verdict(_cos(a.emb, b.emb))
+    return None
+
+
+def _track_same_person(tr1: dict[int, FaceObs], tr2: dict[int, FaceObs]) -> bool | None:
+    pids1 = {f.person_id for f in tr1.values() if f.person_id is not None}
+    pids2 = {f.person_id for f in tr2.values() if f.person_id is not None}
+    if pids1 and pids2:
+        return bool(pids1 & pids2)
+    e1 = [f.emb for f in tr1.values() if f.emb is not None]
+    e2 = [f.emb for f in tr2.values() if f.emb is not None]
+    if e1 and e2:
+        mean1 = [sum(c) / len(e1) for c in zip(*e1)]
+        mean2 = [sum(c) / len(e2) for c in zip(*e2)]
+        return _verdict(_cos(mean1, mean2))
+    return None
+
+
 def _subjects(frames: Sequence[Sequence[FaceObs]]) -> list[dict[int, FaceObs]]:
     """Link faces into subjects: tracked by spatial position, scale, and overlap, bridged across gaps."""
     tracks: list[dict[int, FaceObs]] = []
@@ -102,12 +162,17 @@ def _subjects(frames: Sequence[Sequence[FaceObs]]) -> list[dict[int, FaceObs]]:
                 w2, h2 = max(0.01, b2[2] - b2[0]), max(0.01, b2[3] - b2[1])
 
                 d = math.hypot(cx1 - cx2, cy1 - cy2)
+                same = _same_person(last_f, f2)
+                if same is False:
+                    continue  # known to be someone else, however close they stand
+                if same is True:
+                    cand_matches.append((0.02 * d, ti, fi))  # identity wins; position breaks ties
+                    continue
                 rw = min(w1, w2) / max(w1, w2)
                 rh = min(h1, h2) / max(h1, h2)
                 ov = iou(b1, b2)
 
-                pid_bonus = 0.3 if (last_f.person_id is not None and last_f.person_id == f2.person_id) else 0.0
-                cost = 1.8 * d + 0.4 * (1.0 - (rw + rh) / 2.0) - 0.5 * ov + (gap - 1) * 0.04 - pid_bonus
+                cost = 1.8 * d + 0.4 * (1.0 - (rw + rh) / 2.0) - 0.5 * ov + (gap - 1) * 0.04
                 if cost < 0.48:
                     cand_matches.append((cost, ti, fi))
 
@@ -137,9 +202,10 @@ def _subjects(frames: Sequence[Sequence[FaceObs]]) -> list[dict[int, FaceObs]]:
                 if set(tr1.keys()) & set(tr2.keys()):
                     continue
 
-                pids1 = {f.person_id for f in tr1.values() if f.person_id is not None}
-                pids2 = {f.person_id for f in tr2.values() if f.person_id is not None}
-                if pids1 and pids2 and (pids1 & pids2):
+                same = _track_same_person(tr1, tr2)
+                if same is False:
+                    continue
+                if same is True:
                     best_merge = (i, j)
                     best_cost = -1.0
                     break
@@ -256,7 +322,7 @@ def group_matrix_payload(members) -> dict:
             faces.append(FaceObs(box=tuple(float(v) for v in box) if has_box else None,
                                  eye_status=f.eye_status, eye_closed=f.eye_closed_score,
                                  sharpness=f.face_sharpness, person_id=f.person_id,
-                                 face_id=f.id))
+                                 emb=_emb_of(f), face_id=f.id))
         frames.append(faces)
     tiebreak = [float(r.quality.sharpness_norm) if r.quality is not None else 0.0 for r in ordered]
     m = score_group(frames, tiebreak=tiebreak)
@@ -294,7 +360,7 @@ def burst_face_matrix(members) -> dict:
             faces.append(FaceObs(box=tuple(float(v) for v in box) if has_box else None,
                                  eye_status=f.eye_status, eye_closed=f.eye_closed_score,
                                  sharpness=f.face_sharpness, person_id=f.person_id,
-                                 face_id=f.id,
+                                 emb=_emb_of(f), face_id=f.id,
                                  is_blink=bool(getattr(f, "is_blink", False)) or (f.eye_status == "closed")))
         frames.append(faces)
 

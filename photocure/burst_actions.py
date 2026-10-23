@@ -88,13 +88,16 @@ def clean_export_selection(cfg: CuratorConfig, ids: list[int], output_dir: str, 
     except Exception as e:  # the web helper raises HTTPException
         raise ActionError(str(getattr(e, "detail", e))) from None
     with get_session(cfg.db_path) as s:
-        rows = [(r.id, r.filename, r.path, r.target_path, r.orientation, r.extension,
-                 r.taken_at.isoformat() if r.taken_at else None) for r in s.exec(
-            select(M.ImageRecord).where(col(M.ImageRecord.id).in_(ids))).all()]
+        rows = []
+        for i in range(0, len(ids), 500):  # SQLite caps bound variables per statement
+            rows += [(r.id, r.filename, r.path, r.target_path, r.orientation, r.extension,
+                      r.taken_at.isoformat() if r.taken_at else None) for r in s.exec(
+                select(M.ImageRecord).where(col(M.ImageRecord.id).in_(ids[i:i + 500]))).all()]
     if not rows:
         raise ActionError("none of those photos exist", 404)
     findings: dict = {}
     flagged: list[dict] = []
+    scan_skipped: list[dict] = []
     if policy != "include":
         try:
             scanner = PiiScanner(cfg, backend=backend)
@@ -105,7 +108,12 @@ def clean_export_selection(cfg: CuratorConfig, ids: list[int], output_dir: str, 
                 src = _existing(path, target)
                 if src is None:
                     continue
-                f = scanner.scan_image(iid, load_image(src, max_side=1600, orientation=orient).bgr)
+                try:
+                    f = scanner.scan_image(
+                        iid, load_image(src, max_side=1600, orientation=orient).bgr)
+                except Exception as e:
+                    scan_skipped.append({"id": iid, "filename": name, "error": str(e)[:200]})
+                    continue
                 if f is not None:
                     findings[iid] = f
                     flagged.append({"id": iid, "filename": name, "labels": f.labels})
@@ -116,4 +124,5 @@ def clean_export_selection(cfg: CuratorConfig, ids: list[int], output_dir: str, 
     res = export_bundle(items, root, findings=findings, policy=policy, html=html, rename=rename)
     return {"ok": not res.failures, "folder": str(res.folder), "exported": res.exported,
             "flagged": res.flagged, "blurred": res.blurred, "skipped_flagged": res.skipped_flagged,
-            "flagged_photos": flagged, "failures": res.failures[:20]}
+            "flagged_photos": flagged, "failures": res.failures[:20],
+            "scan_skipped": scan_skipped[:20]}

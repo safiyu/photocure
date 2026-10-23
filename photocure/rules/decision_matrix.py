@@ -9,7 +9,9 @@ Implements spec section 4.B (and the milestone-4 routing rules). Precedence:
        (never for burst members, the burst logic owns those)
     5. Pathological quality (dark/blurry) -> Junk_Review/Accidental/
        (skipped when CLIP is confident the frame is screen content, since
-       flat dark UI screenshots and documents are not accidents)
+       flat dark UI screenshots and documents are not accidents; a confident
+       face also protects a photo from the blurry and overexposed verdicts, so
+       a soft photo of a person is flagged for review, not junked)
     6. Human face (conf > 0.65)           -> People/YYYY/MM/DD/
     7. Low-confidence / close-call CLIP   -> Uncertain_Review/
        (confidence is judged per group of look-alike classes, see taxonomy)
@@ -43,6 +45,11 @@ class Decision:
 
 
 SCREEN_GROUP = "screen"
+
+# Confident classes that win over a detected face: avatars and thumbnails inside screenshots,
+# graphics and documents are not people photos. Slides, whiteboards and labels are photos of
+# real places, so a presenter's face still routes to People.
+FACE_OVERRIDDEN_BY = frozenset({"screenshot", "document", "graphic", "illustration"})
 
 
 def _label(name: str) -> str:
@@ -202,17 +209,27 @@ class DecisionMatrix:
                       if sem is not None and sem.top1_category else None)
         confident_screen = bool(assessment and assessment["confident"]
                                 and assessment["group"] == SCREEN_GROUP)
+        confident_flat = bool(confident_screen and assessment["top1"] in FACE_OVERRIDDEN_BY)
+
+        # Face routing needs the best face before the quality gate so it can protect people.
+        best_face = max(faces, key=lambda f: f.confidence, default=None)
+        has_face = best_face is not None and best_face.confidence > \
+            self.tax.face_confidence_min
 
         # 5. Pathological quality -> accidental junk (not for screen content).
         if (self.cfg.quality.force_review_quality and q is not None
                 and not confident_screen):
-            if q.is_too_dark or q.is_overexposed or q.is_blurry:
+            protected = has_face and not confident_flat
+            bad_dark = q.is_too_dark
+            bad_over = q.is_overexposed and not protected
+            bad_blur = q.is_blurry and not protected
+            if bad_dark or bad_over or bad_blur:
                 which = []
-                if q.is_too_dark:
+                if bad_dark:
                     which.append("too_dark")
-                if q.is_overexposed:
+                if bad_over:
                     which.append("overexposed")
-                if q.is_blurry:
+                if bad_blur:
                     which.append("blurry")
                 return Decision(
                     CategoryType.ACCIDENTAL,
@@ -222,11 +239,8 @@ class DecisionMatrix:
                 )
 
         # 4. Face routing (highest-confidence face).
-        best_face = max(faces, key=lambda f: f.confidence, default=None)
-        has_face = best_face is not None and best_face.confidence > \
-            self.tax.face_confidence_min
         # A confident screenshot can contain avatars or thumbnails; the face must not win.
-        if has_face and not confident_screen:
+        if has_face and not confident_flat:
             return Decision(
                 CategoryType.PEOPLE,
                 reason=f"face conf {best_face.confidence:.2f}",
