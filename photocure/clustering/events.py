@@ -48,7 +48,9 @@ def cluster_events(session, gap_hours: float = 2.0, gps_km: float | None = None,
     session.flush()
 
     rows = [r for r in session.exec(
-        sselect(ImageRecord).where(col(ImageRecord.taken_at).is_not(None))
+        sselect(ImageRecord).where(
+            ImageRecord.scan_status != "missing",
+            col(ImageRecord.taken_at).is_not(None))
     ).all() if not r.is_duplicate
         and r.taken_at_source not in UNRELIABLE_TIME_SOURCES]
     rows.sort(key=lambda r: (_ts(r.taken_at), r.id or 0))

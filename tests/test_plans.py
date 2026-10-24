@@ -355,3 +355,34 @@ def test_marked_burst_alternate_is_trashed_unmarked_stays(tmp_path):
     assert list(trash.rglob(_src(w, 1).name))
     assert not list(trash.rglob(_src(w, 2).name)) and not list(trash.rglob(_src(w, 0).name))
     assert rep.unapproved_junk == 0
+
+
+def test_trashed_photo_removed_from_index_and_undo_restores_it(tmp_path):
+    w = build_world(tmp_path, n=3)
+    set_bucket(w, w.ids[0], "graphic")
+    approve_delete(w, w.ids[0])
+    set_bucket(w, w.ids[1], "food")
+    p = w.planner.build_plan(organize_root=w.out, operation="move")
+    rep = w.planner.execute_plan(p, trash=True)
+
+    # Trashed photo is marked missing/trashed and excluded from stats and subsequent plans
+    trashed = get_img(w, w.ids[0])
+    assert trashed.scan_status == "missing" and trashed.route_status == "trashed"
+    with get_session(w.db) as s:
+        assert PhotoRepository(s).stats()["total_images"] == 2
+        assert PhotoRepository(s).count_category("graphic") == 0
+
+    p2 = w.planner.build_plan(organize_root=w.out, operation="move", persist=False)
+    assert p2.total == 2
+    assert w.ids[0] not in {a.image_id for a in p2.actions}
+
+    # Undo restores the trashed photo to disk and back into the active index
+    undo = w.planner.undo(rep.transaction_id)
+    assert undo.reversed == 3
+    restored = get_img(w, w.ids[0])
+    assert restored.scan_status == "scanned" and restored.route_status == "unrouted"
+    assert restored.path == str(_src(w, 0)) and _src(w, 0).exists()
+    with get_session(w.db) as s:
+        assert PhotoRepository(s).stats()["total_images"] == 3
+        assert PhotoRepository(s).count_category("graphic") == 1
+

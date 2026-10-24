@@ -78,4 +78,5 @@ def find_similar(session, image_id: int, k: int = 10) -> list[tuple[int, float]]
     q = _unit(dequantize_embedding(row.embedding) or []) if row is not None else None
     if q is None:
         raise ValueError(f"image {image_id} has no embedding")
-    return top_k(session, q, k, exclude_id=image_id)
+    return top_k(session, q, k, exclude_id=image_id, join_images=True,
+                 filters=(ImageRecord.scan_status != "missing",))

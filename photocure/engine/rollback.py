@@ -81,6 +81,7 @@ class RollbackEngine:
                         if img is not None:
                             img.route_status = "unrouted"
                             img.target_path = None
+                            img.scan_status = "scanned"
                             if entry.operation_type == "move":
                                 img.path = entry.source_path
                                 if entry.prev_relative_path:
@@ -123,7 +124,11 @@ class RollbackEngine:
                 if img is not None and op == "move":
                     img.path = str(target)
                     img.target_path = str(target)
-                    img.route_status = "executed"
+                    if img.delete_approved and self.cfg.trash_dir_name in target.parts:
+                        img.route_status = "trashed"
+                        img.scan_status = "missing"
+                    else:
+                        img.route_status = "executed"
                 rep.notes.append(f"pending recovered as committed: {target}")
             elif op == "move" and not os.path.lexists(source):
                 # Source gone: the target may be the only copy, never delete it.

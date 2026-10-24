@@ -826,3 +826,57 @@ def test_list_people_sort_options(env):
     r_name = env.client.get("/api/people?sort=name").json()["items"]
     assert r_name[0]["id"] == p2 and r_name[1]["id"] == p1  # Adam before Zack
 
+
+def test_move_to_output_dir_and_trash_index_removal_with_undo(env):
+    c = env.client
+    items = c.get("/api/images").json()["items"]
+    assert len(items) == 4
+    del_id = items[0]["id"]
+    keep_id = items[1]["id"]
+
+    # Mark one photo for deletion
+    r = c.post(f"/api/images/{del_id}/approve-delete", json={"approved": True})
+    assert r.status_code == 200 and r.json()["item"]["delete_approved"] is True
+
+    # Apply move with trash=True
+    r = c.post("/api/plan/apply", json=plan_body(env, operation="move", trash=True))
+    assert r.status_code == 202
+    job = wait_job(c, r.json()["job_id"])
+    assert job["status"] == "done", job
+    tid = job["result"]["transaction_id"]
+
+    # Trashed photo is removed from active index endpoints; kept photos redirect to output_dir
+    after_items = c.get("/api/images").json()
+    assert after_items["total"] == 3
+    after_ids = {it["id"] for it in after_items["items"]}
+    assert del_id not in after_ids and keep_id in after_ids
+    for it in after_items["items"]:
+        assert Path(it["path"]).is_relative_to(env.out)
+        assert not ( Path(env.out) / ".trash" in Path(it["path"]).parents )
+
+    assert c.get("/api/stats").json()["total_images"] == 3
+    assert c.get("/api/overview").json()["total"] == 3
+    assert c.get("/api/facets").json()["total"] == 3
+
+    # Rebuilding or diffing against the same output_dir after moving files succeeds and shows 0 collisions
+    rb = c.post("/api/plan/rebuild", json=plan_body(env, operation="move"))
+    assert rb.status_code == 200 and rb.json()["total"] == 3
+    df = c.post("/api/plan/diff", json=plan_body(env, operation="move"))
+    assert df.status_code == 200
+    assert df.json()["total"] == 3 and df.json()["collisions"] == 0
+
+    # Undo restores both moved and trashed photos back to source folder and active index
+    u = c.post("/api/undo", json={"transaction_id": tid})
+    assert u.status_code == 202
+    ujob = wait_job(c, u.json()["job_id"])
+    assert ujob["status"] == "done" and ujob["result"]["reversed"] == 4
+
+    restored_items = c.get("/api/images").json()
+    assert restored_items["total"] == 4
+    assert del_id in {it["id"] for it in restored_items["items"]}
+    for it in restored_items["items"]:
+        assert Path(it["path"]).is_relative_to(env.lib)
+    assert c.get("/api/stats").json()["total_images"] == 4
+    assert c.get("/api/overview").json()["total"] == 4
+
+

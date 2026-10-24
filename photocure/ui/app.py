@@ -294,9 +294,14 @@ def _nearest_existing(p: Path) -> Path:
 
 def _library_root(dbp: Path) -> Path | None:
     """Common directory of all indexed images, or None when unknown/too shallow."""
+    moved = select(M.ActionLedger.target_path).where(
+        M.ActionLedger.status == "committed",
+        M.ActionLedger.operation_type == "move")
     with get_session(dbp) as s:
         lo, hi = s.exec(select(func.min(M.ImageRecord.path),
-                               func.max(M.ImageRecord.path))).one()
+                               func.max(M.ImageRecord.path)).where(
+            M.ImageRecord.scan_status != "missing",
+            M.ImageRecord.path.not_in(moved))).one()
     if not lo or not hi:
         return None
     try:
@@ -995,6 +1000,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         eff = func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category)
         with get_session(dbp) as s:
             rows = s.exec(select(eff, func.count()).where(
+                M.ImageRecord.scan_status != "missing",
                 M.ImageRecord.route_status == "planned").group_by(eff)).all()
             by_cat = {(k or "unrouted"): int(n) for k, n in rows}
             return {"total_planned": sum(by_cat.values()), "by_category": by_cat,
@@ -1026,7 +1032,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     ):
         I = M.ImageRecord
         eff = func.coalesce(I.manual_bucket, I.category)
-        conds = []
+        conds = [I.scan_status != "missing"]
         if issue:
             conds.append(_issue_clause(issue))
         if category:
@@ -1330,21 +1336,22 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def facets():
         """What the library contains, for the filter controls and the date scrubber."""
         I = M.ImageRecord
+        active = I.scan_status != "missing"
         with get_session(dbp) as s:
-            cams = s.exec(select(I.camera_model, func.count()).where(I.camera_model != "")
+            cams = s.exec(select(I.camera_model, func.count()).where(active, I.camera_model != "")
                           .group_by(I.camera_model).order_by(func.count().desc(), I.camera_model)).all()
-            rated = dict(s.exec(select(func.coalesce(I.rating, 0), func.count())
+            rated = dict(s.exec(select(func.coalesce(I.rating, 0), func.count()).where(active)
                                 .group_by(func.coalesce(I.rating, 0))).all())
-            places = s.exec(select(I.country_code, func.count()).where(I.country_code != "")
+            places = s.exec(select(I.country_code, func.count()).where(active, I.country_code != "")
                             .group_by(I.country_code).order_by(func.count().desc(), I.country_code)).all()
             lo, hi = s.exec(select(func.min(I.taken_at), func.max(I.taken_at))
-                            .where(I.taken_at.is_not(None))).one()
-            favs = s.exec(select(func.count()).select_from(I).where(I.is_favorite == True)).one()  # noqa: E712
-            total = s.exec(select(func.count()).select_from(I)).one()
-            issues = {n: int(s.exec(select(func.count()).select_from(I).where(_issue_clause(n))).one())
+                            .where(active, I.taken_at.is_not(None))).one()
+            favs = s.exec(select(func.count()).select_from(I).where(active, I.is_favorite == True)).one()  # noqa: E712
+            total = s.exec(select(func.count()).select_from(I).where(active)).one()
+            issues = {n: int(s.exec(select(func.count()).select_from(I).where(active, _issue_clause(n))).one())
                       for n in _ISSUES}
             issues["any"] = int(s.exec(select(func.count()).select_from(I).where(
-                _issue_clause(",".join(_ISSUES)))).one())
+                active, _issue_clause(",".join(_ISSUES)))).one())
         return {
             "total": int(total), "favorites": int(favs), "issues": issues,
             "cameras": [{"name": n, "count": int(c)} for n, c in cams],
@@ -1412,23 +1419,24 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def approve_deletes(body: ApproveDeletesReq = ApproveDeletesReq()):
         """Mark every junk photo for deletion, or exactly the given ids."""
         I = M.ImageRecord
+        active = I.scan_status != "missing"
         with exclusive(), get_session(dbp) as s:
             if body.ids is None and body.only_new:
                 junk = func.coalesce(I.manual_bucket, I.category).in_(JUNK_VALUES)
                 recs = _by_ids(s, getattr(app.state, "last_analyzed_ids", ()),
-                               lambda st: st.where(junk))
+                               lambda st: st.where(active, junk))
             elif body.ids is None:
                 recs = s.exec(select(I).where(
-                    func.coalesce(I.manual_bucket, I.category).in_(JUNK_VALUES))).all()
+                    active, func.coalesce(I.manual_bucket, I.category).in_(JUNK_VALUES))).all()
             else:
-                recs = _by_ids(s, body.ids)
+                recs = _by_ids(s, body.ids, lambda st: st.where(active))
             changed = 0
             for rec in recs:
                 if rec.delete_approved != body.approved:
                     rec.delete_approved = body.approved
                     changed += 1
             total = s.exec(select(func.count()).select_from(I).where(
-                I.delete_approved == True)).one()  # noqa: E712
+                active, I.delete_approved == True)).one()  # noqa: E712
             return {"ok": True, "changed": changed, "approved_total": int(total)}
 
     @app.get("/api/images/{image_id}/similar")
@@ -1602,7 +1610,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             if not image_ids:
                 return {"person": {"id": person.id, "name": person.name, "face_count": person.face_count},
                         "photos": []}
-            recs = sorted(_by_ids(s, image_ids), key=lambda r: (r.taken_at is not None, r.taken_at),
+            recs = sorted((r for r in _by_ids(s, image_ids) if r.scan_status != "missing"),
+                          key=lambda r: (r.taken_at is not None, r.taken_at),
                           reverse=True)
             photos = []
             for r in recs:
@@ -1828,12 +1837,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def overview():
         """Library composition by effective category, for the composition strip."""
         eff = func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category)
+        active = M.ImageRecord.scan_status != "missing"
         with get_session(dbp) as s:
-            rows = s.exec(select(eff, func.count()).group_by(eff)).all()
+            rows = s.exec(select(eff, func.count()).where(active).group_by(eff)).all()
             by_cat = {(k or "unrouted"): int(n) for k, n in rows}
             stats_ = PhotoRepository(s).stats()
             manual = s.exec(select(func.count()).select_from(M.ImageRecord).where(
-                M.ImageRecord.manual_bucket.is_not(None))).one()
+                active, M.ImageRecord.manual_bucket.is_not(None))).one()
         return {"by_category": by_cat, "total": sum(by_cat.values()), "stats": stats_,
                 "manual_count": int(manual or 0)}
 
@@ -1928,6 +1938,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 raise HTTPException(404, "burst not found")
             members = s.exec(select(M.ImageRecord).where(
                 M.ImageRecord.burst_id == burst_id,
+                M.ImageRecord.scan_status != "missing",
                 M.ImageRecord.infer_status == "inferred").options(
                 selectinload(M.ImageRecord.quality),
                 selectinload(M.ImageRecord.faces))).all()
@@ -1967,7 +1978,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def events():
         with get_session(dbp) as s:
             covers = dict(s.exec(select(M.ImageRecord.event_id, func.min(M.ImageRecord.id))
-                                 .where(M.ImageRecord.event_id.is_not(None))
+                                 .where(M.ImageRecord.scan_status != "missing",
+                                        M.ImageRecord.event_id.is_not(None))
                                  .group_by(M.ImageRecord.event_id)).all())
             rows = s.exec(select(M.EventGroup).order_by(M.EventGroup.start)).all()
             return {"count": len(rows), "items": [{
@@ -2190,8 +2202,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 for b in bursts:
                     repo.s.delete(b)
                 s.flush()
-                results = BurstDetector(c).cluster_records(records)
-                by_id = {r.id: r for r in records}
+                active = [r for r in records if r.scan_status != "missing"]
+                results = BurstDetector(c).cluster_records(active)
+                by_id = {r.id: r for r in active}
                 sel = BestShotSelector(c)
                 n = seq = 0
                 for res in results:
@@ -2355,7 +2368,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 continue
             total_bytes += st.st_size
             key = str(dst)
-            if dst.exists() or key in targets_seen:
+            same_file = False
+            if dst.exists():
+                try:
+                    same_file = os.path.samefile(src, dst)
+                except OSError:
+                    same_file = False
+            if (dst.exists() and not same_file) or key in targets_seen:
                 collisions.append(key)
             targets_seen.add(key)
             anc = _nearest_existing(dst.parent)

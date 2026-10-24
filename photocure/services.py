@@ -232,6 +232,8 @@ def compute_inputs_hash(records) -> str:
     """Stable hash of every routing input; changes when the DB state changes."""
     h = hashlib.sha256()
     for r in sorted(records, key=lambda x: x.id or 0):
+        if getattr(r, "scan_status", "scanned") == "missing":
+            continue
         sem = getattr(r, "semantic", None)
         q = getattr(r, "quality", None)
         faces = getattr(r, "faces", None) or []
@@ -280,8 +282,9 @@ class Planner:
             repo.s.delete(b)
         repo.s.flush()
 
-        burst_results = BurstDetector(self.cfg).cluster_records(records)
-        by_id = {r.id: r for r in records}
+        active = [r for r in records if getattr(r, "scan_status", "scanned") != "missing"]
+        burst_results = BurstDetector(self.cfg).cluster_records(active)
+        by_id = {r.id: r for r in active}
         groups = []
         for res in burst_results:
             members = [by_id[m] for m in res.image_ids if m in by_id]
@@ -289,7 +292,7 @@ class Planner:
                 groups.append(members)
         # Blinks are judged per burst (a subject's own frames set their baseline) before the
         # best shot is chosen, so the selector sees the closed-eye counts.
-        apply_blinks(records, groups, self.cfg.face)
+        apply_blinks(active, groups, self.cfg.face)
         burst_count = 0
         for members in groups:
             best_id = BestShotSelector(self.cfg).pick_best_shot(
@@ -650,24 +653,33 @@ class Planner:
         fixed = 0
         with get_session(self.db_path) as session:
             repo = PhotoRepository(session)
-            final: dict[int, str] = {}
+            final: dict[int, tuple[str, str]] = {}
             for e in session.exec(select(ActionLedger).order_by(
                     ActionLedger.id)).all():  # type: ignore[arg-type]
                 if e.image_id is None or e.operation_type != "move":
                     continue
                 if e.status == "committed":
-                    final[e.image_id] = e.target_path
+                    final[e.image_id] = (e.target_path, "committed")
                 elif e.status == "rolled_back":
-                    final[e.image_id] = e.source_path
-            for image_id, loc in final.items():
+                    final[e.image_id] = (e.source_path, "rolled_back")
+            for image_id, (loc, st) in final.items():
                 img = repo.get_by_id(image_id)
-                if img is None or img.path == loc or not os.path.lexists(loc):
+                if img is None or not os.path.lexists(loc):
                     continue
                 clash = repo.get_by_path(loc)
                 if clash is not None and clash.id != img.id:
                     continue
-                img.path = loc
-                fixed += 1
+                changed = False
+                if img.path != loc:
+                    img.path = loc
+                    changed = True
+                if st == "rolled_back" and (img.route_status == "trashed" or img.scan_status == "missing"):
+                    img.scan_status = "scanned"
+                    img.route_status = "unrouted"
+                    img.target_path = None
+                    changed = True
+                if changed:
+                    fixed += 1
         return fixed
 
     # ------------------------------------------------------- backend and learning

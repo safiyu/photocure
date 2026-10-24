@@ -145,6 +145,7 @@ class PhotoRepository:
             sselect(func.count()).select_from(ImageRecord)
             .join(SemanticScore, SemanticScore.image_id == ImageRecord.id)
             .where(col(ImageRecord.manual_bucket).is_not(None),
+                   ImageRecord.scan_status != "missing",
                    SemanticScore.embedding != "")
         ).one() or 0)
 
@@ -152,14 +153,16 @@ class PhotoRepository:
         """Rows whose effective category (manual override first) matches."""
         eff = func.coalesce(ImageRecord.manual_bucket, ImageRecord.category)
         return int(self.s.exec(
-            sselect(func.count()).select_from(ImageRecord).where(eff == category)
+            sselect(func.count()).select_from(ImageRecord).where(
+                ImageRecord.scan_status != "missing", eff == category)
         ).one() or 0)
 
     def count_inferred(self) -> int:
         """Number of rows already marked inferred (resumption skip counter)."""
         return int(self.s.exec(
             sselect(func.count()).select_from(ImageRecord)
-            .where(ImageRecord.infer_status == "inferred")
+            .where(ImageRecord.scan_status != "missing",
+                   ImageRecord.infer_status == "inferred")
         ).one() or 0)
 
     def all_images(self, category: str | None = None,
@@ -443,18 +446,19 @@ class PhotoRepository:
 
     # -------------------------------------------------------------- stats
     def stats(self) -> dict:
-        total = self.s.exec(sselect(func.count()).select_from(ImageRecord)).one()
+        active = ImageRecord.scan_status != "missing"
+        total = self.s.exec(sselect(func.count()).select_from(ImageRecord).where(active)).one()
         pending = self.s.exec(
             sselect(func.count()).select_from(ImageRecord)
-            .where(ImageRecord.infer_status == "pending")
+            .where(active, ImageRecord.infer_status == "pending")
         ).one()
         dupes = self.s.exec(
             sselect(func.count()).select_from(ImageRecord)
-            .where(ImageRecord.is_duplicate == True)  # noqa: E712
+            .where(active, ImageRecord.is_duplicate == True)  # noqa: E712
         ).one()
         planned = self.s.exec(
             sselect(func.count()).select_from(ImageRecord)
-            .where(ImageRecord.route_status == "planned")
+            .where(active, ImageRecord.route_status == "planned")
         ).one()
         bursts = self.s.exec(sselect(func.count()).select_from(BurstGroup)).one()
         people = self.s.exec(

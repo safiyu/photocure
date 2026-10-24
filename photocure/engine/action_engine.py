@@ -118,7 +118,13 @@ class ActionEngine:
         free_by_dev: dict[int, tuple[str, int]] = {}
         seen_targets: set[Path] = set()
         for a in plan:
-            if a.target.exists() or a.target in seen_targets:
+            same_file = False
+            if a.target.exists() and os.path.lexists(a.source):
+                try:
+                    same_file = os.path.samefile(a.source, a.target)
+                except OSError:
+                    same_file = False
+            if (a.target.exists() and not same_file) or a.target in seen_targets:
                 a.collides = True
                 rep.collisions += 1
             seen_targets.add(a.target)
@@ -243,7 +249,11 @@ class ActionEngine:
                         repo.ledger_commit(entry)
                         if img is not None:
                             img.target_path = str(target)
-                            img.route_status = "executed"
+                            if marked and trash and action.operation == "move":
+                                img.route_status = "trashed"
+                                img.scan_status = "missing"
+                            else:
+                                img.route_status = "executed"
                             if action.operation == "move":
                                 self._retire_stale_row(session, str(target), img.id)
                                 img.path = str(target)

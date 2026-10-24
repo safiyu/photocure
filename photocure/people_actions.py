@@ -15,7 +15,9 @@ def _best_face_id_for(person_id: int, s) -> int | None:
     # Try sharpest face first
     best = s.exec(
         select(M.FaceDetection.id, M.FaceDetection.face_sharpness)
+        .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
         .where(M.FaceDetection.person_id == person_id)
+        .where(M.ImageRecord.scan_status != "missing")
         .where(M.FaceDetection.x1.isnot(None))  # must have normalised bbox for crop endpoint
         .order_by(M.FaceDetection.face_sharpness.desc())
         .limit(1)
