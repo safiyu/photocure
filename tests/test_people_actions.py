@@ -166,6 +166,13 @@ def test_arrange_similar_faces_together(cfg, session, repo):
     assert a2_dict["similar_to"]["target_id"] == a1.id
     assert a2_dict["similar_to"]["score"] >= 0.90
 
+    # Once a2 is named, it should stop showing merge suggestions
+    repo.rename_person(a2.id, "Alice 2")
+    session.commit()
+    items_after_name = list_people(cfg.db_path, sort="similarity")
+    a2_named_dict = next(it for it in items_after_name if it["id"] == a2.id)
+    assert "similar_to" not in a2_named_dict
+
 
 def test_recluster_people_separates_distinct_individuals(cfg, session, repo):
     _image(session, 1)

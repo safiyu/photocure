@@ -2961,7 +2961,7 @@
 
   function _peopleFP(items) {
     return items.map((p) =>
-      `${p.id}:${p.face_count}:${p.name || ""}:${p.similar_to ? p.similar_to.target_id : ""}`
+      `${p.id}:${p.face_count}:${p.name || ""}:${(!p.name && p.similar_to) ? p.similar_to.target_id : ""}`
     ).join("|");
   }
 
@@ -3197,7 +3197,7 @@
 
         <!-- Bottom Controls Container -->
         <div class="people-card-bottom">
-          ${p.similar_to ? `
+          ${!p.name && p.similar_to ? `
             <button class="people-merge-pill" type="button"
                     data-source-id="${num(p.id)}"
                     data-target-id="${num(p.similar_to.target_id)}"

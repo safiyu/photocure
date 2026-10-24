@@ -109,14 +109,18 @@ def _arrange_by_similarity(clusters: list[M.PersonCluster], s=None) -> list[tupl
             # Strict threshold for linking as similar face / suggesting merge: 0.65
             if best_cand is not None and best_score >= 0.65:
                 unvisited.remove(best_cand)
+                cand_cluster = with_emb[best_cand][0]
                 target_cluster = with_emb[best_ref][0]
-                target_sample_face_id = _best_face_id_for(target_cluster.id, s) if s is not None else None
-                match_info = {
-                    "target_id": target_cluster.id,
-                    "target_name": target_cluster.name,
-                    "target_sample_face_id": target_sample_face_id,
-                    "score": round(best_score, 2),
-                }
+                match_info = None
+                # Only suggest merging for unnamed clusters; once a person is named, stop showing merge suggestions
+                if not cand_cluster.name:
+                    target_sample_face_id = _best_face_id_for(target_cluster.id, s) if s is not None else None
+                    match_info = {
+                        "target_id": target_cluster.id,
+                        "target_name": target_cluster.name,
+                        "target_sample_face_id": target_sample_face_id,
+                        "score": round(best_score, 2),
+                    }
                 ordered.append((best_cand, match_info))
                 group.append(best_cand)
             else:

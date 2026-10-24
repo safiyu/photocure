@@ -71,3 +71,9 @@ def test_people_name_autocomplete_wired_with_tab_and_enter():
     assert ".name-autocomplete-menu" in css
     assert ".name-autocomplete-item.active" in css
 
+
+def test_people_merge_suggestions_hidden_when_named():
+    js = _read("app.js")
+    assert "!p.name && p.similar_to" in js
+
+
