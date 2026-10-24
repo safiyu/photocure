@@ -106,6 +106,10 @@ class RenamePersonReq(BaseModel):
     name: str
 
 
+class BulkDeletePeopleReq(BaseModel):
+    person_ids: list[int]
+
+
 class ReassignFaceReq(BaseModel):
     person_id: int | None = None
     new_name: str | None = None
@@ -1543,6 +1547,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
             return delete_person(dbp, person_id)
         except ActionError as e:
             raise HTTPException(e.status, str(e)) from None
+
+    @app.post("/api/people/bulk-delete", dependencies=auth)
+    def bulk_delete_people_endpoint(body: BulkDeletePeopleReq):
+        """Delete multiple person clusters in a single atomic transaction."""
+        from ..people_actions import bulk_delete_people
+        return bulk_delete_people(dbp, body.person_ids)
 
     @app.post("/api/people/{person_id}/rename", dependencies=auth)
     def rename_person_endpoint(person_id: int, body: RenamePersonReq):

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlmodel import select
+from sqlmodel import col, select
 
 from .db import models as M
 from .db.repository import PhotoRepository, dequantize_embedding, quantize_embedding
@@ -132,19 +132,32 @@ def _arrange_by_similarity(clusters: list[M.PersonCluster], s=None) -> list[tupl
 
 def list_people(db_path: Path | str, sort: str = "similarity") -> list[dict]:
     with get_session(db_path) as s:
+        # Prune any empty unnamed ghost clusters
+        empty_unnamed = s.exec(
+            select(M.PersonCluster)
+            .where(M.PersonCluster.face_count <= 0)
+            .where(M.PersonCluster.name.is_(None))
+        ).all()
+        if empty_unnamed:
+            for p in empty_unnamed:
+                s.delete(p)
+            s.commit()
+
         repo = PhotoRepository(s)
-        clusters = repo.all_person_clusters()
+        clusters = [c for c in repo.all_person_clusters() if c.face_count > 0]
 
         if sort == "name":
             # Named first alphabetically, then unnamed by count desc
             clusters.sort(key=lambda p: (0 if p.name else 1, (p.name or "").lower(), -p.face_count))
-            return [_as_dict(p, _best_face_id_for(p.id, s)) for p in clusters]
+            items = [_as_dict(p, _best_face_id_for(p.id, s)) for p in clusters]
         elif sort == "count":
             clusters.sort(key=lambda p: (p.face_count, p.id or 0), reverse=True)
-            return [_as_dict(p, _best_face_id_for(p.id, s)) for p in clusters]
+            items = [_as_dict(p, _best_face_id_for(p.id, s)) for p in clusters]
         else:  # default: "similarity"
             arranged = _arrange_by_similarity(clusters, s)
-            return [_as_dict(p, _best_face_id_for(p.id, s), match) for p, match in arranged]
+            items = [_as_dict(p, _best_face_id_for(p.id, s), match) for p, match in arranged]
+
+        return [it for it in items if it["face_count"] > 0]
 
 
 def rename_person(db_path: Path | str, person_id: int, name: str) -> dict:
@@ -249,6 +262,29 @@ def delete_person(db_path: Path | str, person_id: int) -> dict:
         s.delete(p)
         s.flush()
         return {"id": person_id, "deleted": True}
+
+
+def bulk_delete_people(db_path: Path | str, person_ids: list[int]) -> dict:
+    """Delete multiple person clusters and unassign all their associated faces in a single transaction."""
+    if not person_ids:
+        return {"deleted_count": 0}
+    with get_session(db_path) as s:
+        faces = s.exec(
+            select(M.FaceDetection)
+            .where(col(M.FaceDetection.person_id).in_(person_ids))
+        ).all()
+        for f in faces:
+            f.person_id = None
+
+        clusters = s.exec(
+            select(M.PersonCluster)
+            .where(col(M.PersonCluster.id).in_(person_ids))
+        ).all()
+        count = len(clusters)
+        for c in clusters:
+            s.delete(c)
+        s.commit()
+        return {"deleted_count": count}
 
 
 def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:

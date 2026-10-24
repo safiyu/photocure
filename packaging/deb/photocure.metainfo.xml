@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <component type="desktop-application">
   <id>io.github.safiyu.photocure</id>
   <metadata_license>CC0-1.0</metadata_license>
@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.4.1" type="stable" date="2026-10-24">
+      <description>
+        <p>Photocure release 1.4.1.</p>
+      </description>
+    </release>
     <release version="1.2.1" type="stable" date="2026-10-21">
       <description>
         <p>Compare all burst faces in one shot with matrix view, robust spatial tracking across camera pans, and direct per-row curation controls.</p>

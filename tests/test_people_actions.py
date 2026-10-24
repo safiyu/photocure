@@ -6,7 +6,7 @@ from sqlmodel import select
 
 from photocure.db import models as M
 from photocure.db.repository import quantize_embedding
-from photocure.people_actions import ActionError, delete_person, list_people, reassign_face, recluster_people, rename_person
+from photocure.people_actions import ActionError, bulk_delete_people, delete_person, list_people, reassign_face, recluster_people, rename_person
 
 
 def _face(session, image_id: int, person_id: int | None = None,
@@ -200,5 +200,55 @@ def test_recluster_people_separates_distinct_individuals(cfg, session, repo):
     assert rf1.person_id == rf2.person_id
     assert rf3.person_id == rf4.person_id
     assert rf1.person_id != rf3.person_id
+
+
+def test_list_people_prunes_and_excludes_empty_clusters(cfg, session, repo):
+    # Create an active cluster with 1 face
+    active = repo.create_person_cluster([1.0, 0.0])
+    repo.update_person_cluster(active.id, [1.0, 0.0], 1)
+    # Create an unnamed orphan cluster with face_count 0
+    orphan = repo.create_person_cluster([0.0, 1.0])
+    orphan.face_count = 0
+    repo.s.add(orphan)
+    session.commit()
+
+    orphan_id = orphan.id
+    items = list_people(cfg.db_path)
+    assert len(items) == 1
+    assert items[0]["id"] == active.id
+
+    # Verify orphan cluster was pruned from DB
+    session.expire_all()
+    assert session.get(M.PersonCluster, orphan_id) is None
+
+
+def test_bulk_delete_people_removes_clusters_and_unassigns_faces(cfg, session, repo):
+    _image(session, 1)
+    _image(session, 2)
+    p1 = repo.create_person_cluster([1.0, 0.0])
+    p2 = repo.create_person_cluster([0.0, 1.0])
+    p3 = repo.create_person_cluster([0.5, 0.5])
+    f1 = _face(session, 1, person_id=p1.id)
+    f2 = _face(session, 2, person_id=p2.id)
+    f3 = _face(session, 2, person_id=p3.id)
+    session.commit()
+
+    p1_id, p2_id, p3_id = p1.id, p2.id, p3.id
+    res = bulk_delete_people(cfg.db_path, [p1_id, p2_id])
+    assert res["deleted_count"] == 2
+
+    session.expire_all()
+    assert session.get(M.PersonCluster, p1_id) is None
+    assert session.get(M.PersonCluster, p2_id) is None
+    assert session.get(M.PersonCluster, p3_id) is not None
+
+    rf1 = session.get(M.FaceDetection, f1.id)
+    rf2 = session.get(M.FaceDetection, f2.id)
+    rf3 = session.get(M.FaceDetection, f3.id)
+    assert rf1.person_id is None
+    assert rf2.person_id is None
+    assert rf3.person_id == p3.id
+
+
 
 

@@ -2680,6 +2680,91 @@
   // Cache so tab-switching back to People skips DOM rebuild & image re-load.
   // Mutating actions (merge, rename, delete, recluster) pass force=true.
   const _pc = { sort: null, fp: null };
+  const pendingPeopleDeletions = new Set();
+
+  function updatePeopleSaveBar() {
+    const bar = $("#people-savebar");
+    const countEl = $("#people-save-count");
+    const tbBtn = $("#people-toolbar-save-btn");
+    const tbCountEl = $("#people-toolbar-save-count");
+    const count = pendingPeopleDeletions.size;
+
+    if (count > 0) {
+      const text = `${fmtN(count)} ${count === 1 ? "person" : "people"} marked for deletion`;
+      if (countEl) countEl.textContent = text;
+      if (bar) openOverlay(bar);
+      if (tbBtn) tbBtn.hidden = false;
+      if (tbCountEl) tbCountEl.textContent = fmtN(count);
+    } else {
+      if (bar) closeOverlay(bar);
+      if (tbBtn) tbBtn.hidden = true;
+    }
+
+    const host = $("#peoplegrid");
+    if (host) {
+      const remaining = host.querySelectorAll(".people-card").length;
+      const sumEl = $("#people-summary");
+      if (sumEl) {
+        sumEl.textContent = count > 0
+          ? `${fmtN(remaining)} ${remaining === 1 ? "person" : "people"} (${fmtN(count)} pending delete)`
+          : `${fmtN(remaining)} ${remaining === 1 ? "person" : "people"}`;
+      }
+    }
+  }
+
+  function wirePeopleSaveBar() {
+    const bar = $("#people-savebar");
+    if (bar && !bar._wired) {
+      bar._wired = true;
+
+      const discardBtn = $("#people-discard-btn");
+      if (discardBtn) {
+        discardBtn.addEventListener("click", async () => {
+          if (!pendingPeopleDeletions.size) return;
+          pendingPeopleDeletions.clear();
+          updatePeopleSaveBar();
+          _pc.fp = null;
+          await renderPeople(true);
+          toast("Deletions discarded", "ok");
+        });
+      }
+
+      const saveBtn = $("#people-save-btn");
+      if (saveBtn) {
+        saveBtn.addEventListener("click", () => commitPeopleDeletions());
+      }
+    }
+
+    const tbBtn = $("#people-toolbar-save-btn");
+    if (tbBtn && !tbBtn._wired) {
+      tbBtn._wired = true;
+      tbBtn.addEventListener("click", () => commitPeopleDeletions());
+    }
+  }
+
+  async function commitPeopleDeletions() {
+    const ids = Array.from(pendingPeopleDeletions);
+    if (!ids.length) return;
+    const saveBtn = $("#people-save-btn");
+    const tbBtn = $("#people-toolbar-save-btn");
+    if (saveBtn) saveBtn.disabled = true;
+    if (tbBtn) tbBtn.disabled = true;
+
+    try {
+      const res = await post("/api/people/bulk-delete", { person_ids: ids });
+      const delCount = res.deleted_count || ids.length;
+      toast(`Deleted ${fmtN(delCount)} ${delCount === 1 ? "person" : "people"} ✓`, "ok");
+      pendingPeopleDeletions.clear();
+      updatePeopleSaveBar();
+      _pc.fp = null;
+      await renderPeople(true);
+    } catch (e) {
+      toast(`Failed to save deletions: ${e.message}`, "err");
+    } finally {
+      if (saveBtn) saveBtn.disabled = false;
+      if (tbBtn) tbBtn.disabled = false;
+    }
+  }
 
   function _peopleFP(items) {
     return items.map((p) =>
@@ -2757,8 +2842,13 @@
     const remaining = host.querySelectorAll(".people-card");
     const count = remaining.length;
     if (state.peoplePicks.delete(num(pid))) applyPicks();
+    const pendingCount = pendingPeopleDeletions.size;
     const sumEl = $("#people-summary");
-    if (sumEl) sumEl.textContent = `${fmtN(count)} ${count === 1 ? "person" : "people"}`;
+    if (sumEl) {
+      sumEl.textContent = pendingCount > 0
+        ? `${fmtN(count)} ${count === 1 ? "person" : "people"} (${fmtN(pendingCount)} pending delete)`
+        : `${fmtN(count)} ${count === 1 ? "person" : "people"}`;
+    }
 
     if (count === 0) {
       host.innerHTML = `<div class="people-empty"><svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><p>No identified people yet.</p></div>`;
@@ -2773,12 +2863,16 @@
     const host = $("#peoplegrid");
     const sort = state.peopleSort || "similarity";
     const data = await api(`/api/people?sort=${encodeURIComponent(sort)}`);
-    const items = data.items || [];
+    const allItems = (data.items || []).filter((p) => p.face_count > 0 && (p.sample_face_id != null || p.name));
+    const items = allItems.filter((p) => !pendingPeopleDeletions.has(p.id));
     const fp = _peopleFP(items);
     const live = new Set(items.map((p) => num(p.id)));
     let pruned = false;
     state.peoplePicks.forEach((id) => { if (!live.has(id)) { state.peoplePicks.delete(id); pruned = true; } });
     if (pruned) applyPicks();
+
+    wirePeopleSaveBar();
+    updatePeopleSaveBar();
 
     // ── Cache hit: data unchanged, DOM already built → just scroll-restore ────
     if (!force && sort === _pc.sort && fp === _pc.fp && host && host.children.length > 0) {
@@ -3078,27 +3172,17 @@
         });
       }
 
-      // ── Dismiss / Delete Cluster ───────────────────────────────────────────
+      // ── Dismiss / Delete Cluster (Staged UI Deletion) ───────────────────────
       const dismissBtn = card.querySelector(".people-card-dismiss");
       if (dismissBtn) {
         dismissBtn.addEventListener("click", async (ev) => {
           ev.stopPropagation();
-          const name = pillWrapper?.dataset.currentName || `Person #${pid}`;
-          const ok = await showConfirmDialog({
-            title: "Delete person cluster?",
-            message: `Delete cluster for "${name}"? Photos will remain in your library, but face assignments to this person will be cleared.`,
-            confirmText: "Delete",
-            variant: "danger",
-          });
-          if (!ok) return;
+          const personIdNum = parseInt(pid, 10);
+          if (isNaN(personIdNum)) return;
 
-          try {
-            await api(`/api/people/${pid}`, { method: "DELETE" });
-            toast("Person deleted", "ok");
-            await rippleDeleteCard(card, pid);
-          } catch (e) {
-            toast(`Delete failed: ${e.message}`, "err");
-          }
+          pendingPeopleDeletions.add(personIdNum);
+          await rippleDeleteCard(card, pid);
+          updatePeopleSaveBar();
         });
       }
 
@@ -5227,9 +5311,12 @@
       loadHighlightYears().catch(() => {});
       if (isEventView()) renderEventHighlights();
     }
-    if (name === "bursts") renderBursts().catch((e) => toast(e.message, "err"));
-    if (name === "people") renderPeople().catch((e) => toast(e.message, "err"));
-    if (name === "events") loadEvents().catch((e) => toast(e.message, "err"));
+    if (name === "people") {
+      renderPeople().catch((e) => toast(e.message, "err"));
+      updatePeopleSaveBar();
+    } else {
+      closeOverlay($("#people-savebar"));
+    }
     if (name === "actions") loadTransactions().catch(() => {});
     if (name === "settings") { refreshSettings(true); refreshKeywords(); }
     if (name === "uncertain") renderLegend();
@@ -5883,6 +5970,12 @@
     window.addEventListener("hashchange", () => {
       const h = (location.hash || "").slice(1);
       if (TITLES[h] && h !== state.tab) showTab(h);
+    });
+    window.addEventListener("beforeunload", (ev) => {
+      if (pendingPeopleDeletions.size > 0) {
+        ev.preventDefault();
+        ev.returnValue = "";
+      }
     });
     $("#btn-save-settings").onclick = saveSettings;
     $("#btn-reset-settings").onclick = () => { renderSettings(); };

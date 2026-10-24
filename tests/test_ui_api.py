@@ -788,6 +788,32 @@ def test_delete_person_endpoint(env):
     assert by_id[fid]["person_id"] is None
 
 
+def test_bulk_delete_people_endpoint(env):
+    p1 = _seed_person(env, name="Bulk A", face_count=2)
+    p2 = _seed_person(env, name="Bulk B", face_count=3)
+    p3 = _seed_person(env, name="Bulk Keep", face_count=1)
+    iid = env.client.get("/api/images").json()["items"][0]["id"]
+    f1 = _seed_face(env, iid, person_id=p1)
+    f2 = _seed_face(env, iid, person_id=p2)
+    f3 = _seed_face(env, iid, person_id=p3)
+
+    r = env.client.post("/api/people/bulk-delete", json={"person_ids": [p1, p2]})
+    assert r.status_code == 200
+    assert r.json() == {"deleted_count": 2}
+
+    # Verify p1, p2 are gone, p3 remains
+    items = env.client.get("/api/people").json()["items"]
+    ids = {it["id"] for it in items}
+    assert p1 not in ids and p2 not in ids and p3 in ids
+
+    # Verify faces unlinked
+    faces = env.client.get(f"/api/images/{iid}/faces").json()["items"]
+    by_id = {f["id"]: f for f in faces}
+    assert by_id[f1]["person_id"] is None
+    assert by_id[f2]["person_id"] is None
+    assert by_id[f3]["person_id"] == p3
+
+
 def test_list_people_sort_options(env):
     p1 = _seed_person(env, name="Zack", face_count=1)
     p2 = _seed_person(env, name="Adam", face_count=5)

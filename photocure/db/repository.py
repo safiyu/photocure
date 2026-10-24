@@ -249,6 +249,8 @@ class PhotoRepository:
             raise ValueError(f"no person cluster with id {person_id}")
         p.centroid_json = quantize_embedding(centroid)
         p.face_count = face_count
+        if p.face_count <= 0 and not p.name:
+            self.s.delete(p)
         self.s.flush()
 
     def decrement_person_cluster(self, person_id: int) -> None:
@@ -257,6 +259,8 @@ class PhotoRepository:
         if p is None:
             return
         p.face_count = max(0, p.face_count - 1)
+        if p.face_count <= 0 and not p.name:
+            self.s.delete(p)
         self.s.flush()
 
     def rename_person(self, person_id: int, name: str | None) -> PersonCluster:

@@ -26,3 +26,19 @@ def test_find_person_by_name_returns_none_when_unknown(repo):
 def test_rename_person_raises_for_unknown_id(repo):
     with pytest.raises(ValueError):
         repo.rename_person(999, "x")
+
+
+def test_decrement_person_cluster_deletes_when_zero_and_unnamed(repo):
+    p = repo.create_person_cluster([1.0])
+    assert p.face_count == 1
+    repo.decrement_person_cluster(p.id)
+    assert repo.s.get(p.__class__, p.id) is None
+
+
+def test_decrement_person_cluster_preserves_when_named(repo):
+    p = repo.create_person_cluster([1.0])
+    repo.rename_person(p.id, "Alice")
+    repo.decrement_person_cluster(p.id)
+    saved = repo.s.get(p.__class__, p.id)
+    assert saved is not None and saved.face_count == 0
+

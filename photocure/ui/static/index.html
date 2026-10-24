@@ -352,6 +352,10 @@
               </button>
             </div>
             <span class="grow"></span>
+            <button class="btn sm danger" id="people-toolbar-save-btn" type="button" hidden title="Save pending deletions">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>
+              <span>Save deletions (<span id="people-toolbar-save-count">0</span>)</span>
+            </button>
             <button class="chip-btn" id="people-recluster-btn" type="button" title="Separate mixed-up people and recalculate clusters with strict facial identity matching">
               <svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg>
               <span>Re-cluster faces</span>
@@ -695,6 +699,22 @@
     <button class="btn sm danger people-only" id="bulk-del-people" title="Delete the selected people. Photos stay in your library."><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete people</button>
     <span class="bulk-sep"></span>
     <button class="btn sm ghost bulk-x" id="bulk-clear" title="Clear selection (Esc)" aria-label="Clear selection"><svg class="ic sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+  </div>
+
+  <div id="people-savebar" class="bulk people-savebar" hidden role="region" aria-label="Pending person deletions">
+    <div class="people-savebar-info">
+      <svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>
+      <b id="people-save-count">0 people marked for deletion</b>
+    </div>
+    <span class="grow"></span>
+    <button class="btn sm ghost" id="people-discard-btn" type="button" title="Undo all pending deletions">
+      <svg class="ic sm" aria-hidden="true"><use href="#i-undo"/></svg>
+      <span>Discard</span>
+    </button>
+    <button class="btn sm danger" id="people-save-btn" type="button" title="Commit deletions to the library">
+      <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg>
+      <span>Save changes</span>
+    </button>
   </div>
 
   <!-- lightbox -->

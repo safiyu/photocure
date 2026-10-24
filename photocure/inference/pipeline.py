@@ -355,7 +355,7 @@ class InferencePipeline:
         # images, without re-reading every centroid from the DB on each face.
         centroids: dict[int, ClusterCentroid] = {
             c.id: ClusterCentroid(c.id, dequantize_embedding(c.centroid_json) or [], c.face_count)
-            for c in repo.all_person_clusters() if c.centroid_json
+            for c in repo.all_person_clusters() if c.centroid_json and c.face_count > 0
         }
         try:
             for chunk in chunks:
@@ -667,7 +667,10 @@ class InferencePipeline:
             if c is not None:
                 undo.restore.setdefault(lost_pid, (c.centroid, c.face_count))
                 new_count = max(0, c.face_count - 1)
-                centroids[lost_pid] = ClusterCentroid(lost_pid, c.centroid, new_count)
+                if new_count == 0:
+                    centroids.pop(lost_pid, None)
+                else:
+                    centroids[lost_pid] = ClusterCentroid(lost_pid, c.centroid, new_count)
                 repo.update_person_cluster(lost_pid, c.centroid, new_count)
             else:
                 repo.decrement_person_cluster(lost_pid)  # no centroid cached; no-op if gone

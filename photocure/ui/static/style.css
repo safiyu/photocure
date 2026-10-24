@@ -3206,22 +3206,26 @@ body.has-picks .tools, body.has-picks .hover-actions {
   overflow: hidden;
   background: #12141D;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
   cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: 210px 262px;
   /* Entrance animation — stagger delay capped so later cards don't wait seconds */
   animation: mo-rise var(--mo-slow) var(--ease-soft) both;
   animation-delay: calc(min(var(--card-index, 0), 8) * var(--mo-stagger));
+  user-select: none;
   transition: transform var(--mo-std) var(--ease-soft),
               border-color var(--mo-std) var(--ease-soft),
               box-shadow var(--mo-std) var(--ease-soft);
-  user-select: none;
-  will-change: transform;
 }
-/* Hover: simple lift via transition — no animation swap so entrance never restarts */
+@media (prefers-reduced-motion: reduce) {
+  .people-card { animation: none; transition: none; }
+}
+/* Lightweight hover: subtle 2px lift and border highlight — no heavy bitmap scaling */
 .people-card:hover {
-  border-color: rgba(255, 255, 255, 0.28);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255,255,255,.08);
-  transform: translateY(-4px) scale(1.012);
+  border-color: rgba(255, 255, 255, 0.32);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  transform: translateY(-2px);
 }
 
 /* ── Full-bleed portrait image & vignette ────────────────────────────────── */
@@ -3232,7 +3236,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
   height: 100%;
   z-index: 0;
   overflow: hidden;
-  background: #0d0f17;
+  background: #141824;
 }
 .people-face-img {
   width: 100%;
@@ -3240,30 +3244,11 @@ body.has-picks .tools, body.has-picks .hover-actions {
   object-fit: cover;
   object-position: center 20%;
   display: block;
-  transition: transform var(--mo-slow) var(--ease-soft),
-              opacity var(--mo-slow) var(--ease-soft),
-              filter var(--mo-slow) var(--ease-soft);
   opacity: 0;
-  filter: blur(4px) saturate(.6);
+  transition: opacity .2s ease;
 }
 .people-face-img.loaded {
   opacity: 1;
-  filter: blur(0) saturate(1);
-}
-/* Shimmer skeleton shown while image is still loading */
-.people-card-portrait:not(:has(.people-face-img.loaded)) .people-face-img,
-.people-card-portrait:has(.people-face-img[src]:not(.loaded)) {
-  background:
-    linear-gradient(90deg,
-      #1a1e2a 25%,
-      #252b3b 45%,
-      #1a1e2a 65%
-    );
-  background-size: 300% 100%;
-  animation: people-face-shimmer 1.8s ease-in-out infinite;
-}
-.people-card:hover .people-face-img.loaded {
-  transform: scale(1.05);
 }
 .people-face-fallback {
   width: 100%;
@@ -3297,9 +3282,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(14, 17, 26, 0.75);
   border: 1.5px solid rgba(255, 255, 255, 0.75);
   display: flex;
   align-items: center;
@@ -3324,10 +3307,8 @@ body.has-picks .tools, body.has-picks .hover-actions {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(14, 17, 26, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3340,8 +3321,8 @@ body.has-picks .tools, body.has-picks .hover-actions {
   opacity: 1;
 }
 .people-card-dismiss:hover {
-  background: rgba(239, 68, 68, 0.85);
-  border-color: rgba(248, 113, 113, 0.9);
+  background: rgba(239, 68, 68, 0.92);
+  border-color: rgba(248, 113, 113, 0.95);
   color: #fff;
   transform: scale(1.08);
 }
@@ -3358,10 +3339,8 @@ body.has-picks .tools, body.has-picks .hover-actions {
   z-index: 3;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(14, 17, 26, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   font-family: var(--font-mono, 'JetBrains Mono', monospace);
   font-size: 12px;
   font-weight: 600;
@@ -3386,10 +3365,8 @@ body.has-picks .tools, body.has-picks .hover-actions {
   width: 100%;
   padding: 7px 12px;
   border-radius: 12px;
-  background: color-mix(in srgb, var(--primary) 32%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid color-mix(in srgb, var(--primary) 50%, transparent);
+  background: rgba(30, 27, 75, 0.92);
+  border: 1px solid rgba(129, 140, 248, 0.45);
   color: #e0e7ff;
   font-size: 12px;
   font-weight: 500;
@@ -3404,8 +3381,8 @@ body.has-picks .tools, body.has-picks .hover-actions {
   box-sizing: border-box;
 }
 .people-merge-pill:hover {
-  background: color-mix(in srgb, var(--primary) 52%, transparent);
-  border-color: color-mix(in srgb, var(--primary) 70%, transparent);
+  background: rgba(49, 46, 129, 0.96);
+  border-color: rgba(129, 140, 248, 0.7);
   color: #fff;
   transform: translateY(-1px);
 }
@@ -3460,10 +3437,8 @@ body.has-picks .tools, body.has-picks .hover-actions {
   font-size: 11px;
   font-weight: 600;
   color: #e0e7ff;
-  background: rgba(30, 27, 75, 0.92);
+  background: rgba(30, 27, 75, 0.95);
   border: 1px solid rgba(129, 140, 248, 0.45);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   padding: 3px 10px;
   border-radius: 999px;
   white-space: nowrap;
@@ -3479,10 +3454,8 @@ body.has-picks .tools, body.has-picks .hover-actions {
   width: 100%;
   padding: 8px 12px;
   border-radius: 12px;
-  background: rgba(0, 0, 0, 0.78);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 15, 24, 0.90);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3496,7 +3469,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
   border-color: rgba(255, 255, 255, 0.22);
 }
 .people-name-pill:hover {
-  background: rgba(0, 0, 0, 0.92);
+  background: rgba(12, 15, 24, 0.98);
   border-color: rgba(255, 255, 255, 0.35);
 }
 .people-name-label {
@@ -3537,9 +3510,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
   width: 100%;
   padding: 6px 10px;
   border-radius: 12px;
-  background: rgba(0, 0, 0, 0.92);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(12, 15, 24, 0.96);
   border: 1px solid var(--primary);
   box-shadow: 0 4px 16px color-mix(in srgb, var(--primary) 35%, transparent);
   box-sizing: border-box;
@@ -4130,6 +4101,25 @@ body.has-picks .tools, body.has-picks .hover-actions {
   100% { top: calc(100% - 3px); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .bio-scan { display: none; } }
+
+/* ── People Savebar (#people-savebar) ─────────────────────────────────── */
+#people-savebar:not([hidden]) {
+  animation: ov-slide-up-in .24s cubic-bezier(0.16, 1, 0.3, 1) both;
+  border-color: color-mix(in srgb, var(--err) 40%, var(--line));
+}
+#people-savebar.closing {
+  animation: ov-slide-up-out .18s ease both;
+  pointer-events: none;
+}
+.people-savebar-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--err, #ef4444);
+}
+.people-savebar-info svg {
+  color: var(--err, #ef4444);
+}
 
 /* ── Toast notifications ────────────────────────────────────────────────── */
 .toast.out { animation: mo-rise-out var(--mo-fast) var(--ease-soft) both; }
