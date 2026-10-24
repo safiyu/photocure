@@ -35,3 +35,11 @@ def test_person_photo_face_avatar_zooms_on_hover():
     css = (STATIC / "style.css").read_text(encoding="utf-8")
     block = css[css.index(".ppo-thumb-face {"):css.index(".ppo-face-zoom {")]
     assert "pointer-events: none" not in block
+
+
+def test_face_rename_wires_autocomplete_with_tab_and_enter():
+    js = _js()
+    body = js[js.index("function openFaceRename"):js.index("_faceRenameBound")]
+    assert "setupNameAutocomplete" in body
+    assert "commitRename" in body
+

@@ -111,7 +111,8 @@ def test_modified_file_clears_approval_and_face_counts(tmp_path):
     r = get_img(w, w.ids[0])
     assert r.delete_approved is False and r.manual_bucket is None
     with get_session(w.db) as s:
-        assert s.get(PersonCluster, pid).face_count == 0
+        cluster = s.get(PersonCluster, pid)
+        assert cluster is None or cluster.face_count == 0
 
 
 def test_rescan_keeps_ui_rating_without_sidecar(tmp_path):

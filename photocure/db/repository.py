@@ -457,12 +457,17 @@ class PhotoRepository:
             .where(ImageRecord.route_status == "planned")
         ).one()
         bursts = self.s.exec(sselect(func.count()).select_from(BurstGroup)).one()
+        people = self.s.exec(
+            sselect(func.count()).select_from(PersonCluster)
+            .where(PersonCluster.face_count > 0)
+        ).one()
         return {
             "total_images": int(total or 0),
             "pending_inference": int(pending or 0),
             "duplicates": int(dupes or 0),
             "planned_actions": int(planned or 0),
             "burst_groups": int(bursts or 0),
+            "people": int(people or 0),
         }
 
     # ----------------------------------------------------------- thumbnails

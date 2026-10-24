@@ -2758,12 +2758,205 @@
       updatePeopleSaveBar();
       _pc.fp = null;
       await renderPeople(true);
+      loadStats();
     } catch (e) {
       toast(`Failed to save deletions: ${e.message}`, "err");
     } finally {
       if (saveBtn) saveBtn.disabled = false;
       if (tbBtn) tbBtn.disabled = false;
     }
+  }
+
+  const allKnownPeopleNames = new Set();
+  function getKnownPeopleNames() {
+    const dl = $("#people-names");
+    if (dl) Array.from(dl.options || []).forEach((o) => { if (o.value) allKnownPeopleNames.add(o.value); });
+    if (Array.isArray(activeOverlayPeopleNames)) {
+      activeOverlayPeopleNames.forEach((n) => { if (n) allKnownPeopleNames.add(n); });
+    }
+    return Array.from(allKnownPeopleNames).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  }
+
+  function setupNameAutocomplete(input, getNames, onCommit) {
+    let menu = null;
+    let selectedIndex = 0;
+    let currentMatches = [];
+
+    const closeMenu = () => {
+      if (menu) {
+        menu.remove();
+        menu = null;
+        currentMatches = [];
+        selectedIndex = -1;
+      }
+    };
+
+    const updateHighlight = () => {
+      if (!menu) return;
+      const items = menu.querySelectorAll(".name-autocomplete-item");
+      items.forEach((item, idx) => {
+        const isSel = idx === selectedIndex;
+        item.classList.toggle("active", isSel);
+        item.setAttribute("aria-selected", isSel ? "true" : "false");
+        if (isSel) item.scrollIntoView({ block: "nearest" });
+      });
+    };
+
+    const commitIndex = (idx) => {
+      const match = currentMatches[idx];
+      if (match) {
+        input.value = match;
+        closeMenu();
+        if (onCommit) onCommit(match);
+      }
+    };
+
+    const renderMenu = (query) => {
+      const q = (query || "").trim().toLowerCase();
+      if (!q) {
+        closeMenu();
+        return;
+      }
+
+      const allNames = (getNames() || []).filter(Boolean);
+      const seen = new Set();
+      const uniqueNames = [];
+      allNames.forEach((n) => {
+        const lower = n.toLowerCase();
+        if (!seen.has(lower)) {
+          seen.add(lower);
+          uniqueNames.push(n);
+        }
+      });
+
+      const prefix = uniqueNames.filter((n) => n.toLowerCase().startsWith(q));
+      const sub = uniqueNames.filter((n) => !n.toLowerCase().startsWith(q) && n.toLowerCase().includes(q));
+      currentMatches = [...prefix, ...sub];
+
+      if (!currentMatches.length) {
+        closeMenu();
+        return;
+      }
+
+      selectedIndex = 0;
+
+      if (!menu) {
+        menu = document.createElement("div");
+        menu.className = "name-autocomplete-menu";
+        menu.setAttribute("role", "listbox");
+        const parent = input.closest(".people-name-pill-wrapper") || input.closest(".face-rename-pop") || input.parentElement;
+        parent.style.position = parent.style.position || "relative";
+        parent.appendChild(menu);
+      }
+
+      menu.innerHTML = currentMatches.map((name, idx) => {
+        const matchIdx = name.toLowerCase().indexOf(q);
+        let labelHtml = esc(name);
+        if (matchIdx !== -1) {
+          const before = esc(name.slice(0, matchIdx));
+          const hit = esc(name.slice(matchIdx, matchIdx + q.length));
+          const after = esc(name.slice(matchIdx + q.length));
+          labelHtml = `${before}<b>${hit}</b>${after}`;
+        }
+        return `
+          <div class="name-autocomplete-item${idx === 0 ? " active" : ""}" role="option" data-idx="${idx}" aria-selected="${idx === 0}">
+            <svg class="ic" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+            <span class="name-autocomplete-label">${labelHtml}</span>
+            ${idx === 0 ? `<span class="name-autocomplete-hint">Tab or ↵</span>` : ""}
+          </div>
+        `;
+      }).join("");
+
+      menu.querySelectorAll(".name-autocomplete-item").forEach((el) => {
+        el.addEventListener("mousedown", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const idx = parseInt(el.dataset.idx, 10);
+          commitIndex(idx);
+        });
+      });
+    };
+
+    input.addEventListener("input", () => {
+      renderMenu(input.value);
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (menu && currentMatches.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          e.stopPropagation();
+          selectedIndex = (selectedIndex + 1) % currentMatches.length;
+          updateHighlight();
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          e.stopPropagation();
+          selectedIndex = (selectedIndex - 1 + currentMatches.length) % currentMatches.length;
+          updateHighlight();
+          return;
+        }
+        if (e.key === "Tab") {
+          if (selectedIndex >= 0 && selectedIndex < currentMatches.length) {
+            e.preventDefault();
+            e.stopPropagation();
+            const picked = currentMatches[selectedIndex];
+            input.value = picked;
+            closeMenu();
+            input.focus();
+            input.setSelectionRange(picked.length, picked.length);
+            return;
+          }
+        }
+        if (e.key === "Enter") {
+          if (selectedIndex >= 0 && selectedIndex < currentMatches.length) {
+            e.preventDefault();
+            e.stopPropagation();
+            commitIndex(selectedIndex);
+            return;
+          }
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          e.stopPropagation();
+          closeMenu();
+          return;
+        }
+      } else {
+        const q = input.value.trim().toLowerCase();
+        if (q && (e.key === "Tab" || e.key === "Enter")) {
+          const allNames = (getNames() || []).filter(Boolean);
+          const match = allNames.find((n) => n.toLowerCase().startsWith(q) && n.toLowerCase() !== q);
+          if (match) {
+            if (e.key === "Tab") {
+              e.preventDefault();
+              e.stopPropagation();
+              input.value = match;
+              input.focus();
+              input.setSelectionRange(match.length, match.length);
+              return;
+            }
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.stopPropagation();
+              input.value = match;
+              if (onCommit) onCommit(match);
+              return;
+            }
+          }
+        }
+      }
+    });
+
+    input.addEventListener("blur", () => {
+      setTimeout(closeMenu, 150);
+    });
+
+    return { close: closeMenu };
   }
 
   function _peopleFP(items) {
@@ -2838,9 +3031,24 @@
     _finalizeDelete(host, pid);
   }
 
+  function setPeopleCount(v) {
+    const e = $('[data-count="people"]');
+    if (!e) return;
+    const next = v ? fmtN(v) : "";
+    const had = e.textContent;
+    if (had !== next) {
+      e.textContent = next;
+      e.classList.remove("tick");
+      void e.offsetWidth;
+      e.classList.add("tick");
+      afterAnim(e, moMs("--mo-slow", 380) * 2).then(() => e.classList.remove("tick"));
+    }
+  }
+
   function _finalizeDelete(host, pid) {
     const remaining = host.querySelectorAll(".people-card");
     const count = remaining.length;
+    setPeopleCount(count);
     if (state.peoplePicks.delete(num(pid))) applyPicks();
     const pendingCount = pendingPeopleDeletions.size;
     const sumEl = $("#people-summary");
@@ -2863,6 +3071,7 @@
     const host = $("#peoplegrid");
     const sort = state.peopleSort || "similarity";
     const data = await api(`/api/people?sort=${encodeURIComponent(sort)}`);
+    (data.items || []).forEach((p) => { if (p.name) allKnownPeopleNames.add(p.name); });
     const allItems = (data.items || []).filter((p) => p.face_count > 0 && (p.sample_face_id != null || p.name));
     const items = allItems.filter((p) => !pendingPeopleDeletions.has(p.id));
     const fp = _peopleFP(items);
@@ -2879,6 +3088,7 @@
       // Update counts/summary even without a full rebuild
       const sumEl = $("#people-summary");
       if (sumEl) sumEl.textContent = `${fmtN(items.length)} ${items.length === 1 ? "person" : "people"}`;
+      setPeopleCount(items.length);
       return;
     }
     _pc.sort = sort;
@@ -2887,6 +3097,7 @@
     // Summary count
     const sumEl = $("#people-summary");
     if (sumEl) sumEl.textContent = `${fmtN(items.length)} ${items.length === 1 ? "person" : "people"}`;
+    setPeopleCount(items.length);
 
     // Sort buttons
     $$(".people-sort-group .chip-btn").forEach((btn) => {
@@ -2920,6 +3131,7 @@
           toast(`Done! Formed ${fmtN(res.clusters_created)} person clusters across ${fmtN(res.faces_clustered)} faces.`, "ok");
           _pc.fp = null;
           await renderPeople(true);
+          loadStats();
         } catch (e) {
           toast(`Re-clustering failed: ${e.message}`, "err");
         } finally {
@@ -3033,7 +3245,7 @@
           const currentName = pillWrapper.dataset.currentName || "";
           pillWrapper.innerHTML = `
             <form class="people-name-form" onsubmit="return false;">
-              <input type="text" class="people-name-input" list="people-names" placeholder="Type a name..." value="${esc(currentName)}">
+              <input type="text" class="people-name-input" autocomplete="off" placeholder="Type a name..." value="${esc(currentName)}">
               <button type="submit" class="people-name-submit" title="Save name">
                 <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
@@ -3047,10 +3259,12 @@
           input.select();
 
           let saved = false;
-          const save = async () => {
+          let ac = null;
+          const save = async (nameOverride) => {
             if (saved) return;
             saved = true;
-            const newName = input.value.trim();
+            if (ac) ac.close();
+            const newName = (nameOverride != null ? nameOverride : input.value).trim();
             if (newName === currentName) {
               restore();
               return;
@@ -3058,6 +3272,7 @@
             try {
               await post(`/api/people/${pid}/rename`, { name: newName });
               toast("Renamed ✓", "ok");
+              allKnownPeopleNames.add(newName);
               _pc.fp = null; await renderPeople(true);
             } catch (e) {
               toast(e.message, "err");
@@ -3067,6 +3282,7 @@
           };
 
           const restore = () => {
+            if (ac) ac.close();
             pillWrapper.dataset.currentName = currentName;
             pillWrapper.innerHTML = `
               <button class="people-name-pill" type="button">
@@ -3077,6 +3293,8 @@
               </button>
             `;
           };
+
+          ac = setupNameAutocomplete(input, getKnownPeopleNames, (name) => save(name));
 
           form.addEventListener("submit", (e) => {
             e.preventDefault();
@@ -3096,7 +3314,7 @@
 
           // Leaving the field cancels; only Enter or the check button commits.
           form.addEventListener("focusout", (e) => {
-            if (saved || (e.relatedTarget && form.contains(e.relatedTarget))) return;
+            if (saved || (e.relatedTarget && (form.contains(e.relatedTarget) || pillWrapper.contains(e.relatedTarget)))) return;
             saved = true;
             restore();
           });
@@ -3559,7 +3777,7 @@
     closeFaceRename();
     const current = face.personId != null ? face.name : "";
     const input = el("input", {
-      type: "text", id: "face-rename-input", class: "face-rename-input", list: "face-rename-names",
+      type: "text", id: "face-rename-input", class: "face-rename-input",
       placeholder: "Who is this?", maxlength: 80, autocomplete: "off", "aria-label": "Person name",
     });
     input.value = current;
@@ -3570,14 +3788,23 @@
     const names = el("datalist", { id: "face-rename-names" },
       activeOverlayPeopleNames.map((n) => el("option", { value: n })));
     const pop = el("form", { id: "face-rename-pop", class: "face-rename-pop" }, input, ok, names);
-    pop.addEventListener("submit", async (ev) => {
-      ev.preventDefault();
-      const name = input.value.trim();
+    const commitRename = async (chosenName) => {
+      const name = (chosenName != null ? chosenName : input.value).trim();
       if (!name || name === current) { closeFaceRename(); return; }
       ok.disabled = true;
       await reassignFace(faceId, { new_name: name });
+      allKnownPeopleNames.add(name);
       ok.disabled = false;
+    };
+    pop.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      await commitRename();
     });
+    setupNameAutocomplete(
+      input,
+      () => activeOverlayPeopleNames.length ? activeOverlayPeopleNames : getKnownPeopleNames(),
+      (name) => commitRename(name)
+    );
     overlay.append(pop);
     const o = overlay.getBoundingClientRect();
     const a = anchor.getBoundingClientRect();
@@ -5186,6 +5413,7 @@
     set("library", ov.total);
     set("categories", ov.total);
     set("bursts", s.burst_groups);
+    set("people", s.people);
     set("uncertain", ov.by_category.uncertain || 0, true);
     set("junk", junk);
     set("utility", Object.entries(ov.by_category).reduce((a, [c, n]) => a + (state.utility.has(c) ? n : 0), 0));
@@ -5649,7 +5877,7 @@
       state.density = numVal;
       document.documentElement.style.setProperty("--thumb-min", numVal + "px");
       try { localStorage.setItem("pcur-density", String(numVal)); } catch (e) { /* ignore */ }
-      $$(".density input, #density, .density-slider").forEach((s) => {
+      $$(".density input:not(#people-density), #density, .density-slider:not(.people-density-slider)").forEach((s) => {
         if (s.value !== String(numVal)) s.value = numVal;
       });
 
@@ -5681,11 +5909,29 @@
       });
     };
     document.addEventListener("input", (e) => {
-      if (e.target && e.target.matches && e.target.matches(".density input, #density, .density-slider")) {
+      if (e.target && e.target.matches && e.target.matches(".density input:not(#people-density), #density, .density-slider:not(.people-density-slider)")) {
         setDens(e.target.value);
       }
     });
     setDens(curVal);
+
+    let savedPeopleDensity = null;
+    try { savedPeopleDensity = localStorage.getItem("pcur-people-density"); } catch (e) { /* ignore */ }
+    const curPeopleVal = savedPeopleDensity || ($("#people-density") ? $("#people-density").value : "210") || "210";
+    const setPeopleDens = (val) => {
+      const numVal = Math.min(340, Math.max(140, parseInt(val, 10) || 210));
+      state.peopleDensity = numVal;
+      document.documentElement.style.setProperty("--people-card-min", numVal + "px");
+      try { localStorage.setItem("pcur-people-density", String(numVal)); } catch (e) { /* ignore */ }
+      const slider = $("#people-density");
+      if (slider && slider.value !== String(numVal)) slider.value = numVal;
+    };
+    document.addEventListener("input", (e) => {
+      if (e.target && e.target.matches && e.target.matches("#people-density, .people-density-slider")) {
+        setPeopleDens(e.target.value);
+      }
+    });
+    setPeopleDens(curPeopleVal);
 
     ["catfilter", "manualonly", "neardup"].forEach((id) =>
       $("#" + id).addEventListener("change", () => {

@@ -42,3 +42,14 @@ def test_decrement_person_cluster_preserves_when_named(repo):
     saved = repo.s.get(p.__class__, p.id)
     assert saved is not None and saved.face_count == 0
 
+
+def test_stats_counts_active_person_clusters(repo):
+    assert repo.stats()["people"] == 0
+    p1 = repo.create_person_cluster([1.0])
+    assert repo.stats()["people"] == 1
+    p2 = repo.create_person_cluster([0.5])
+    assert repo.stats()["people"] == 2
+    repo.rename_person(p2.id, "Alice")
+    repo.decrement_person_cluster(p2.id)
+    assert repo.stats()["people"] == 1
+

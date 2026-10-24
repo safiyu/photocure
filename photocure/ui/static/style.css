@@ -55,6 +55,7 @@
   --r-card: 24px;
   --r-thumb: 16px;
   --thumb-min: 220px;
+  --people-card-min: 210px;
   --side-w: 252px;
 
   /* Brand scales sampled from the logo (blue 45%, pink 26%, amber 22%). */
@@ -270,6 +271,7 @@ button { cursor: pointer; }
   font-size: 11px; color: var(--faint); min-width: 2ch; text-align: right;
   padding: 2px 7px; border-radius: 10px; background: var(--well);
 }
+.navitem .count:empty { display: none; }
 .navitem.active .count { color: inherit; background: color-mix(in srgb, var(--primary) 28%, transparent); }
 .navitem .count.alert { background: var(--commit-soft); color: var(--warn); border-radius: 10px; padding: 2px 7px; font-weight: 600; }
 
@@ -614,11 +616,11 @@ input:hover, select:hover { border-color: var(--faint); }
 .toolbar .toggle:has(input:checked), .toolbar .toggle.on, .toolbar .pill.on {
   background: var(--accent); border-color: var(--accent); color: #fff;
 }
-.toolbar .density, .toolbar .size, .learn .density {
+.toolbar .density, .toolbar .size, .learn .density, .people-toolbar .density, .people-toolbar .people-density {
   display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--mut);
   flex-shrink: 0; white-space: nowrap;
 }
-.toolbar .density input, .toolbar .size input, .learn .density input {
+.toolbar .density input, .toolbar .size input, .learn .density input, .people-toolbar .density input, .people-toolbar .people-density input {
   accent-color: var(--accent); width: 90px; height: auto; padding: 0; border: 0; background: none;
 }
 .toolbar .rowcount, .toolbar .count {
@@ -3195,7 +3197,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
 
 .people-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--people-card-min, 210px)), 1fr));
   gap: 18px;
 }
 
@@ -3209,7 +3211,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
   cursor: pointer;
   content-visibility: auto;
-  contain-intrinsic-size: 210px 262px;
+  contain-intrinsic-size: var(--people-card-min, 210px) calc(var(--people-card-min, 210px) * 1.25);
   /* Entrance animation — stagger delay capped so later cards don't wait seconds */
   animation: mo-rise var(--mo-slow) var(--ease-soft) both;
   animation-delay: calc(min(var(--card-index, 0), 8) * var(--mo-stagger));
@@ -3548,6 +3550,108 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .people-name-submit svg {
   width: 16px;
   height: 16px;
+}
+
+/* ── Name Autocomplete Suggestions Menu ──────────────────────────────────── */
+.name-autocomplete-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  z-index: 100;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-sizing: border-box;
+}
+
+.name-autocomplete-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #e2e8f0;
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--mo-fast, 120ms) ease, color var(--mo-fast, 120ms) ease;
+}
+
+.name-autocomplete-item .ic {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--c-primary, var(--c-illustration));
+}
+
+.name-autocomplete-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.name-autocomplete-label b {
+  color: #fff;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-color: var(--primary, #2b9af6);
+  text-underline-offset: 2px;
+}
+
+.name-autocomplete-hint {
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.name-autocomplete-item:hover,
+.name-autocomplete-item.active {
+  background: var(--primary, #2b9af6);
+  color: #fff;
+}
+
+.name-autocomplete-item:hover .ic,
+.name-autocomplete-item.active .ic {
+  color: #fff;
+}
+
+.name-autocomplete-item:hover .name-autocomplete-hint,
+.name-autocomplete-item.active .name-autocomplete-hint {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+.name-autocomplete-menu::-webkit-scrollbar {
+  width: 4px;
+}
+.name-autocomplete-menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.face-rename-pop .name-autocomplete-menu {
+  top: calc(100% + 6px);
+  bottom: auto;
+  left: 0;
+  right: 0;
+  min-width: 190px;
 }
 
 /* ── Drop overlay (shown when another card is dragged over) ──────────────── */

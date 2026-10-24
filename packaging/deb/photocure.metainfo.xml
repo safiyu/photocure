@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.4.2" type="stable" date="2026-10-25">
+      <description>
+        <p>Photocure release 1.4.2.</p>
+      </description>
+    </release>
     <release version="1.4.1" type="stable" date="2026-10-24">
       <description>
         <p>Photocure release 1.4.1.</p>
