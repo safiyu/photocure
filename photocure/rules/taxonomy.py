@@ -93,12 +93,8 @@ class CategoryType(str, Enum):
 
     @property
     def is_date_grouped(self) -> bool:
-        """Photographic classes get YYYY/MM/DD date subfolders."""
-        return self in (
-            CategoryType.PEOPLE, CategoryType.EVENT, CategoryType.FOOD,
-            CategoryType.SCENERY, CategoryType.ANIMAL,
-            CategoryType.VEHICLE, CategoryType.ARCHITECTURE, CategoryType.PLANT,
-        )
+        """Photographic classes no longer use YYYY/MM/DD date subfolders."""
+        return False
 
 
 @dataclass(frozen=True)

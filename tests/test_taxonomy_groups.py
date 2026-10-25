@@ -53,9 +53,9 @@ def test_new_categories_folders_and_flags():
         cat = CategoryType(name)
         assert cat.folder == FOLDERS[name]
         assert not cat.is_junk
-    assert CategoryType.VEHICLE.is_date_grouped
-    assert CategoryType.ARCHITECTURE.is_date_grouped
-    assert CategoryType.PLANT.is_date_grouped
+    assert not CategoryType.VEHICLE.is_date_grouped
+    assert not CategoryType.ARCHITECTURE.is_date_grouped
+    assert not CategoryType.PLANT.is_date_grouped
     assert not CategoryType.ILLUSTRATION.is_date_grouped
     assert not CategoryType.SLIDE.is_date_grouped
     assert not CategoryType.PRODUCT.is_date_grouped

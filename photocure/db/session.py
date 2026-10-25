@@ -43,6 +43,20 @@ def get_engine(db_path: Path | str = "photocure.db", echo: bool = False):
     if cached is not None:
         return cached
 
+    if len(_engine_cache) >= 16:
+        to_del = []
+        for u in list(_engine_cache.keys()):
+            path_str = u.removeprefix("sqlite:///")
+            if not Path(path_str).exists():
+                to_del.append(u)
+        for u in to_del:
+            old = _engine_cache.pop(u, None)
+            if old is not None:
+                try:
+                    old.dispose()
+                except Exception:
+                    pass
+
     engine = create_engine(
         url,
         echo=echo,
@@ -54,7 +68,7 @@ def get_engine(db_path: Path | str = "photocure.db", echo: bool = False):
     return engine
 
 
-SCHEMA_VERSION = 9  # 9: delete_approved; 8: aesthetic_model, preference, preference_models; 7: file_mtime; 6: geo/favourite columns and indexes; 5: blink/face columns; 4: xmp_written_*
+SCHEMA_VERSION = 10  # 10: face ignored column; 9: delete_approved; 8: aesthetic_model, preference, preference_models; 7: file_mtime; 6: geo/favourite columns and indexes; 5: blink/face columns; 4: xmp_written_*
 
 
 def _sql_type(col) -> str:

@@ -202,7 +202,7 @@ class DecisionMatrix:
         # Gather child metrics.
         q = getattr(rec, "quality", None)
         sem = getattr(rec, "semantic", None)
-        faces: list[FaceDetection] = getattr(rec, "faces", None) or []
+        faces: list[FaceDetection] = [f for f in (getattr(rec, "faces", None) or []) if not getattr(f, "ignored", False)]
 
         # Judge semantics first so the quality gate can spare screen content.
         assessment = (assess_semantics(sem, self.taxonomy, self.tax)

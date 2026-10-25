@@ -171,6 +171,20 @@ def run_with_retry(fn: Callable[[Sequence], list], items: Sequence,
                 + run_with_retry(fn, items[mid:], bs, on_oom))
 
 
+def _box_iou(b1: tuple[float, float, float, float], b2: tuple[float, float, float, float]) -> float:
+    xA = max(b1[0], b2[0])
+    yA = max(b1[1], b2[1])
+    xB = min(b1[2], b2[2])
+    yB = min(b1[3], b2[3])
+    inter = max(0.0, xB - xA) * max(0.0, yB - yA)
+    if inter <= 0.0:
+        return 0.0
+    area1 = max(0.0, b1[2] - b1[0]) * max(0.0, b1[3] - b1[1])
+    area2 = max(0.0, b2[2] - b2[0]) * max(0.0, b2[3] - b2[1])
+    union = area1 + area2 - inter
+    return inter / union if union > 0.0 else 0.0
+
+
 class InferencePipeline:
     """Run face + semantic inference over all pending images."""
 
@@ -195,7 +209,10 @@ class InferencePipeline:
             for i in range(0, len(paths), _IN_BATCH):
                 part = paths[i:i + _IN_BATCH]
                 recs.extend(s.exec(
-                    sselect(ImageRecord).where(col(ImageRecord.path).in_(part))
+                    sselect(ImageRecord)
+                    .where(col(ImageRecord.path).in_(part))
+                    .where(ImageRecord.route_status != "executed")
+                    .where(ImageRecord.scan_status != "missing")
                 ).all())
             recs.sort(key=lambda r: r.id or 0)
             return recs[:limit] if limit else recs
@@ -205,7 +222,11 @@ class InferencePipeline:
             # Photos analysed by an older face pipeline: their boxes cannot be reused.
             wanted = or_(wanted, and_(ImageRecord.infer_status == "inferred",
                                       ImageRecord.faces_schema_version < self.cfg.face.schema_version))
-        stmt = sselect(ImageRecord).where(ImageRecord.scan_status != "missing", wanted).order_by(col(ImageRecord.id))
+        stmt = sselect(ImageRecord).where(
+            ImageRecord.scan_status != "missing",
+            ImageRecord.route_status != "executed",
+            wanted
+        ).order_by(col(ImageRecord.id))
         if limit:
             stmt = stmt.limit(limit)
         return list(s.exec(stmt).all())
@@ -406,16 +427,39 @@ class InferencePipeline:
                                 image_id=fr.image_id,
                                 **{k: v for k, v in q.items() if k != "needs_review"},
                             ))
+                            old_ignored = [
+                                of for of in repo.faces_for_image(fr.image_id)
+                                if getattr(of, "ignored", False) and of.x1 is not None
+                            ]
+                            ignored_flags = [False] * len(faces)
+                            for i, f in enumerate(faces):
+                                if getattr(f, "x1", None) is not None:
+                                    box = (f.x1, f.y1, f.x2, f.y2)
+                                    if any(_box_iou(box, (oi.x1, oi.y1, oi.x2, oi.y2)) >= 0.5 for oi in old_ignored):
+                                        ignored_flags[i] = True
+
+                            active_faces = [f for f, ign in zip(faces, ignored_flags) if not ign]
                             if emb_ok:
-                                person_ids = self._assign_people(
-                                    repo, centroids, fr.image_id, faces, undo)
+                                active_pids = self._assign_people(
+                                    repo, centroids, fr.image_id, active_faces, undo)
                             else:
-                                person_ids = self._keep_people(repo, fr.image_id, faces)
+                                active_pids = self._keep_people(repo, fr.image_id, active_faces)
+
+                            act_idx = 0
+                            person_ids = []
+                            for ign in ignored_flags:
+                                if ign:
+                                    person_ids.append(None)
+                                else:
+                                    person_ids.append(active_pids[act_idx])
+                                    act_idx += 1
+
                             repo.replace_faces(
                                 fr.image_id,
                                 [self._face_row(fr.image_id, f, fr.scale, fr.bgr.shape,
-                                               embedding=f.embedding, person_id=pid)
-                                 for f, pid in zip(faces, person_ids)],
+                                               embedding=f.embedding, person_id=pid,
+                                               ignored=ign)
+                                 for f, pid, ign in zip(faces, person_ids, ignored_flags)],
                             )
                             rec.blink_count = counts[0]
                             rec.has_blinks = counts[0] > 0
@@ -679,7 +723,8 @@ class InferencePipeline:
 
     @staticmethod
     def _face_row(image_id: int, f, scale: float = 1.0, shape: tuple = (0, 0),
-                 embedding: list[float] | None = None, person_id: int | None = None) -> FaceDetection:
+                 embedding: list[float] | None = None, person_id: int | None = None,
+                 ignored: bool = False) -> FaceDetection:
         h, w = shape[:2]
         return FaceDetection(
             image_id=image_id,
@@ -695,6 +740,7 @@ class InferencePipeline:
             is_blink=bool(getattr(f, "is_blink", False)),
             embedding_json=quantize_embedding(embedding) if embedding else None,
             person_id=person_id,
+            ignored=ignored,
         )
 
 

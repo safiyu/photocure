@@ -259,6 +259,8 @@ class CuratorConfig(BaseSettings):
 
     # Output organization root (Option 1).
     organize_root: Path = Path("Organized")
+    # Persistent Library root for finalized library photos.
+    library_root: Path | None = None
     unknown_date_dir: str = "Unknown_Date"
 
     # Server & auth (C1).

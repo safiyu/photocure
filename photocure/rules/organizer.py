@@ -136,7 +136,7 @@ class FolderOrganizer:
 
         cat = decision.category
         base = self.root / self._folder_for(decision)
-        if decision.needs_date:
+        if decision.needs_date and cat.is_date_grouped:
             date = _date_components(rec.taken_at)
             if date is None:
                 # Date-grouped class without a usable date (never 1970).

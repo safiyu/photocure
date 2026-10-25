@@ -41,7 +41,7 @@ def test_json_taxonomy_with_custom_class(tmp_path):
     assert tax.category_of("kids") == CategoryType.CUSTOM
     assert tax.folder_override_of("kids") == "Family/Kids"
     assert tax.is_date_grouped("kids") is True
-    assert tax.is_date_grouped("food") is True  # built-in default
+    assert tax.is_date_grouped("food") is False  # built-in default
 
 
 def test_yaml_taxonomy(tmp_path):
@@ -127,9 +127,9 @@ def test_custom_class_routes_to_its_folder(tmp_path, monkeypatch):
     cfg = CuratorConfig()
     dec = DecisionMatrix(cfg).evaluate_record(_rec("kids"))
     assert dec.category == CategoryType.CUSTOM
-    assert dec.folder == "Family/Kids" and dec.needs_date is True
+    assert dec.folder == "Family/Kids"
     target = FolderOrganizer(cfg, organize_root=Path("/org")).full_target(_rec("kids"), dec)
-    assert target == Path("/org/Family/Kids/2024/05/12/k.jpg")
+    assert target == Path("/org/Family/Kids/k.jpg")
 
 
 def test_class_removed_from_taxonomy_routes_to_uncertain(tmp_path, monkeypatch):

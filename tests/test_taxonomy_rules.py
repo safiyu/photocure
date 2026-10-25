@@ -106,7 +106,7 @@ def test_every_class_keeps_a_balanced_prompt_ensemble():
 def test_event_is_a_built_in_date_grouped_class():
     assert CategoryType.EVENT in DEFAULT_TAXONOMY.categories
     assert CategoryType.EVENT.folder == "Events"
-    assert CategoryType.EVENT.is_date_grouped and not CategoryType.EVENT.is_junk
+    assert not CategoryType.EVENT.is_date_grouped and not CategoryType.EVENT.is_junk
     assert DEFAULT_TAXONOMY.group_of("event") == DEFAULT_TAXONOMY.group_of("people")
 
 
@@ -114,7 +114,7 @@ def test_a_confident_event_photo_routes_to_events_with_a_date():
     rec = _rec(quality=_good_quality(),
                semantic=_semantic("event", 0.8, top2="scenery", top2_score=0.05))
     d = _eval(rec)
-    assert d.category == CategoryType.EVENT and d.needs_date is True
+    assert d.category == CategoryType.EVENT and d.needs_date is False
 
 
 def test_event_and_people_are_judged_as_one_group():

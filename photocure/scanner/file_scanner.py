@@ -143,11 +143,15 @@ class FileScanner:
                      "build", "dist", "node_modules", "_gzip", "ui-gzip",
                      ".venv", "venv", "__pycache__", ".tox", "target"}
         root_resolved = None
+        lib_root = Path(self.cfg.library_root).expanduser().resolve() if self.cfg.library_root else None
         for dirpath, dirnames, filenames in _os_walk(root, skip_dirs, errors):
             if cancel_check and cancel_check():
                 raise InterruptedError("Scan cancelled by user")
             dirnames[:] = [d for d in dirnames if d.lower() not in skip_dirs
                            and not d.startswith(".") and not _is_library_bundle(d)]
+            if lib_root:
+                dirnames[:] = [d for d in dirnames if Path(dirpath, d).resolve() != lib_root
+                               and not Path(dirpath, d).resolve().is_relative_to(lib_root)]
             for fn in filenames:
                 if cancel_check and cancel_check():
                     raise InterruptedError("Scan cancelled by user")
@@ -180,6 +184,10 @@ class FileScanner:
         root = Path(root).expanduser().resolve()
         if not root.exists():
             raise FileNotFoundError(f"Target directory does not exist: {root}")
+        if self.cfg.library_root:
+            lib_root = Path(self.cfg.library_root).expanduser().resolve()
+            if root == lib_root or root.is_relative_to(lib_root):
+                raise ValueError(f"Cannot scan inside library root: {root}")
         result = ScanResult()
         files = list(self.iter_files(root, errors=result.walk_errors,
                                      skipped=result.skipped_files,

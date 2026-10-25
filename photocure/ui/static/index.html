@@ -70,11 +70,11 @@
 
       <nav>
         <span id="nav-indicator" class="nav-indicator" aria-hidden="true"></span>
-        <div class="navgroup">
+        <div class="navgroup" id="navgroup-pipeline">
           <h2>Get started</h2>
           <button class="tab navitem active" data-tab="library"><svg class="ic" aria-hidden="true"><use href="#i-pipeline"/></svg><span>Pipeline</span><em class="count"></em></button>
         </div>
-        <div class="navgroup" style="margin-top:18px">
+        <div class="navgroup" id="navgroup-browse" style="margin-top:18px">
           <h2>Browse</h2>
           <button class="tab navitem" data-tab="categories"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span>Library</span><em class="count" data-count="categories"></em></button>
           <button class="tab navitem" data-tab="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span>Search</span><em class="count"></em></button>
@@ -84,7 +84,7 @@
           <button class="tab navitem" data-tab="events"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg><span>Events</span><em class="count"></em></button>
           <button class="tab navitem" data-tab="utility"><svg class="ic" aria-hidden="true"><use href="#i-inbox"/></svg><span>Utility</span><em class="count" data-count="utility"></em></button>
         </div>
-        <div class="navgroup" style="margin-top:18px">
+        <div class="navgroup" id="navgroup-review" style="margin-top:18px">
           <h2>Review</h2>
           <button class="tab navitem" data-tab="uncertain"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><span>Finalize</span><em class="count" data-count="uncertain"></em></button>
           <button class="tab navitem" data-tab="duplicates"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>Duplicates</span><em class="count" data-count="duplicates"></em></button>
@@ -121,6 +121,16 @@
         <div class="grow">
           <h1 id="page-title">Pipeline</h1>
           <div class="sub" id="page-sub"></div>
+        </div>
+        <div class="top-mode-switch" id="top-mode-switch" role="tablist" aria-label="Mode Selection">
+          <button class="top-mode-btn active" id="btn-mode-pipeline" role="tab" aria-selected="true" data-mode="pipeline">
+            <span>New Pipeline</span>
+            <span class="mode-badge" id="badge-mode-pipeline">0</span>
+          </button>
+          <button class="top-mode-btn" id="btn-mode-library" role="tab" aria-selected="false" data-mode="library">
+            <span>Photo Library</span>
+            <span class="mode-badge" id="badge-mode-library">0</span>
+          </button>
         </div>
         <div id="progress-card" class="progress-card" hidden>
           <div class="progress-header">

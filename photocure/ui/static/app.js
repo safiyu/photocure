@@ -51,6 +51,10 @@
       afterAnim(el, moMs("--mo-fast", 160) + 100).then(() => el.remove());
     };
     if (action) {
+      $$(".toast-action", box).forEach((b) => {
+        const oldToast = b.closest(".toast");
+        if (oldToast) oldToast.remove();
+      });
       const b = document.createElement("button");
       b.type = "button";
       b.className = "toast-action";
@@ -654,7 +658,9 @@
       renderSkeleton: () => el("div", { class: "skel" }),
       async fetchPage(offset, limit) {
         const qs = cfg.params();
-        const data = await api(`/api/images?${qs}${qs ? "&" : ""}limit=${limit}&offset=${offset}`);
+        const sc = state.scope || "pipeline";
+        const scopeParam = (qs && qs.includes("scope=")) ? "" : `&scope=${encodeURIComponent(sc)}`;
+        const data = await api(`/api/images?${qs}${qs ? "&" : ""}limit=${limit}&offset=${offset}${scopeParam}`);
         data.items.forEach((it) => { state.byId[it.id] = it; });
         return data;
       },
@@ -2647,7 +2653,8 @@
 
   // ------------------------------------------------------------------ bursts
   async function renderBursts(keepId) {
-    const data = await api("/api/bursts");
+    const sc = state.scope || "pipeline";
+    const data = await api(`/api/bursts?scope=${encodeURIComponent(sc)}`);
     const list = $("#burstlist");
     const scroll = list.scrollTop;
     if (!data.items.length) {
@@ -3070,7 +3077,8 @@
   async function renderPeople(force = false) {
     const host = $("#peoplegrid");
     const sort = state.peopleSort || "similarity";
-    const data = await api(`/api/people?sort=${encodeURIComponent(sort)}`);
+    const sc = state.scope || "pipeline";
+    const data = await api(`/api/people?sort=${encodeURIComponent(sort)}&scope=${encodeURIComponent(sc)}`);
     (data.items || []).forEach((p) => { if (p.name) allKnownPeopleNames.add(p.name); });
     const allItems = (data.items || []).filter((p) => p.face_count > 0 && (p.sample_face_id != null || p.name));
     const items = allItems.filter((p) => !pendingPeopleDeletions.has(p.id));
@@ -3532,7 +3540,8 @@
     document.body.style.overflow = "hidden";
 
     try {
-      const data = await api(`/api/people/${personId}/photos`);
+      const sc = state.scope || "pipeline";
+      const data = await api(`/api/people/${personId}/photos?scope=${encodeURIComponent(sc)}`);
       const { person, photos } = data;
 
       // Header
@@ -5419,6 +5428,11 @@
     set("utility", Object.entries(ov.by_category).reduce((a, [c, n]) => a + (state.utility.has(c) ? n : 0), 0));
     set("actions", s.planned_actions);
 
+    const pBadge = $("#badge-mode-pipeline");
+    if (pBadge && ov.pipeline_count != null) pBadge.textContent = fmtN(ov.pipeline_count);
+    const lBadge = $("#badge-mode-library");
+    if (lBadge && ov.library_count != null) lBadge.textContent = fmtN(ov.library_count);
+
     const total = ov.total, pending = num(s.pending_inference), bursts = num(s.burst_groups);
     let stored = null;
     try {
@@ -5469,7 +5483,8 @@
 
   async function loadStats() {
     try {
-      const ov = await api("/api/overview");
+      const sc = state.scope || "pipeline";
+      const ov = await api(`/api/overview?scope=${encodeURIComponent(sc)}`);
       state.overview = ov;
       state.manualCount = num(ov.manual_count);
       updateLearn();
@@ -5843,6 +5858,41 @@
     document.addEventListener("keydown", onKey);
 
     $$(".tab").forEach((t) => (t.onclick = () => showTab(t.dataset.tab)));
+
+    function setMode(mode) {
+      state.scope = mode;
+      const pBtn = $("#btn-mode-pipeline");
+      const lBtn = $("#btn-mode-library");
+      const pipeGroup = $("#navgroup-pipeline");
+      const revGroup = $("#navgroup-review");
+      if (mode === "library") {
+        if (pBtn) { pBtn.classList.remove("active"); pBtn.setAttribute("aria-selected", "false"); }
+        if (lBtn) { lBtn.classList.add("active"); lBtn.setAttribute("aria-selected", "true"); }
+        if (pipeGroup) pipeGroup.style.display = "none";
+        if (revGroup) revGroup.style.display = "none";
+        post("/api/library/sync", {}).catch(() => {});
+        resetVisibleGrids();
+        loadStats();
+        if (["library", "uncertain", "duplicates", "junk", "actions"].includes(state.tab)) {
+          showTab("categories");
+        } else {
+          showTab(state.tab);
+        }
+      } else {
+        if (lBtn) { lBtn.classList.remove("active"); lBtn.setAttribute("aria-selected", "false"); }
+        if (pBtn) { pBtn.classList.add("active"); pBtn.setAttribute("aria-selected", "true"); }
+        if (pipeGroup) pipeGroup.style.display = "";
+        if (revGroup) revGroup.style.display = "";
+        resetVisibleGrids();
+        loadStats();
+        showTab(state.tab);
+      }
+    }
+    const btnModePipe = $("#btn-mode-pipeline");
+    if (btnModePipe) btnModePipe.onclick = () => setMode("pipeline");
+    const btnModeLib = $("#btn-mode-library");
+    if (btnModeLib) btnModeLib.onclick = () => setMode("library");
+
     $("#menu-btn").onclick = () => document.body.classList.toggle("nav-open");
     document.addEventListener("click", (e) => {
       if (document.body.classList.contains("nav-open") && !e.target.closest("#side, #menu-btn")) {

@@ -79,7 +79,7 @@ def describe_backends(cfg: CuratorConfig) -> dict:
 
 # Settings store. Precedence: CLI flag > this settings file > environment > defaults.
 SETTINGS_KEYS = ("device", "device_index", "decode_workers", "torch_threads", "scan_workers",
-                 "collision_policy")
+                 "collision_policy", "library_root")
 COLLISION_POLICIES = ("sequence", "date_suffix", "skip")
 
 
@@ -107,6 +107,8 @@ def _validate_settings(data: dict, allow_none: bool = False) -> dict:
                 raise ValueError(f"Unknown collision policy '{value}'. "
                                  f"Choose one of: {', '.join(COLLISION_POLICIES)}.")
             out[key] = v
+        elif key == "library_root":
+            out[key] = str(Path(value).expanduser().resolve()) if value else None
         else:
             if isinstance(value, bool):
                 raise ValueError(f"'{key}' must be a whole number.")
@@ -170,6 +172,8 @@ def apply_settings(cfg: CuratorConfig, settings: dict) -> CuratorConfig:
         new.scan_workers = checked["scan_workers"] or auto_scan_workers()
     if "collision_policy" in checked:
         new.collision_policy = checked["collision_policy"]
+    if "library_root" in checked:
+        new.library_root = Path(checked["library_root"]) if checked["library_root"] else None
     return new
 
 
@@ -185,6 +189,7 @@ def effective_settings(db_path: Path | str, cfg: CuratorConfig | None = None,
         "torch_threads": base.device.torch_threads,
         "scan_workers": 0 if stored.get("scan_workers") == 0 else base.scan_workers,
         "collision_policy": base.collision_policy,
+        "library_root": str(base.library_root) if base.library_root else None,
     }
     return {
         "values": values,

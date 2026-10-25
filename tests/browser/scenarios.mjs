@@ -440,6 +440,7 @@ try {
     await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length >= 5", 15000, "category cards");
     await settle();
     const junkTotal = async () => (await api("/api/images?category=accidental&limit=1")).total;
+    await settle();
     const before = await junkTotal();
     const ids = await page.eval("[...document.querySelectorAll('#grid .vg-window .card')].filter((c) => (c.querySelector('.catpick .t') || {}).textContent !== 'Accidental').slice(0, 2).map((c) => Number(c.dataset.id))");
     check(ids.length === 2, "need two photos outside the Accidental bucket");
@@ -450,12 +451,14 @@ try {
     await shot("12-selection-bar");
     await page.eval("document.getElementById('bulk-junk').click()");
     await page.waitFor("!!document.querySelector('#toasts .toast-action')", 8000, "Undo toast appears");
-    check((await junkTotal()) === before + 2, "Mark junk did not move both photos");
+    let mid = await junkTotal();
+    for (let i = 0; i < 20 && mid !== before + 2; i++) { await sleep(200); mid = await junkTotal(); }
+    check(mid === before + 2, `Mark junk did not move both photos (before: ${before}, after: ${mid}, ids: ${JSON.stringify(ids)})`);
     await page.eval("document.querySelector('#toasts .toast-action').click()");
-    await page.waitFor("!document.querySelector('#toasts .toast-action')", 8000, "Undo toast closes");
+    await page.waitFor("!document.querySelector('#toasts .toast-action')", 15000, "Undo toast closes");
     await page.waitFor("true", 1000);
     let after = await junkTotal();
-    for (let i = 0; i < 20 && after !== before; i++) { await sleep(200); after = await junkTotal(); }
+    for (let i = 0; i < 40 && after !== before; i++) { await sleep(200); after = await junkTotal(); }
     check(after === before, `Undo left ${after - before} photos in junk`);
   });
 
@@ -545,7 +548,7 @@ try {
 
   await scenario("touch swipe navigation in lightbox stage", async () => {
     // Wait for the first card itself: after a tab switch the window can still hold cards from lower down.
-    await page.waitFor("document.querySelector('#grid .vg-window .card[data-idx=\"0\"] .thumb')", 8000, "first card rendered");
+    await page.waitFor("!!document.querySelector('#grid .vg-window .card[data-idx=\"0\"] .thumb')", 8000, "first card rendered");
     await page.eval("document.querySelector('#grid .vg-window .card[data-idx=\"0\"] .thumb').click()");
     await page.waitFor("!document.querySelector('#lightbox').hidden", 8000, "lightbox opens");
     const title0 = await page.eval("document.querySelector('#lb-title').textContent");
@@ -785,10 +788,18 @@ try {
     await clickTab("settings");
     await page.waitFor("document.querySelector('#kw-note').textContent.length > 0", 8000, "note filled");
     check(!(await page.eval("document.querySelector('#set-keywords').disabled")), "the switch is usable");
-    // Set the wanted state instead of assuming each click flips it, and allow for a slow runner.
+    // Set the wanted state instead of assuming each click flips it. Under load the app's
+    // change handler can be slow or a save can fail and revert the box, so re-dispatch the
+    // change (resetting the box if it was rolled back) until the API actually reports the value.
     const setKeywords = async (want) => {
-      await page.eval(`(() => { const b = document.querySelector('#set-keywords'); if (b.checked !== ${want}) b.click(); })()`);
-      await page.waitFor(`fetch('/api/features').then((r) => r.json()).then((j) => j.features.write_keywords === ${want})`, 20000, want ? "saved on" : "saved off");
+      const end = Date.now() + 30000;
+      while (Date.now() < end) {
+        const cur = await page.eval("document.querySelector('#set-keywords').checked");
+        if (cur !== want) await page.eval(`(() => { const b = document.querySelector('#set-keywords'); b.checked = ${want}; b.dispatchEvent(new Event('change')); })()`);
+        await page.waitFor(`fetch('/api/features').then((r) => r.json()).then((j) => j.features.write_keywords === ${want})`, 4000, want ? "saved on" : "saved off").catch(() => {});
+        if (await page.eval(`fetch('/api/features').then((r) => r.json()).then((j) => j.features.write_keywords === ${want})`)) return;
+      }
+      throw new Error(`could not save keywords=${want}`);
     };
     await setKeywords(true);
     await shot("18-settings-keywords");

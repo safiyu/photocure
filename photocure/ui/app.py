@@ -56,7 +56,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy import update as sa_update
 from sqlalchemy.orm import selectinload
-from sqlmodel import col, select
+from sqlmodel import and_, col, or_, select
 
 from .. import __version__
 from ..auth import COOKIE_MAX_AGE, COOKIE_NAME, AuthManager, build_allowed_hosts, origin_allowed
@@ -1029,10 +1029,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
         sort: Literal["id", "taken"] = Query("id"),
         limit: int = Query(200, ge=1, le=1000),
         offset: int = Query(0, ge=0),
+        scope: Literal["pipeline", "library", "all"] | None = Query(None),
     ):
         I = M.ImageRecord
         eff = func.coalesce(I.manual_bucket, I.category)
         conds = [I.scan_status != "missing"]
+        if scope == "pipeline":
+            conds.append(I.route_status != "executed")
+        elif scope == "library":
+            conds.append(I.route_status == "executed")
         if issue:
             conds.append(_issue_clause(issue))
         if category:
@@ -1518,8 +1523,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
             if rec is None:
                 raise HTTPException(404, "image not found")
             fp = _fingerprint(rec)
-            faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == image_id)
-                           .order_by(M.FaceDetection.id)).all()
+            faces = s.exec(select(M.FaceDetection).where(
+                M.FaceDetection.image_id == image_id,
+            ).order_by(M.FaceDetection.id)).all()
             person_ids = {f.person_id for f in faces if f.person_id is not None}
             names = {p.id: p.name for p in (
                 s.exec(select(M.PersonCluster).where(col(M.PersonCluster.id).in_(person_ids))).all()
@@ -1542,25 +1548,28 @@ def create_app(db_path: str | None = None) -> FastAPI:
             }
 
     @app.get("/api/people")
-    def list_people_endpoint(sort: Literal["similarity", "count", "name"] = "similarity"):
+    def list_people_endpoint(
+        sort: Literal["similarity", "count", "name"] = "similarity",
+        scope: str = Query("all")
+    ):
         """Known people clusters, arranged by similarity (default), count, or name."""
         from ..people_actions import list_people
-        return {"items": list_people(dbp, sort=sort)}
+        return {"items": list_people(dbp, sort=sort, scope=scope)}
 
     @app.delete("/api/people/{person_id}", dependencies=auth)
-    def delete_person_endpoint(person_id: int):
+    def delete_person_endpoint(person_id: int, scope: str = Query("all")):
         """Delete a person cluster and unassign all its associated faces."""
         from ..people_actions import ActionError, delete_person
         try:
-            return delete_person(dbp, person_id)
+            return delete_person(dbp, person_id, scope=scope)
         except ActionError as e:
             raise HTTPException(e.status, str(e)) from None
 
     @app.post("/api/people/bulk-delete", dependencies=auth)
-    def bulk_delete_people_endpoint(body: BulkDeletePeopleReq):
+    def bulk_delete_people_endpoint(body: BulkDeletePeopleReq, scope: str = Query("all")):
         """Delete multiple person clusters in a single atomic transaction."""
         from ..people_actions import bulk_delete_people
-        return bulk_delete_people(dbp, body.person_ids)
+        return bulk_delete_people(dbp, body.person_ids, scope=scope)
 
     @app.post("/api/people/{person_id}/rename", dependencies=auth)
     def rename_person_endpoint(person_id: int, body: RenamePersonReq):
@@ -1587,16 +1596,17 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return recluster_people(dbp, threshold=threshold)
 
     @app.get("/api/people/{person_id}/photos")
-    def person_photos_endpoint(person_id: int):
+    def person_photos_endpoint(person_id: int, scope: str = Query("all")):
         """All distinct photos that contain a face belonging to *person_id*, newest first."""
         with get_session(dbp) as s:
             person = s.get(M.PersonCluster, person_id)
             if person is None:
                 raise HTTPException(404, "person not found")
-            # Fetch all face rows for this person that have a valid crop box
+            # Fetch all non-ignored face rows for this person that have a valid crop box
             faces = s.exec(
                 select(M.FaceDetection)
                 .where(M.FaceDetection.person_id == person_id)
+                .where(M.FaceDetection.ignored == False)
                 .where(M.FaceDetection.x1.isnot(None))
             ).all()
             # Deduplicate: keep one face (sharpest) per image
@@ -1608,9 +1618,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
             # Load image records
             image_ids = list(best.keys())
             if not image_ids:
-                return {"person": {"id": person.id, "name": person.name, "face_count": person.face_count},
+                return {"person": {"id": person.id, "name": person.name, "face_count": 0},
                         "photos": []}
-            recs = sorted((r for r in _by_ids(s, image_ids) if r.scan_status != "missing"),
+            all_recs = [r for r in _by_ids(s, image_ids) if r.scan_status != "missing"]
+            if scope == "pipeline":
+                all_recs = [r for r in all_recs if r.route_status != "executed"]
+            elif scope == "library":
+                all_recs = [r for r in all_recs if r.route_status == "executed"]
+
+            recs = sorted(all_recs,
                           key=lambda r: (r.taken_at is not None, r.taken_at),
                           reverse=True)
             photos = []
@@ -1626,7 +1642,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     "face_url": f"/api/faces/{face.id}.jpg" if face else None,
                 })
             return {
-                "person": {"id": person.id, "name": person.name, "face_count": person.face_count},
+                "person": {"id": person.id, "name": person.name, "face_count": len(photos)},
                 "photos": photos,
             }
 
@@ -1830,22 +1846,65 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 if m.id == body.image_id:
                     m.delete_approved = False  # choosing a frame to keep clears its delete mark
             bg.best_shot_id = body.image_id
+
+            # If in library mode (route_status == "executed"), move files on disk immediately
+            promoted = next((m for m in members if m.id == body.image_id), None)
+            if promoted and promoted.route_status == "executed" and Path(promoted.path).exists():
+                lib_root = Path(cfg.library_root).resolve() if cfg.library_root else Path(promoted.path).parent.parent.parent
+                from ..rules.taxonomy import get_taxonomy
+                tax = get_taxonomy(cfg)
+                cat_name = promoted.manual_bucket or promoted.category or "People"
+                cat_enum = tax.category_of(cat_name)
+                cat_folder = tax.folder_override_of(cat_name) or (cat_enum.folder if cat_enum else cat_name)
+
+                cat_dir = lib_root / cat_folder
+                cat_dir.mkdir(parents=True, exist_ok=True)
+                new_best_path = cat_dir / Path(promoted.path).name
+                if new_best_path != Path(promoted.path):
+                    shutil.move(promoted.path, new_best_path)
+                    promoted.path = str(new_best_path)
+                    promoted.target_path = str(new_best_path)
+
+                b_name = bg.name or f"Burst_{bg.id:06d}"
+                alt_dir = lib_root / "Bursts" / b_name / "alternates"
+                alt_dir.mkdir(parents=True, exist_ok=True)
+                for m in members:
+                    if m.id != body.image_id and m.route_status == "executed" and Path(m.path).exists():
+                        target_alt = alt_dir / Path(m.path).name
+                        if target_alt != Path(m.path):
+                            shutil.move(m.path, target_alt)
+                            m.path = str(target_alt)
+                            m.target_path = str(target_alt)
+
             s.flush()
             return {"ok": True, "burst_id": burst_id, "best_shot_id": body.image_id}
 
     @app.get("/api/overview")
-    def overview():
+    def overview(scope: str = Query("all")):
         """Library composition by effective category, for the composition strip."""
-        eff = func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category)
-        active = M.ImageRecord.scan_status != "missing"
+        I = M.ImageRecord
+        eff = func.coalesce(I.manual_bucket, I.category)
+        active = I.scan_status != "missing"
         with get_session(dbp) as s:
-            rows = s.exec(select(eff, func.count()).where(active).group_by(eff)).all()
+            scope_filter = active
+            if scope == "pipeline":
+                scope_filter = and_(active, I.route_status != "executed")
+            elif scope == "library":
+                scope_filter = and_(active, I.route_status == "executed")
+
+            rows = s.exec(select(eff, func.count()).where(scope_filter).group_by(eff)).all()
             by_cat = {(k or "unrouted"): int(n) for k, n in rows}
             stats_ = PhotoRepository(s).stats()
-            manual = s.exec(select(func.count()).select_from(M.ImageRecord).where(
-                active, M.ImageRecord.manual_bucket.is_not(None))).one()
+            manual = s.exec(select(func.count()).select_from(I).where(
+                scope_filter, I.manual_bucket.is_not(None))).one()
+            pipeline_count = s.exec(select(func.count()).select_from(I).where(
+                active, I.route_status != "executed")).one() or 0
+            library_count = s.exec(select(func.count()).select_from(I).where(
+                active, I.route_status == "executed")).one() or 0
         return {"by_category": by_cat, "total": sum(by_cat.values()), "stats": stats_,
-                "manual_count": int(manual or 0)}
+                "manual_count": int(manual or 0),
+                "pipeline_count": int(pipeline_count),
+                "library_count": int(library_count)}
 
     @app.get("/api/browse", dependencies=auth)
     def browse(path: str | None = Query(None), hidden: bool = Query(False)):
@@ -1916,7 +1975,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return {"path": str(new)}
 
     @app.get("/api/bursts")
-    def bursts():
+    def bursts(scope: str = Query("all")):
         with get_session(dbp) as s:
             repo = PhotoRepository(s)
             if repo.prune_bursts():
@@ -1924,8 +1983,23 @@ def create_app(db_path: str | None = None) -> FastAPI:
             out = []
             for b in repo.all_bursts():
                 best = repo.get_by_id(b.best_shot_id) if b.best_shot_id else None
+                if scope in ("pipeline", "library"):
+                    m_q = select(func.count(M.ImageRecord.id)).where(
+                        M.ImageRecord.burst_id == b.id,
+                        M.ImageRecord.scan_status != "missing",
+                    )
+                    if scope == "pipeline":
+                        m_q = m_q.where(M.ImageRecord.route_status != "executed")
+                    else:
+                        m_q = m_q.where(M.ImageRecord.route_status == "executed")
+                    cnt = s.exec(m_q).one()
+                    if not cnt:
+                        continue
+                    b_count = int(cnt)
+                else:
+                    b_count = b.image_count
                 out.append({
-                    "id": b.id, "name": b.name, "image_count": b.image_count,
+                    "id": b.id, "name": b.name, "image_count": b_count,
                     "best_shot_id": b.best_shot_id,
                     "best_shot": best.filename if best else None,
                     "start_time": b.start_time.isoformat() if b.start_time else None,
@@ -2112,6 +2186,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
         target = Path(body.path).expanduser().resolve()
         if not target.exists() or not target.is_dir():
             raise HTTPException(400, f"Directory does not exist: {body.path}")
+        if c.library_root:
+            lib = Path(c.library_root).expanduser().resolve()
+            if target == lib or target.is_relative_to(lib):
+                raise HTTPException(400, f"Cannot scan inside library root: {target}")
         if _confined() and not _within(target, _browse_roots()):
             raise HTTPException(403, "that folder is outside the allowed locations")
         progress_mgr.start("Scanning", f"Scanning directory: {target.name}", 0,
@@ -2160,7 +2238,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     upd = {"faces_schema_version": 0}
                     if pipeline.bs.face_backend == "stub" or not c.face.enabled:
                         upd["infer_status"] = "pending"  # the stale-face path is off, so redo from scratch
-                    s.exec(sa_update(I).where(I.scan_status != "missing", I.infer_status == "inferred").values(**upd))
+                    s.exec(sa_update(I).where(
+                        I.scan_status != "missing",
+                        I.route_status != "executed",
+                        I.infer_status == "inferred"
+                    ).values(**upd))
             res = pipeline.run(db_path=dbp, on_progress=on_prog, show_progress=False,
                                cancel_check=progress_mgr.is_stopped)
         except InterruptedError:
@@ -2326,8 +2408,87 @@ def create_app(db_path: str | None = None) -> FastAPI:
             if rec is None:
                 raise HTTPException(404, "image not found")
             PhotoRepository(s).set_manual_bucket(image_id, effective)
+
+            # In Photo Library mode, move file on disk immediately
+            if rec.route_status == "executed" and effective and Path(rec.path).exists():
+                from ..rules.taxonomy import get_taxonomy
+                tax = get_taxonomy(cfg)
+                cat_enum = tax.category_of(effective)
+                new_folder = tax.folder_override_of(effective) or (cat_enum.folder if cat_enum else effective)
+
+                lib_root = Path(cfg.library_root).resolve() if cfg.library_root else Path(rec.path).parent.parent
+                dst_dir = lib_root / new_folder
+                dst_dir.mkdir(parents=True, exist_ok=True)
+                src_path = Path(rec.path)
+                dst_path = dst_dir / src_path.name
+                if dst_path != src_path:
+                    if dst_path.exists():
+                        seq = 1
+                        while (dst_dir / f"{src_path.stem}_{seq}{src_path.suffix}").exists():
+                            seq += 1
+                        dst_path = dst_dir / f"{src_path.stem}_{seq}{src_path.suffix}"
+                    shutil.move(src_path, dst_path)
+                    xmp_src = src_path.with_suffix(".xmp")
+                    if xmp_src.exists():
+                        try:
+                            shutil.move(xmp_src, dst_path.with_suffix(".xmp"))
+                        except OSError:
+                            pass
+                    rec.path = str(dst_path)
+                    rec.target_path = str(dst_path)
+                rec.category = effective
+                s.flush()
+
             return {"ok": True, "id": image_id, "manual_bucket": rec.manual_bucket,
                     "category": rec.category, "locked": bool(rec.locked)}
+
+    @app.delete("/api/images/{image_id}", dependencies=auth)
+    def delete_image(image_id: int):
+        """Delete photo: moves to .trash, marks missing/trashed, prunes bursts and face counts."""
+        with get_session(dbp) as s:
+            rec = s.get(M.ImageRecord, image_id)
+            if rec is None:
+                raise HTTPException(404, "image not found")
+
+            src_path = Path(rec.path)
+            if src_path.exists():
+                lib_root = Path(cfg.library_root).resolve() if cfg.library_root else src_path.parent
+                trash_dir = lib_root / ".trash"
+                trash_dir.mkdir(parents=True, exist_ok=True)
+                dst_path = trash_dir / src_path.name
+                if dst_path.exists():
+                    seq = 1
+                    while (trash_dir / f"{src_path.stem}_{seq}{src_path.suffix}").exists():
+                        seq += 1
+                    dst_path = trash_dir / f"{src_path.stem}_{seq}{src_path.suffix}"
+                shutil.move(src_path, dst_path)
+                xmp_src = src_path.with_suffix(".xmp")
+                if xmp_src.exists():
+                    try:
+                        shutil.move(xmp_src, dst_path.with_suffix(".xmp"))
+                    except OSError:
+                        pass
+                rec.target_path = str(dst_path)
+
+            rec.scan_status = "missing"
+            rec.route_status = "trashed"
+            rec.delete_approved = True
+
+            faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == image_id)).all()
+            for f in faces:
+                if f.person_id is not None:
+                    c = s.get(M.PersonCluster, f.person_id)
+                    if c is not None:
+                        c.face_count = max(0, c.face_count - 1)
+                        if c.face_count <= 0 and not c.name:
+                            s.delete(c)
+                f.ignored = True
+                f.person_id = None
+
+            repo = PhotoRepository(s)
+            repo.prune_bursts()
+            s.commit()
+            return {"ok": True, "id": image_id, "deleted": True}
 
     @app.post("/api/images/{image_id}/lock", dependencies=auth)
     def lock_image(image_id: int, body: LockReq = LockReq()):
@@ -2410,10 +2571,150 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "free_bytes": free, "enough_space": need_bytes <= free, "marked_for_delete": marked,
         }
 
+    @app.get("/api/plan/readiness")
+    def plan_readiness():
+        with get_session(dbp) as s:
+            I = M.ImageRecord
+            active_q = select(I).where(I.route_status != "executed", I.scan_status != "missing")
+            recs = s.exec(active_q).all()
+            pending_analysis = sum(1 for r in recs if r.infer_status not in ("inferred", "failed"))
+            uncertain_count = sum(1 for r in recs if (r.manual_bucket or r.category) == "uncertain" and not r.delete_approved)
+            unresolved_junk = sum(1 for r in recs if (r.manual_bucket or r.category) in JUNK_VALUES and not r.delete_approved)
+            issues = []
+            if pending_analysis > 0:
+                issues.append(f"{pending_analysis} photo(s) pending analysis")
+            if uncertain_count > 0:
+                issues.append(f"{uncertain_count} photo(s) in Finalize need category assignment or delete approval")
+            if unresolved_junk > 0:
+                issues.append(f"{unresolved_junk} junk/duplicate photo(s) need delete approval")
+            ready = (pending_analysis == 0 and uncertain_count == 0 and unresolved_junk == 0 and len(recs) > 0)
+            return {
+                "ready": ready,
+                "total_pipeline": len(recs),
+                "pending_analysis": pending_analysis,
+                "uncertain_count": uncertain_count,
+                "unresolved_junk": unresolved_junk,
+                "issues": issues,
+            }
+
+    @app.post("/api/library/sync", dependencies=auth)
+    def sync_library():
+        """Sync photo library with disk changes (moved category folders or deleted files)."""
+        lib_root_str = cfg.library_root
+        if not lib_root_str:
+            from ..services import load_settings
+            st = load_settings(dbp)
+            lib_root_str = st.get("library_root")
+        if not lib_root_str:
+            return {"ok": True, "checked": 0, "moved": 0, "missing": 0, "message": "no library_root configured"}
+
+        lib_root = Path(lib_root_str).expanduser().resolve()
+        if not lib_root.exists():
+            return {"ok": True, "checked": 0, "moved": 0, "missing": 0, "message": "library_root does not exist on disk"}
+
+        with get_session(dbp) as s:
+            repo = PhotoRepository(s)
+            I = M.ImageRecord
+            recs = s.exec(select(I).where(I.route_status == "executed", I.scan_status != "missing")).all()
+            checked_count = len(recs)
+            moved_count = 0
+            missing_count = 0
+
+            # Scan files inside library_root excluding .trash
+            disk_files: dict[str, list[Path]] = {}
+            skip_dirs = {".trash", ".git", ".cache", ".thumbnails", "__pycache__"}
+            for dirpath, dirnames, filenames in os.walk(lib_root):
+                dirnames[:] = [d for d in dirnames if d.lower() not in skip_dirs and not d.startswith(".")]
+                for fn in filenames:
+                    if fn.startswith("."):
+                        continue
+                    disk_files.setdefault(fn, []).append(Path(dirpath, fn))
+
+            for rec in recs:
+                cur_path = Path(rec.path)
+                if cur_path.exists():
+                    continue
+
+                candidates = disk_files.get(rec.filename, [])
+                matched_path = None
+                for cand in candidates:
+                    try:
+                        cand_size = cand.stat().st_size
+                        if cand_size == rec.file_size:
+                            if rec.sha256:
+                                from ..scanner.hasher import compute_sha256
+                                if compute_sha256(cand) == rec.sha256:
+                                    matched_path = cand
+                                    break
+                            else:
+                                matched_path = cand
+                                break
+                    except OSError:
+                        continue
+
+                if matched_path is not None:
+                    rec.path = str(matched_path)
+                    rec.target_path = str(matched_path)
+                    try:
+                        rel = matched_path.relative_to(lib_root)
+                        folder_part = str(rel.parent).replace("\\", "/")
+                        if folder_part and folder_part != ".":
+                            from ..rules.taxonomy import get_taxonomy
+                            tax = get_taxonomy(cfg)
+                            inferred_cat = None
+                            for entry in tax.entries:
+                                entry_folder = entry.folder_override or entry.category.folder
+                                if folder_part == entry_folder or folder_part.startswith(entry_folder + "/"):
+                                    inferred_cat = entry.key
+                                    break
+                            if not inferred_cat:
+                                inferred_cat = folder_part.split("/")[-1].lower()
+                            rec.category = inferred_cat
+                            rec.manual_bucket = inferred_cat
+                    except Exception:
+                        pass
+                    moved_count += 1
+                else:
+                    rec.scan_status = "missing"
+                    rec.route_status = "removed"
+                    missing_count += 1
+                    faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == rec.id)).all()
+                    for f in faces:
+                        if f.person_id:
+                            c = s.get(M.PersonCluster, f.person_id)
+                            if c:
+                                c.face_count = max(0, c.face_count - 1)
+                                if c.face_count <= 0 and not c.name:
+                                    s.delete(c)
+
+            if missing_count > 0:
+                repo.prune_bursts()
+            s.commit()
+            return {"ok": True, "checked": checked_count, "moved": moved_count, "missing": missing_count}
+
     @app.post("/api/plan/apply", dependencies=auth, status_code=202)
     def apply_plan(body: PlanReq):
         only = _check_category(body.only_category, "only_category")
         root = validate_output_dir(body.output_dir, dbp, body.mode == "in_place")
+
+        # Completion gate check before apply
+        with get_session(dbp) as s:
+            I = M.ImageRecord
+            active_q = select(I).where(I.route_status != "executed", I.scan_status != "missing")
+            recs = s.exec(active_q).all()
+            pending_analysis = sum(1 for r in recs if r.infer_status not in ("inferred", "failed"))
+            uncertain_count = sum(1 for r in recs if (r.manual_bucket or r.category) == "uncertain" and not r.delete_approved)
+            unresolved_junk = sum(1 for r in recs if (r.manual_bucket or r.category) in JUNK_VALUES and not r.delete_approved)
+            if pending_analysis > 0 or uncertain_count > 0 or unresolved_junk > 0:
+                issues = []
+                if pending_analysis > 0:
+                    issues.append(f"{pending_analysis} pending analysis")
+                if uncertain_count > 0:
+                    issues.append(f"{uncertain_count} finalize (uncertain)")
+                if unresolved_junk > 0:
+                    issues.append(f"{unresolved_junk} unresolved junk/duplicates")
+                raise HTTPException(409, f"Apply blocked: {', '.join(issues)}")
+
         planner = make_planner(run_cfg())
         if body.trash and not _accepts(planner.execute_plan, "trash"):
             raise _not_impl("trash staging")

@@ -178,6 +178,8 @@ class FaceDetection(SQLModel, table=True):
     # open | possible | closed | unknown. Unknown is never scored as open or closed.
     eye_status: str = Field(default="unknown")
     is_blink: bool = Field(default=False)
+    # Persistent face rejection flag (e.g. user deleted cluster or face)
+    ignored: bool = Field(default=False, index=True)
 
 
 class SemanticScore(SQLModel, table=True):

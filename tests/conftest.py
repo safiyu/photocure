@@ -25,11 +25,23 @@ os.environ.setdefault("PCUR_DEVICE_DEVICE", "cpu")
 os.environ.setdefault("PCUR_ALLOWED_HOSTS", "testserver")
 os.environ.setdefault("PCUR_AUTH_TOKEN", "test-token-for-the-suite")
 
+try:
+    import resource
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = min(65536, hard)
+    if soft < target:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+except Exception:
+    pass
+
 
 @pytest.fixture()
 def tmp_db(tmp_path):
     """A fresh SQLite state store path inside the temp sandbox."""
-    return tmp_path / "photocure.db"
+    db_file = tmp_path / "photocure.db"
+    yield db_file
+    from photocure.db.session import close_engine
+    close_engine(db_file)
 
 
 @pytest.fixture()
@@ -45,11 +57,12 @@ def cfg(tmp_db):
 @pytest.fixture()
 def session(cfg, tmp_db):
     """An open, committed-at-exit SQLModel session over a fresh schema."""
-    from photocure.db.session import get_session, init_db
+    from photocure.db.session import close_engine, get_session, init_db
 
     init_db(tmp_db, drop=True)
     with get_session(tmp_db) as s:
         yield s
+    close_engine(tmp_db)
 
 
 @pytest.fixture()

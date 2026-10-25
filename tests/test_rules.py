@@ -119,9 +119,9 @@ def test_clip_routes_categories(cfg):
         d = _eval(rec)
         assert d.category == CategoryType(cat), cat
         assert d.reason.startswith("clip top1")
-    # date grouping only for the non-human world classes + people
-    assert _eval(_rec(quality=_good_quality(),
-                      semantic=_semantic("food", 0.85, top2_score=0.05))).needs_date
+    # date grouping removed per spec: all photos land directly in category folders
+    assert not _eval(_rec(quality=_good_quality(),
+                          semantic=_semantic("food", 0.85, top2_score=0.05))).needs_date
     assert not _eval(_rec(quality=_good_quality(),
                           semantic=_semantic("screenshot", 0.85, top2_score=0.05))).needs_date
 
@@ -195,17 +195,17 @@ def test_organizer_people_date_hierachy(cfg):
     org = FolderOrganizer(cfg, organize_root=Path("/org"))
     from photocure.rules.decision_matrix import Decision
     rec = _rec(path="/lib/a.jpg", filename="a.jpg")
-    dec = Decision(CategoryType.PEOPLE, "face", needs_date=True)
+    dec = Decision(CategoryType.PEOPLE, "face", needs_date=False)
     target = org.full_target(rec, dec)
-    assert target == Path("/org/People/2024/05/12/a.jpg")
+    assert target == Path("/org/People/a.jpg")
 
 
 def test_organizer_food_date_hierarchy(cfg):
     org = FolderOrganizer(cfg, organize_root=Path("/org"))
     from photocure.rules.decision_matrix import Decision
     rec = _rec(path="/lib/b.jpg", filename="b.jpg")
-    dec = Decision(CategoryType.FOOD, "clip", needs_date=True)
-    assert org.full_target(rec, dec) == Path("/org/Non-Human/Food/2024/05/12/b.jpg")
+    dec = Decision(CategoryType.FOOD, "clip", needs_date=False)
+    assert org.full_target(rec, dec) == Path("/org/Non-Human/Food/b.jpg")
 
 
 def test_organizer_screenshot_no_date(cfg):
@@ -221,9 +221,9 @@ def test_organizer_missing_date_uses_unknown(cfg):
     from photocure.rules.decision_matrix import Decision
     rec = _rec(path="/lib/d.jpg", filename="d.jpg",
                taken_at=None, taken_at_source="unknown")
-    dec = Decision(CategoryType.SCENERY, "clip", needs_date=True)
+    dec = Decision(CategoryType.SCENERY, "clip", needs_date=False)
     target = org.full_target(rec, dec)
-    assert "Unknown_Date" in str(target)
+    assert target == Path("/org/Non-Human/Scenery/d.jpg")
 
 
 def test_organizer_epoch_date_never_used(cfg):
@@ -231,10 +231,9 @@ def test_organizer_epoch_date_never_used(cfg):
     from photocure.rules.decision_matrix import Decision
     rec = _rec(path="/lib/e.jpg", filename="e.jpg",
                taken_at=datetime(1970, 1, 1), taken_at_source="mtime")
-    dec = Decision(CategoryType.PEOPLE, "face", needs_date=True)
+    dec = Decision(CategoryType.PEOPLE, "face", needs_date=False)
     target = org.full_target(rec, dec)
-    assert "1970" not in str(target)
-    assert "Unknown_Date" in str(target)
+    assert target == Path("/org/People/e.jpg")
 
 
 def test_organizer_alternate_goes_to_burst_folder(cfg):
@@ -346,8 +345,8 @@ def test_unknown_date_folder_has_no_zero_padding_dirs(cfg):
     org = FolderOrganizer(cfg, organize_root=Path("/org"))
     rec = _rec(path="/lib/d.jpg", filename="d.jpg", taken_at=None,
                taken_at_source="unknown")
-    dec = Decision(CategoryType.PEOPLE, "face", needs_date=True)
-    assert org.full_target(rec, dec) == Path("/org/People/Unknown_Date/d.jpg")
+    dec = Decision(CategoryType.PEOPLE, "face", needs_date=False)
+    assert org.full_target(rec, dec) == Path("/org/People/d.jpg")
 
 
 def test_uncertain_without_date_stays_in_uncertain_folder(cfg):
@@ -364,22 +363,22 @@ def test_organizer_event_label_in_day_folder(cfg):
     ev.id = 3
     org.set_events([ev])
     rec = _rec(path="/lib/a.jpg", filename="a.jpg", event_id=3)
-    dec = Decision(CategoryType.PEOPLE, "face", needs_date=True)
-    assert org.full_target(rec, dec) == Path("/org/People/2024/05/12_Event3/a.jpg")
+    dec = Decision(CategoryType.PEOPLE, "face", needs_date=False)
+    assert org.full_target(rec, dec) == Path("/org/People/a.jpg")
 
 
 def test_organizer_event_label_is_opt_in(cfg):
     org = FolderOrganizer(cfg, organize_root=Path("/org"))
     rec = _rec(path="/lib/a.jpg", filename="a.jpg", event_id=3)
-    dec = Decision(CategoryType.PEOPLE, "face", needs_date=True)
-    assert org.full_target(rec, dec) == Path("/org/People/2024/05/12/a.jpg")
+    dec = Decision(CategoryType.PEOPLE, "face", needs_date=False)
+    assert org.full_target(rec, dec) == Path("/org/People/a.jpg")
 
 
 def test_organizer_event_without_event_id_uses_plain_day(cfg):
     org = FolderOrganizer(cfg, organize_root=Path("/org"), use_events=True)
     rec = _rec(path="/lib/a.jpg", filename="a.jpg")
-    dec = Decision(CategoryType.FOOD, "clip", needs_date=True)
-    assert org.full_target(rec, dec) == Path("/org/Non-Human/Food/2024/05/12/a.jpg")
+    dec = Decision(CategoryType.FOOD, "clip", needs_date=False)
+    assert org.full_target(rec, dec) == Path("/org/Non-Human/Food/a.jpg")
 
 
 def test_organizer_decision_folder_override(cfg):
