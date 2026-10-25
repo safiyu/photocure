@@ -5539,6 +5539,8 @@
       loadHighlightYears().catch(() => {});
       if (isEventView()) renderEventHighlights();
     }
+    if (name === "bursts") renderBursts().catch((e) => toast(e.message, "err"));
+    if (name === "events") loadEvents().catch((e) => toast(e.message, "err"));
     if (name === "people") {
       renderPeople().catch((e) => toast(e.message, "err"));
       updatePeopleSaveBar();

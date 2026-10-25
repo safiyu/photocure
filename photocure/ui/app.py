@@ -1919,6 +1919,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def bursts():
         with get_session(dbp) as s:
             repo = PhotoRepository(s)
+            if repo.prune_bursts():
+                s.commit()
             out = []
             for b in repo.all_bursts():
                 best = repo.get_by_id(b.best_shot_id) if b.best_shot_id else None
@@ -2158,7 +2160,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     upd = {"faces_schema_version": 0}
                     if pipeline.bs.face_backend == "stub" or not c.face.enabled:
                         upd["infer_status"] = "pending"  # the stale-face path is off, so redo from scratch
-                    s.exec(sa_update(I).where(I.infer_status == "inferred").values(**upd))
+                    s.exec(sa_update(I).where(I.scan_status != "missing", I.infer_status == "inferred").values(**upd))
             res = pipeline.run(db_path=dbp, on_progress=on_prog, show_progress=False,
                                cancel_check=progress_mgr.is_stopped)
         except InterruptedError:

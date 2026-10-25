@@ -35,6 +35,8 @@ def test_people_tab_is_wired_into_show_tab():
     js = _read("app.js")
     body = js.split("function showTab", 1)[1].split("\n  }\n", 1)[0]
     assert '"people"' in body and "renderPeople" in body
+    assert '"bursts"' in body and "renderBursts" in body
+    assert '"events"' in body and "loadEvents" in body
 
 
 def test_people_count_wired_in_render_counts():

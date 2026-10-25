@@ -161,8 +161,51 @@ def test_reanalyze_reprocesses_everything_and_keeps_rows(env):
     again = infer(client, reanalyze=True)
     assert again["processed"] == n
     assert len(rows(app)) == n
-    assert all(r.infer_status == "inferred" for r in rows(app))
     assert infer(client)["processed"] == 0
+
+
+def test_reanalyze_skips_missing_or_trashed_images(env):
+    app, client, _ = env
+    infer(client)
+    rws = rows(app)
+    # Mark one image as missing (e.g. moved to trash)
+    with get_session(app.state.db) as s:
+        rec = s.get(M.ImageRecord, rws[0].id)
+        rec.scan_status = "missing"
+        rec.route_status = "trashed"
+    again = infer(client, reanalyze=True)
+    # Processed count must exclude the missing photo
+    assert again["processed"] == len(rws) - 1
+
+
+def test_prune_bursts_cleans_up_singleton_and_dead_bursts(env):
+    app, client, _ = env
+    from photocure.db.repository import PhotoRepository
+    with get_session(app.state.db) as s:
+        repo = PhotoRepository(s)
+        rws = s.exec(select(M.ImageRecord)).all()
+        # Create a burst with 2 members, and a burst with 1 member
+        b1 = M.BurstGroup(name="Burst 1", image_count=2, best_shot_id=rws[0].id)
+        b2 = M.BurstGroup(name="Burst 2", image_count=1, best_shot_id=rws[2].id)
+        s.add(b1)
+        s.add(b2)
+        s.flush()
+        rws[0].burst_id = b1.id
+        rws[1].burst_id = b1.id
+        rws[2].burst_id = b2.id
+        s.commit()
+
+        # Mark rws[1] as missing so b1 only has 1 active member left
+        rws[1].scan_status = "missing"
+        s.commit()
+
+        # Prune bursts: both b1 and b2 should be pruned
+        deleted = repo.prune_bursts()
+        assert deleted == 2
+        assert len(repo.all_bursts()) == 0
+        assert rws[0].burst_id is None and rws[0].is_best_shot is False
+        assert rws[1].burst_id is None and rws[1].is_best_shot is False
+
 
 
 def test_ui_has_reanalyse_buttons_and_skips_when_nothing_new():

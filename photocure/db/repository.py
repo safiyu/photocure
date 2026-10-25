@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from collections.abc import Iterator, Sequence
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 from sqlmodel import Session, col, delete as sdelete, select as sselect, update as supdate
 
@@ -322,6 +322,66 @@ class PhotoRepository:
     def all_bursts(self) -> list[BurstGroup]:
         return list(self.s.exec(sselect(BurstGroup)).all())
 
+    def prune_bursts(self) -> int:
+        """Clean up burst groups whose members were deleted, trashed, or reduced below 2.
+
+        - Disassociates stale members (missing/trashed/purged) from burst groups.
+        - Burst groups with 0 active members are deleted.
+        - Burst groups with 1 active member have their burst flags cleared on that member
+          and the burst group is deleted (a single frame cannot form a burst).
+        - Burst groups with >= 2 active members have image_count updated and ensure
+          best_shot_id points to an active member with member flags synchronized.
+        Returns the number of burst groups removed.
+        """
+        bursts = self.all_bursts()
+        deleted = 0
+        for bg in bursts:
+            # Clear burst flags from any images that are missing, trashed, or purged
+            stale_members = self.s.exec(
+                sselect(ImageRecord).where(
+                    ImageRecord.burst_id == bg.id,
+                    or_(
+                        ImageRecord.scan_status == "missing",
+                        col(ImageRecord.route_status).in_(["trashed", "purged"]),
+                    ),
+                )
+            ).all()
+            for sm in stale_members:
+                sm.burst_id = None
+                sm.is_best_shot = False
+                sm.is_alternate = False
+
+            members = self.s.exec(
+                sselect(ImageRecord).where(
+                    ImageRecord.burst_id == bg.id,
+                    ImageRecord.scan_status != "missing",
+                    ~col(ImageRecord.route_status).in_(["trashed", "purged"]),
+                )
+            ).all()
+            if len(members) == 0:
+                self.s.delete(bg)
+                deleted += 1
+            elif len(members) == 1:
+                lone = members[0]
+                lone.burst_id = None
+                lone.is_best_shot = False
+                lone.is_alternate = False
+                self.s.delete(bg)
+                deleted += 1
+            else:
+                if bg.image_count != len(members):
+                    bg.image_count = len(members)
+                active_ids = {m.id for m in members}
+                if bg.best_shot_id not in active_ids:
+                    best = max(members, key=lambda r: getattr(getattr(r, "quality", None), "sharpness_norm", 0.0) or 0.0)
+                    bg.best_shot_id = best.id
+                for m in members:
+                    m.is_best_shot = (m.id == bg.best_shot_id)
+                    m.is_alternate = (m.id != bg.best_shot_id)
+        if deleted:
+            self.s.flush()
+        return deleted
+
     # --------------------------------------------------------------- routing
     def set_routing(self, image: ImageRecord, category: str, subcategory: str,
                     target_path: str, route_status: str = "planned") -> None:
@@ -460,6 +520,7 @@ class PhotoRepository:
             sselect(func.count()).select_from(ImageRecord)
             .where(active, ImageRecord.route_status == "planned")
         ).one()
+        self.prune_bursts()
         bursts = self.s.exec(sselect(func.count()).select_from(BurstGroup)).one()
         people = self.s.exec(
             sselect(func.count()).select_from(PersonCluster)

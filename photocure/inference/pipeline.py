@@ -124,7 +124,8 @@ def mark_stub_rows_for_reanalysis(session) -> int:
     rows = session.exec(
         sselect(ImageRecord)
         .join(SemanticScore, SemanticScore.image_id == ImageRecord.id)
-        .where(ImageRecord.infer_status == "inferred",
+        .where(ImageRecord.scan_status != "missing",
+               ImageRecord.infer_status == "inferred",
                col(backend_col).in_(("", "stub")))
     ).all()
     for rec in rows:
@@ -204,7 +205,7 @@ class InferencePipeline:
             # Photos analysed by an older face pipeline: their boxes cannot be reused.
             wanted = or_(wanted, and_(ImageRecord.infer_status == "inferred",
                                       ImageRecord.faces_schema_version < self.cfg.face.schema_version))
-        stmt = sselect(ImageRecord).where(wanted).order_by(col(ImageRecord.id))
+        stmt = sselect(ImageRecord).where(ImageRecord.scan_status != "missing", wanted).order_by(col(ImageRecord.id))
         if limit:
             stmt = stmt.limit(limit)
         return list(s.exec(stmt).all())

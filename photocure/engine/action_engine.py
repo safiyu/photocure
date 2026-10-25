@@ -290,6 +290,9 @@ class ActionEngine:
                         except Exception:
                             log.exception("could not mark ledger entry failed")
                             session.rollback()
+            if rep.executed:
+                repo.prune_bursts()
+                session.commit()
         rep.duration_s = time.monotonic() - t0
         return rep
 
