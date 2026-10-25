@@ -2602,6 +2602,16 @@ def create_app(db_path: str | None = None) -> FastAPI:
         pid_file = _pid_file(cfg.port)
         pid_file.parent.mkdir(parents=True, exist_ok=True)
         pid_file.write_text(str(os.getpid()))
+        try:
+            with get_session(dbp) as s:
+                tpat = f"%/{cfg.trash_dir_name}/%"
+                for r in s.exec(select(M.ImageRecord).where(
+                        M.ImageRecord.scan_status != "missing",
+                        M.ImageRecord.path.like(tpat))).all():
+                    r.scan_status = "missing"
+                    r.route_status = "trashed"
+        except Exception:
+            pass
         from .. import models as bundled
         for m in bundled.load_manifest():
             if not bundled.verify_model(m["file"]):

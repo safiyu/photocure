@@ -428,7 +428,12 @@ class ActionEngine:
         if file_sha256(target) != want or file_sha256(src) != want:
             target.unlink(missing_ok=True)
             raise RuntimeError("post-move hash mismatch (source preserved)")
-        src.unlink()
+        try:
+            src.unlink()
+        except OSError:
+            if src.exists():
+                target.unlink(missing_ok=True)
+            raise
 
     @staticmethod
     def _copy(src: Path, target: Path) -> None:

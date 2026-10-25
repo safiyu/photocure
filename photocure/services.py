@@ -273,7 +273,19 @@ class Planner:
             repo = PhotoRepository(session)
             return self._cluster(repo, repo.all_images())
 
+    def _retire_legacy_trashed(self, records) -> int:
+        """Ensure any row whose path already lives inside .trash is marked missing/trashed."""
+        retired = 0
+        trash_name = self.cfg.trash_dir_name
+        for r in records:
+            if getattr(r, "scan_status", "scanned") != "missing" and trash_name in Path(r.path).parts:
+                r.scan_status = "missing"
+                r.route_status = "trashed"
+                retired += 1
+        return retired
+
     def _cluster(self, repo: PhotoRepository, records) -> int:
+        self._retire_legacy_trashed(records)
         for r in records:
             r.burst_id = None
             r.is_best_shot = False
@@ -383,6 +395,7 @@ class Planner:
         with get_session(self.db_path) as session:
             repo = PhotoRepository(session)
             records = repo.all_images()
+            self._retire_legacy_trashed(records)
             self._confirm_near_duplicates(records)
 
             has_bursts = bool(repo.all_bursts())
@@ -651,21 +664,35 @@ class Planner:
     def repair_paths(self) -> int:
         """Fix images.path from the ledger (committed moves and rollbacks)."""
         fixed = 0
+        trash_name = self.cfg.trash_dir_name
         with get_session(self.db_path) as session:
             repo = PhotoRepository(session)
             final: dict[int, tuple[str, str]] = {}
+            cands: dict[int, list[tuple[str, str]]] = {}
             for e in session.exec(select(ActionLedger).order_by(
                     ActionLedger.id)).all():  # type: ignore[arg-type]
                 if e.image_id is None or e.operation_type != "move":
                     continue
                 if e.status == "committed":
                     final[e.image_id] = (e.target_path, "committed")
+                    cands.setdefault(e.image_id, []).append((e.target_path, "committed"))
+                    cands[e.image_id].append((e.source_path, "rolled_back"))
                 elif e.status == "rolled_back":
                     final[e.image_id] = (e.source_path, "rolled_back")
+                    cands.setdefault(e.image_id, []).append((e.source_path, "rolled_back"))
+                elif e.status == "failed":
+                    cands.setdefault(e.image_id, []).append((e.source_path, "rolled_back"))
+                    cands[e.image_id].append((e.target_path, "committed"))
             for image_id, (loc, st) in final.items():
                 img = repo.get_by_id(image_id)
-                if img is None or not os.path.lexists(loc):
+                if img is None:
                     continue
+                if not os.path.lexists(loc):
+                    found = next(((p, s) for p, s in reversed(cands.get(image_id, []))
+                                  if os.path.lexists(p)), None)
+                    if found is None:
+                        continue
+                    loc, st = found
                 clash = repo.get_by_path(loc)
                 if clash is not None and clash.id != img.id:
                     continue
@@ -673,11 +700,19 @@ class Planner:
                 if img.path != loc:
                     img.path = loc
                     changed = True
-                if st == "rolled_back" and (img.route_status == "trashed" or img.scan_status == "missing"):
-                    img.scan_status = "scanned"
-                    img.route_status = "unrouted"
-                    img.target_path = None
-                    changed = True
+                in_trash = trash_name in Path(loc).parts
+                if st == "committed" and in_trash:
+                    if img.scan_status != "missing" or img.route_status != "trashed":
+                        img.scan_status = "missing"
+                        img.route_status = "trashed"
+                        changed = True
+                elif st == "rolled_back" or (not in_trash and img.route_status == "trashed"):
+                    if img.scan_status == "missing" or img.route_status == "trashed":
+                        img.scan_status = "scanned"
+                        img.route_status = "unrouted" if st == "rolled_back" else "executed"
+                        if st == "rolled_back":
+                            img.target_path = None
+                        changed = True
                 if changed:
                     fixed += 1
         return fixed
