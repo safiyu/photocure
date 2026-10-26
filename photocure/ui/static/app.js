@@ -582,8 +582,12 @@
           el("button", { class: "x", "data-clear": id, title: "Back to the AI choice",
             "aria-label": "Back to the AI choice", tabindex: -1, html: icon("x", "sm") })] : null));
 
-    const actions = el("div", { class: "actions" },
-      el("button", {
+    const delBtn = state.stage === "trash"
+      ? el("button", {
+        type: "button", class: "btn btn-del", "data-purge": id, title: "Delete permanently",
+        "aria-label": "Delete permanently", tabindex: -1,
+      }, el("span", { class: "btn-ic", html: icon("trash", "sm") }), el("span", { class: "btn-lbl", text: "Delete forever" }))
+      : el("button", {
         type: "button",
         class: "btn btn-del" + (it.delete_approved ? " is-del" : ""),
         "data-approve-delete": id,
@@ -591,7 +595,9 @@
         title: it.delete_approved ? "Marked for delete (click to unmark)" : "Mark for delete",
         "aria-label": it.delete_approved ? "Clear delete mark" : "Mark for delete",
         tabindex: -1,
-      }, el("span", { class: "btn-ic", html: icon("trash", "sm") }), el("span", { class: "btn-lbl", text: it.delete_approved ? "Marked" : "Delete" })),
+      }, el("span", { class: "btn-ic", html: icon("trash", "sm") }), el("span", { class: "btn-lbl", text: it.delete_approved ? "Marked" : "Delete" }));
+    const actions = el("div", { class: "actions" },
+      delBtn,
       el("button", {
         type: "button",
         class: "btn btn-lock" + (it.locked ? " is-locked" : ""),
@@ -772,7 +778,9 @@
         if (rt !== "" && !rt.startsWith("min:") && rt !== "0" && num(it.rating) !== num(rt)) return false;
         return true;
       },
-      empty: () => (state.overview && state.overview.total === 0
+      empty: () => (state.stage === "trash"
+        ? { icon: "trash", title: "The trash is empty", text: "Photos you delete show up here. You can restore them or delete them for good." }
+        : state.overview && state.overview.total === 0
         ? { icon: "import", title: "Your library is empty", text: "Import a folder of photos to get started.",
             action: { label: "Go to Import", attr: 'data-goto="library"' } }
         : { icon: "search", title: "No photos match", text: "Try a different search or clear the filters.",
@@ -1101,6 +1109,7 @@
     const bi = pn ? null : burstPickInfo();
     $("#bulkbar").classList.toggle("burst-ctx", !!bi);
     $("#bulkbar").classList.toggle("people-ctx", pn > 0);
+    $("#bulkbar").classList.toggle("trash-ctx", state.stage === "trash" && !pn && !bi);
     if (n === 0) closeOverlay($("#bulkbar")); else openOverlay($("#bulkbar"));
     if (pn) {
       $("#bulk-count").textContent = `${fmtN(pn)} ${pn === 1 ? "person" : "people"}`;
@@ -1282,6 +1291,81 @@
   }
 
   const bulkJunk = () => bulkReassign("accidental");
+
+  // ------------------------------------------------------------ trash
+  const SKIP_WORDS = {
+    file_missing: "the file is gone",
+    origin_missing: "the original folder is missing",
+    origin_occupied: "a file already sits at the origin",
+  };
+
+  function skippedText(res) {
+    const parts = Object.entries(res.skipped_reasons || {}).filter(([, n]) => n > 0)
+      .map(([k, n]) => `${SKIP_WORDS[k] || k} (${fmtN(n)})`);
+    return num(res.skipped) > 0 ? ` ${fmtN(res.skipped)} skipped: ${parts.join(", ") || "see the activity log"}.` : "";
+  }
+
+  async function runTrashJob(label, path, body, summary) {
+    const res = await runTask(label, async () => followJob((await post(path, body)).job_id, label));
+    if (!res) return null;
+    toast(summary(res) + skippedText(res), num(res.skipped) > 0 ? "warn" : "ok");
+    libLog(summary(res) + skippedText(res), num(res.skipped) > 0 ? "warn" : "ok");
+    clearPicks();
+    resetVisibleGrids();
+    loadStats();
+    return res;
+  }
+
+  const photos = (n) => `${fmtN(n)} photo${n === 1 ? "" : "s"}`;
+
+  async function restoreSelected() {
+    const ids = Array.from(state.picks);
+    if (ids.length) await runTrashJob("Restoring", "/api/trash/restore", { ids }, (r) => `Restored ${photos(num(r.restored))}.`);
+  }
+
+  async function returnSelected() {
+    const ids = Array.from(state.picks);
+    if (ids.length) await runTrashJob("Returning", "/api/trash/return", { ids }, (r) => `Returned ${photos(num(r.returned))} to the folder they came from.`);
+  }
+
+  async function purgePhotos(ids) {
+    const ok = await showConfirmDialog({
+      title: `Delete ${photos(ids.length)} permanently?`,
+      message: "The files are removed from your disk. This cannot be undone.",
+      confirmText: "Delete permanently", variant: "danger" });
+    if (!ok) return;
+    await runTrashJob("Deleting", "/api/trash/delete", { ids }, (r) => `Deleted ${photos(num(r.deleted))} permanently.`);
+  }
+
+  async function emptyTrash() {
+    const n = num(((state.overview || {}).stage_counts || {}).trash);
+    const ok = await showConfirmDialog({
+      title: "Empty the trash?",
+      message: `Everything in the trash${n ? ` (${photos(n)})` : ""} is removed from your disk for good. This cannot be undone.`,
+      confirmText: "Empty trash", variant: "danger" });
+    if (!ok) return;
+    await runTrashJob("Emptying trash", "/api/trash/empty", {}, (r) => `Emptied the trash: ${photos(num(r.deleted))} deleted.`);
+  }
+
+  async function returnAllToOrigin() {
+    const n = num(((state.overview || {}).stage_counts || {}).trash);
+    const ok = await showConfirmDialog({
+      title: "Return everything to its origin?",
+      message: `${photos(n)} will move back to the folders they came from and count as new again.`,
+      confirmText: "Return all", variant: "warning" });
+    if (!ok) return;
+    await runTrashJob("Returning", "/api/trash/return", { ids: null }, (r) => `Returned ${photos(num(r.returned))} to the folders they came from.`);
+  }
+
+  async function reanalyseTrash() {
+    const device = $("#infer-device").value;
+    const r = await runTask(`Reanalysing the trash (${device})`, async () => post("/api/infer", { device, stage: "trash" }));
+    if (!r || r.stopped) return;
+    const gone = num(r.missing) ? ` ${photos(num(r.missing))} had been deleted by hand and left the trash.` : "";
+    toast(`Reanalysed ${photos(num(r.processed))}.${gone}`, "ok");
+    resetVisibleGrids();
+    loadStats();
+  }
 
   async function bulkMarkDelete() {
     const ids = Array.from(state.picks);
@@ -1970,7 +2054,7 @@
     delegatesBound = true;
     document.addEventListener("click", async (ev) => {
       const t = ev.target.closest && ev.target.closest(
-        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-similar],[data-faces],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-analyze-now],.thumb");
+        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-purge],[data-similar],[data-faces],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-analyze-now],.thumb");
       if (!t) return;
       try {
         if (t.dataset.pick) await togglePick(num(t.dataset.pick), ev.shiftKey);
@@ -1982,6 +2066,7 @@
           toast("Back to the AI choice", "ok");
         } else if (t.dataset.lock) await toggleLock(num(t.dataset.lock));
         else if (t.dataset.approveDelete) await toggleApproveDelete(num(t.dataset.approveDelete));
+        else if (t.dataset.purge) await purgePhotos([num(t.dataset.purge)]);
         else if (t.dataset.similar) {
           closeLightbox();
           await showSimilar(num(t.dataset.similar));
@@ -2231,7 +2316,8 @@
     const ap = $("#lb-approve");
     ap.disabled = !full;
     ap.setAttribute("aria-pressed", String(!!it.delete_approved));
-    ap.textContent = it.delete_approved ? "Marked for delete (undo)" : "Mark for delete";
+    ap.textContent = state.stage === "trash" ? "Delete permanently"
+      : it.delete_approved ? "Marked for delete (undo)" : "Mark for delete";
     $("#lb-prev").disabled = lb.i === 0;
     $("#lb-next").disabled = lb.i >= lbCount() - 1;
     $("#lb-count").textContent = `${fmtN(lb.i + 1)} of ${fmtN(lbCount())}`;
@@ -2311,7 +2397,7 @@
       } catch (err) { toast(err.message, "err"); }
     };
     $("#lb-lock").onclick = () => toggleLock(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
-    $("#lb-approve").onclick = () => toggleApproveDelete(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
+    $("#lb-approve").onclick = () => (state.stage === "trash" ? purgePhotos([lbIdAt(lb.i)]) : toggleApproveDelete(lbIdAt(lb.i))).catch((e) => toast(e.message, "err"));
     $$("#lb-rate .star").forEach((b) => {
       b.onclick = () => {
         const id = lbIdAt(lb.i);
@@ -5440,11 +5526,12 @@
     const dockTotal = $("#dock-total");
     if (dockTotal) {
       dockTotal.textContent = fmtN(total);
-      $("#dock-label").textContent = total === 1 ? "photo in your library" : "photos in your library";
+      const where = state.stage === "trash" ? "in the trash" : "in your library";
+      $("#dock-label").textContent = `${total === 1 ? "photo" : "photos"} ${where}`;
     }
     $$(".comp-host").forEach((host) => {
       const head = `<div class="comp-head total"><b class="comp-total" id="total">${fmtN(total)}</b>
-        <span class="comp-label">${total === 1 ? "photo" : "photos"} in your library${total ? "" : ". Import a folder to see it sorted here."}</span></div>`;
+        <span class="comp-label">${total === 1 ? "photo" : "photos"} ${state.stage === "trash" ? "in the trash" : "in your library"}${total ? "" : state.stage === "trash" ? "" : ". Import a folder to see it sorted here."}</span></div>`;
       if (!total) {
         host.innerHTML = head + '<div class="comp-strip bar empty-strip"></div>';
         return;
@@ -6119,6 +6206,12 @@
     };
     $("#bulk-del-people").onclick = bulkDeletePeople;
     $("#bulk-lock").onclick = () => bulkLock();
+    $("#bulk-restore").onclick = restoreSelected;
+    $("#bulk-return").onclick = returnSelected;
+    $("#bulk-purge").onclick = () => purgePhotos(Array.from(state.picks));
+    $("#btn-trash-reanalyse").onclick = reanalyseTrash;
+    $("#btn-trash-return-all").onclick = returnAllToOrigin;
+    $("#btn-trash-empty").onclick = emptyTrash;
     $("#bulk-delete").onclick = () => bulkMarkDelete();
     $("#bulk-junk").onclick = bulkJunk;
     $("#bulk-best").onclick = async () => {

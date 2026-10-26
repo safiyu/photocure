@@ -280,6 +280,12 @@
         <!-- LIBRARY -->
         <section id="tab-categories" class="panel">
           <div class="comp comp-host" data-target="categories"></div>
+          <div class="trash-toolbar" id="trash-toolbar" role="group" aria-label="Trash actions">
+            <button id="btn-trash-reanalyse" data-busy class="btn" title="Run the AI again on the trashed photos">Reanalyse trash</button>
+            <button id="btn-trash-return-all" data-busy class="btn" title="Move every trashed photo back to the folder it came from">Return all to origin</button>
+            <span class="grow"></span>
+            <button id="btn-trash-empty" data-busy class="btn danger" title="Delete everything in the trash for good">Empty trash</button>
+          </div>
           <div class="toolbar">
             <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
               <input id="q" type="search" placeholder="Search by file name or path" aria-label="Search photos"></div>
@@ -714,6 +720,9 @@
     <button class="btn sm danger burst-only" id="bulk-rest" title="Mark every frame you did not select for delete. The best shot is kept."><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete the other <span id="bulk-rest-n">0</span></button>
     <button class="btn sm danger lib-only" id="bulk-delete" title="Leave the selected photos out of the result"><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Mark for delete</button>
     <button class="btn sm ghost lib-only" id="bulk-clean" title="Make copies without location or other hidden details">Clean export</button>
+    <button class="btn sm primary trash-only" id="bulk-restore" title="Put the selected photos back in the library, sorted by category">Restore</button>
+    <button class="btn sm ghost trash-only" id="bulk-return" title="Move the selected photos back to the folder they came from">Return to origin</button>
+    <button class="btn sm danger trash-only" id="bulk-purge" title="Delete the selected photos for good"><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete permanently</button>
     <button class="btn sm primary people-only" id="bulk-merge" title="Merge the selected people into one person" disabled><svg class="ic sm" aria-hidden="true"><use href="#i-users"/></svg>Merge</button>
     <button class="btn sm ghost people-only" id="bulk-name" title="Name the selected person" disabled>Name...</button>
     <button class="btn sm danger people-only" id="bulk-del-people" title="Delete the selected people. Photos stay in your library."><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete people</button>
