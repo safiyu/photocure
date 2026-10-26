@@ -2548,6 +2548,7 @@
         if (window.__syncScanPathDisplay) window.__syncScanPathDisplay();
       },
     });
+    $("#btn-move-library").onclick = openMoveLibrary;
     $("#btn-browse-library").onclick = () => openPicker({
       title: "Choose the library folder", mode: "output", initial: $("#set-library-root").value.trim(),
       okLabel: "Use this folder",
@@ -5285,6 +5286,56 @@
     const want = keep || (st.settings && st.settings.device) || "auto";
     const ok = $$("option", sel).some((o) => o.value === want && !o.disabled);
     sel.value = ok ? want : "auto";
+  }
+
+  // Move the library: pick an empty folder, see what will be copied, then run the copy-and-switch job.
+  function openMoveLibrary() {
+    const modal = $("#movelib"), path = $("#movelib-path"), pv = $("#movelib-preview"), start = $("#movelib-start");
+    path.value = "";
+    pv.textContent = "";
+    pv.className = "help";
+    start.disabled = true;
+    let release = null;
+    const close = () => { if (release) release(); release = null; closeOverlay(modal); };
+    openOverlay(modal);
+    release = trapFocus(modal, close);
+    $("#movelib-close").onclick = $("#movelib-cancel").onclick = close;
+    $("#movelib-browse").onclick = () => openPicker({
+      title: "Choose the new library folder", mode: "output", initial: path.value.trim(), okLabel: "Use this folder",
+      onPick: async (p) => {
+        path.value = p;
+        start.disabled = true;
+        try {
+          const r = await api(`/api/library/migrate/preview?path=${encodeURIComponent(p)}`);
+          pv.textContent = r.error
+            ? r.error
+            : `${fmtN(r.files)} file${r.files === 1 ? "" : "s"}, ${fmtBytes(r.bytes)}; ${fmtBytes(r.free_bytes)} free there.`;
+          pv.className = "help " + (r.ok ? "ok" : "err");
+          start.disabled = !r.ok;
+        } catch (e) {
+          pv.textContent = e.message;
+          pv.className = "help err";
+        }
+      },
+    });
+    start.onclick = async () => {
+      const target = path.value.trim();
+      close();
+      let res = null;
+      try {
+        res = await runTask("Moving the library", async () =>
+          followJob((await post("/api/library/migrate", { path: target })).job_id, "Move library"));
+      } catch (e) { toast(e.message, "err"); return; }
+      if (!res) return;
+      if (res.ok) {
+        toast(`Library moved. The old folder at ${res.old_root} is yours to delete.`, "ok");
+        await refreshSettings(true);
+        resetVisibleGrids();
+        loadStats();
+      } else {
+        toast((res.failed && res.failed[0]) || res.error || "The library was not moved.", "err");
+      }
+    };
   }
 
   // The first time the app starts with no library folder: choose it and the device before anything else.

@@ -542,6 +542,10 @@ class CleanExportReq(BaseModel):
     rename: bool = True
 
 
+class MigrateReq(BaseModel):
+    path: str
+
+
 class TrashIdsReq(BaseModel):
     ids: list[int] = Field(min_length=1, max_length=5000)
 
@@ -2646,6 +2650,55 @@ def create_app(db_path: str | None = None) -> FastAPI:
         from .. import trash_actions
         return trash_job("trash-empty", "Empty trash", lambda c, stop, cb: trash_actions.empty_trash(
             dbp, c, cancel_check=stop, on_progress=cb))
+
+    def migration_target(raw: str) -> Path:
+        """The checked new library folder, or an HTTP error: not set, set by the environment, or not allowed."""
+        from ..library import (LibraryRootError, LibraryRootMissing, library_root_source,
+                               require_library_root, validate_library_root)
+        try:
+            require_library_root(dbp, app.state.cfg)
+        except LibraryRootMissing as e:
+            raise HTTPException(409, str(e)) from None
+        if library_root_source(dbp, app.state.cfg) == "environment":
+            raise HTTPException(403, "the library folder is set by PCUR_LIBRARY_ROOT; change that instead")
+        try:
+            return validate_library_root(raw, dbp, browse_roots=_browse_roots() if _confined() else None)
+        except LibraryRootError as e:
+            raise HTTPException(e.status, str(e)) from None
+
+    @app.get("/api/library/migrate/preview", dependencies=auth)
+    def migrate_preview(path: str = Query(...)):
+        from ..library_migration import preview_migration
+        return preview_migration(dbp, app.state.cfg, migration_target(path))
+
+    @app.post("/api/library/migrate", dependencies=auth, status_code=202)
+    def migrate_library_endpoint(body: MigrateReq):
+        from ..library_migration import migrate_library, preview_migration
+        new = migration_target(body.path)
+        pv = preview_migration(dbp, app.state.cfg, new)
+        if not pv["ok"]:
+            raise HTTPException(409, pv["error"])
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+
+        def work(job: dict) -> dict:
+            progress_mgr.start("Move library", "Copying the library", pv["files"], "Copying...")
+
+            def on_prog(done, total, name):
+                progress_mgr.update(done, total, name, detail=f"{done} / {total}")
+
+            res = migrate_library(dbp, app.state.cfg, new, on_progress=on_prog,
+                                  cancel_check=progress_mgr.is_stopped)
+            if res["ok"]:
+                progress_mgr.finish(f"Library moved: {res['copied']} files")
+                jlog(job, f"library moved to {res['new_root']} ({res['copied']} files); "
+                          f"the old folder at {res['old_root']} was left alone")
+            else:
+                progress_mgr.error((res.get("failed") or [res.get("error") or "failed"])[0])
+                jlog(job, f"library move failed: {(res.get('failed') or [res.get('error')])[0]}", "err")
+            return res
+
+        return {"ok": True, "job_id": spawn("library-migrate", work)["id"]}
 
     @app.post("/api/plan/apply", dependencies=auth, status_code=202)
     def apply_plan(body: PlanReq):

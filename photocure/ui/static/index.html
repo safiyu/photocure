@@ -863,6 +863,32 @@
     </div>
   </div>
 
+  <!-- move the library to another folder -->
+  <div id="movelib" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="movelib-title">
+      <header>
+        <h2 id="movelib-title">Move the library</h2>
+        <button class="icon-btn" id="movelib-close" type="button" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="modal-body">
+        <p class="lede">Choose an empty folder. Photocure copies every photo there, checks each copy, then switches over. The old folder is not deleted.</p>
+        <div class="field wide">
+          <label for="movelib-path">New folder</label>
+          <div class="with-btn">
+            <input id="movelib-path" type="text" readonly placeholder="Not chosen yet" autocomplete="off" spellcheck="false">
+            <button class="btn" id="movelib-browse" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+          </div>
+        </div>
+        <p class="help" id="movelib-preview" role="status"></p>
+      </div>
+      <footer>
+        <span class="grow"></span>
+        <button class="btn" id="movelib-cancel" type="button">Cancel</button>
+        <button class="btn primary" id="movelib-start" type="button" disabled>Move library</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- folder picker -->
   <div id="picker" class="modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="picker-title">
