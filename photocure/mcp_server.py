@@ -125,11 +125,12 @@ class LibraryQueries:
     def overview(self) -> dict:
         I = M.ImageRecord
         with get_session(self.db) as s:
-            total = s.exec(select(func.count()).select_from(I)).one()
-            first, last = s.exec(select(func.min(I.taken_at), func.max(I.taken_at))).one()
-            rows = s.exec(select(self._eff(), func.count()).group_by(self._eff())).all()
+            live = I.scan_status != "missing"  # trashed and vanished photos are not part of the library
+            total = s.exec(select(func.count()).select_from(I).where(live)).one()
+            first, last = s.exec(select(func.min(I.taken_at), func.max(I.taken_at)).where(live)).one()
+            rows = s.exec(select(self._eff(), func.count()).where(live).group_by(self._eff())).all()
             analysed = s.exec(select(func.count()).select_from(I).where(
-                I.infer_status == "inferred")).one()
+                live, I.infer_status == "inferred")).one()
         return {
             "photos": int(total), "analysed": int(analysed),
             "earliest": first.isoformat() if first else None,
@@ -206,7 +207,7 @@ class LibraryQueries:
                 if (d0 or d1) and (day is None or (d0 and day < d0) or (d1 and day > d1)):
                     continue
                 members = s.exec(select(I).where(
-                    I.burst_id == b.id, I.infer_status == "inferred"
+                    I.burst_id == b.id, I.infer_status == "inferred", I.scan_status != "missing"
                 ).options(selectinload(I.quality), selectinload(I.faces))).all()
                 grp = group_matrix_payload(members)
                 if only_fixable and grp["status"] != "composite":

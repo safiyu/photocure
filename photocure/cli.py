@@ -433,6 +433,9 @@ def infer(
         console.print(f"[red]Unknown device '{device}'. Choose one of: "
                       f"{', '.join(_DEVICES)}.[/red]")
         raise typer.Exit(2)
+    if stage not in ("new", "trash"):
+        console.print(f"[red]Unknown stage '{stage}'. Choose new or trash.[/red]")
+        raise typer.Exit(2)
     cfg = _config(db)
     cfg.face.enabled = faces
     if device:
@@ -463,19 +466,11 @@ def infer(
     stub = bool(info.get("semantic_is_stub"))
     if stub:
         console.print(_stub_warning(info))
-    if stage not in ("new", "trash"):
-        console.print(f"[red]Unknown stage '{stage}'. Choose new or trash.[/red]")
-        raise typer.Exit(2)
     only = None
     if paths:
         only = [p.strip() for p in paths.split(",") if p.strip()]
-    elif limit:
-        with get_session(cfg.db_path) as s:
-            repo = PhotoRepository(s)
-            pend = repo.images_pending_inference(limit)
-            only = [r.path for r in pend]
     pipeline = InferencePipeline(cfg, backend=bs)
-    result = _call_flex(pipeline.run, db_path=cfg.db_path, only_paths=only,
+    result = _call_flex(pipeline.run, db_path=cfg.db_path, only_paths=only, limit=limit or 0,
                         show_progress=not quiet, stage=stage, reanalyze=stage == "trash")
     t = Table(title="Inference result")
     t.add_column("Metric", style="cyan")
@@ -1092,8 +1087,9 @@ def serve(
     os.environ["PCUR_HOST"], os.environ["PCUR_PORT"] = host, str(free)
     if isinstance(token, str) and token:  # a direct call that omits it leaves Typer's option object here
         os.environ["PCUR_AUTH_TOKEN"] = token
-    auth = AuthManager(cfg.cache_dir)  # creates and stores the token when none exists
-    otc = new_otc()
+    incoming_otc = os.environ.get("PCUR_OTC")  # the .deb installer opens the browser with this code
+    auth = AuthManager(cfg.cache_dir)  # creates and stores the token when none exists (and pops PCUR_OTC)
+    otc = incoming_otc or new_otc()
     os.environ["PCUR_OTC"] = otc  # read once by the app, never written to disk
     shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
     if host not in ("127.0.0.1", "localhost", "::1"):
