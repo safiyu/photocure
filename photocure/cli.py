@@ -9,7 +9,7 @@ Commands:
     undo         Roll back a committed transaction.
     verify-txn   Re-hash every committed target of a transaction.
     repair       Fix images.path from the ledger.
-    trash-purge  Delete trash staging older than the retention window.
+    trash-purge  Permanently delete everything in the trash.
     similar      Find images similar to one image.
     search       Find photos by describing them in words.
     highlights   Export the best photos of a year as a page, optionally with copies.
@@ -743,21 +743,16 @@ def repair(db: Path = typer.Option(default_factory=default_db_path)):
 def trash_purge(
     db: Path = typer.Option(default_factory=default_db_path),
     library_root: Path | None = typer.Option(None, "--library-root", "-o"),
-    older_than_days: float | None = typer.Option(
-        None, "--older-than-days", help="Default 30."),
     yes: bool = typer.Option(False, "--yes", "-y"),
 ):
-    """Permanently delete trash staging older than the retention window."""
+    """Permanently delete everything in the library's trash."""
     cfg = _config(db)
-    output_dir = _plan_root(cfg, library_root)
-    days = 30 if older_than_days is None else older_than_days
-    if not yes and not typer.confirm(
-            f"Permanently delete trash under {output_dir} older than {days} days?"):
+    root = _plan_root(cfg, library_root)
+    if not yes and not typer.confirm(f"Permanently delete everything in the trash under {root}?"):
         console.print("[yellow]Aborted.[/yellow]")
         return
-    res = Planner(cfg, db_path=cfg.db_path).purge_trash(output_dir, days)
-    console.print(f"[green]Purged {len(res['removed_transactions'])} transactions, "
-                  f"{res['files']} files, {_human(res['bytes'])}.[/green]")
+    res = Planner(cfg, db_path=cfg.db_path).empty_trash(root)
+    console.print(f"[green]Deleted {res['deleted']} photos, {_human(res['bytes'])}.[/green]")
 
 
 @app.command()

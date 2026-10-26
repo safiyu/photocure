@@ -78,16 +78,15 @@ def test_failed_mutation_still_marks_ledger_failed(tmp_path, monkeypatch):
         assert [r.status for r in rows] == ["failed"]
 
 
-def test_purge_trash_marks_ledger_with_relative_output_dir(tmp_path, monkeypatch):
+def test_empty_trash_marks_ledger_with_a_relative_library_root(tmp_path, monkeypatch):
     w = build_world(tmp_path, n=1)
     set_bucket(w, w.ids[0], "graphic")
     approve_delete(w, w.ids[0])
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     rep = w.planner.execute_plan(p, trash=True)
     monkeypatch.chdir(tmp_path)
-    res = w.planner.purge_trash(type(w.out)("out"), older_than_days=30,
-                                now=time.time() + 31 * 86400)
-    assert res["removed_transactions"] == [rep.transaction_id]
+    res = w.planner.empty_trash(type(w.out)("out"))
+    assert res["deleted"] == 1
     with get_session(w.db) as s:
         rows = PhotoRepository(s).ledger_by_txn(rep.transaction_id)
         assert rows[0].status == "purged"

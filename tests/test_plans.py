@@ -199,17 +199,15 @@ def test_reassigning_clears_delete_approval(tmp_path):
     assert not get_img(w, w.ids[0]).delete_approved
 
 
-def test_purge_trash_respects_retention_and_marks_ledger(tmp_path):
+def test_empty_trash_deletes_the_files_and_marks_the_ledger(tmp_path):
     w = build_world(tmp_path, n=1)
     set_bucket(w, w.ids[0], "graphic")
     approve_delete(w, w.ids[0])
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     rep = w.planner.execute_plan(p, trash=True)
-    kept = w.planner.purge_trash(w.out, older_than_days=30)
-    assert kept["removed_transactions"] == []
-    res = w.planner.purge_trash(w.out, older_than_days=30,
-                                now=time.time() + 31 * 86400)
-    assert res["removed_transactions"] == [rep.transaction_id] and res["files"] == 1
+    assert list((w.out / ".trash").rglob("*.jpg"))  # nothing leaves the trash on a timer
+    res = w.planner.empty_trash(w.out)
+    assert res["deleted"] == 1 and res["bytes"] > 0
     assert not (w.out / ".trash").exists()
     with get_session(w.db) as s:
         rows = PhotoRepository(s).ledger_by_txn(rep.transaction_id)

@@ -597,3 +597,8 @@ def detach_faces(s, image_id: int) -> int:
         n += 1
     s.flush()
     return n
+
+
+def attach_faces_to_library(s, image_id: int, threshold: float = 0.64) -> dict:
+    """Match a restored photo's faces to the people already in the library (filled in with the people stages)."""
+    return {"matched": 0, "created": 0}

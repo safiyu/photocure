@@ -542,6 +542,14 @@ class CleanExportReq(BaseModel):
     rename: bool = True
 
 
+class TrashIdsReq(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=5000)
+
+
+class TrashReturnReq(BaseModel):
+    ids: list[int] | None = Field(default=None, max_length=5000)  # None means everything in the trash
+
+
 class ApproveDeleteReq(BaseModel):
     approved: bool | None = None  # omitted: toggle
 
@@ -2590,6 +2598,53 @@ def create_app(db_path: str | None = None) -> FastAPI:
             s.commit()
             return {"ok": True, "checked": checked_count, "moved": moved_count,
                     "missing": missing_count, "missing_ids": missing_ids}
+
+    def trash_job(kind: str, label: str, run):
+        """Run one trash action as a background job holding the busy lock."""
+        from ..library import LibraryRootMissing, require_library_root
+        try:
+            require_library_root(dbp, app.state.cfg)
+        except LibraryRootMissing as e:
+            raise HTTPException(409, str(e)) from None
+        if not _BUSY.acquire(blocking=False):
+            raise HTTPException(409, "another task is already running")
+
+        def work(job: dict) -> dict:
+            progress_mgr.start(label, label, 0, "Working...")
+
+            def on_prog(done, total, name):
+                progress_mgr.update(done, total, name, detail=f"{done} / {total}")
+
+            res = run(app.state.cfg, progress_mgr.is_stopped, on_prog)
+            progress_mgr.finish(f"{label}: done")
+            jlog(job, f"{label}: {json.dumps({k: v for k, v in res.items() if k != 'transaction_id'})}")
+            return res
+
+        return {"ok": True, "job_id": spawn(kind, work)["id"]}
+
+    @app.post("/api/trash/restore", dependencies=auth, status_code=202)
+    def trash_restore(body: TrashIdsReq):
+        from .. import trash_actions
+        return trash_job("trash-restore", "Restore", lambda c, stop, cb: trash_actions.restore(
+            dbp, c, body.ids, cancel_check=stop, on_progress=cb))
+
+    @app.post("/api/trash/return", dependencies=auth, status_code=202)
+    def trash_return(body: TrashReturnReq):
+        from .. import trash_actions
+        return trash_job("trash-return", "Return to origin", lambda c, stop, cb: trash_actions.return_to_origin(
+            dbp, c, body.ids, cancel_check=stop, on_progress=cb))
+
+    @app.post("/api/trash/delete", dependencies=auth, status_code=202)
+    def trash_delete(body: TrashIdsReq):
+        from .. import trash_actions
+        return trash_job("trash-delete", "Delete permanently", lambda c, stop, cb: trash_actions.delete_permanently(
+            dbp, c, body.ids, cancel_check=stop, on_progress=cb))
+
+    @app.post("/api/trash/empty", dependencies=auth, status_code=202)
+    def trash_empty():
+        from .. import trash_actions
+        return trash_job("trash-empty", "Empty trash", lambda c, stop, cb: trash_actions.empty_trash(
+            dbp, c, cancel_check=stop, on_progress=cb))
 
     @app.post("/api/plan/apply", dependencies=auth, status_code=202)
     def apply_plan(body: PlanReq):

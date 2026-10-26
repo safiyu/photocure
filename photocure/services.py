@@ -83,8 +83,6 @@ SETTINGS_KEYS = ("device", "device_index", "decode_workers", "torch_threads", "s
                  "collision_policy", "library_root", "default_operation")
 COLLISION_POLICIES = ("sequence", "date_suffix", "skip")
 OPERATIONS = ("move", "copy")
-# Kept only until Trash gets its own empty-trash action; the timer itself is no longer a setting.
-_LEGACY_RETENTION_DAYS = 30
 
 
 def settings_path(db_path: Path | str) -> Path:
@@ -772,48 +770,10 @@ class Planner:
         return out
 
     # ---------------------------------------------------------------- trash
-    def purge_trash(self, organize_root: Path | None = None,
-                    older_than_days: float | None = None,
-                    now: float | None = None) -> dict:
-        """Permanently delete trash staging dirs older than the retention window."""
-        root = Path(organize_root or self.cfg.organize_root)
-        days = _LEGACY_RETENTION_DAYS if older_than_days is None else older_than_days
-        cutoff = (now if now is not None else time.time()) - float(days) * 86400.0
-        trash = root / self.cfg.trash_dir_name
-        res = {"removed_transactions": [], "files": 0, "bytes": 0}
-        if not trash.is_dir():
-            return res
-        for d in sorted(p for p in trash.iterdir() if p.is_dir()):
-            newest = max([d.stat().st_mtime] + [
-                f.stat().st_mtime for f in d.rglob("*") if f.exists()])
-            if newest > cutoff:
-                continue
-            for f in d.rglob("*"):
-                if f.is_file():
-                    res["files"] += 1
-                    res["bytes"] += f.stat().st_size
-            shutil.rmtree(d)
-            res["removed_transactions"].append(d.name)
-            self._mark_purged(d)
-        if trash.is_dir() and not any(trash.iterdir()):
-            trash.rmdir()
-        return res
-
-    def _mark_purged(self, trash_txn_dir: Path) -> None:
-        base = trash_txn_dir.resolve()
-        with get_session(self.db_path) as session:
-            candidates = session.exec(select(ActionLedger).where(
-                ActionLedger.status == "committed",
-                ActionLedger.transaction_id == trash_txn_dir.name)).all()
-            rows = [e for e in candidates
-                    if Path(e.target_path).resolve().is_relative_to(base)]
-            repo = PhotoRepository(session)
-            for e in rows:
-                e.status = "purged"
-                img = repo.get_by_id(e.image_id) if e.image_id else None
-                if img is not None:
-                    img.scan_status = "missing"
-                    img.route_status = "purged"
+    def empty_trash(self, root: Path | None = None) -> dict:
+        """Delete everything in the trash; nothing leaves it on a timer."""
+        from .trash_actions import empty_trash
+        return empty_trash(self.db_path, self.cfg, root=root)
 
     # --------------------------------------------------------------- report
     def render_html_report(self, plan: Plan, output: Path | str,
