@@ -208,6 +208,8 @@ def test_apply_completion_gate(tmp_path):
         s.commit()
         r1_id, r2_id = r1.id, r2.id
 
+    assert client.post("/api/settings", json={"library_root": str(out_dir)}).status_code == 200
+
     # Check readiness: should report uncompleted issues
     readiness = client.get("/api/plan/readiness").json()
     assert readiness["ready"] is False
@@ -215,7 +217,7 @@ def test_apply_completion_gate(tmp_path):
     assert readiness["unresolved_junk"] == 1
 
     # Attempt apply: must be rejected with 409 Conflict
-    apply_res = client.post("/api/plan/apply", json={"output_dir": str(out_dir), "operation": "copy"})
+    apply_res = client.post("/api/plan/apply", json={"operation": "copy"})
     assert apply_res.status_code == 409
     assert "uncertain" in apply_res.text.lower() or "finalize" in apply_res.text.lower()
 
@@ -230,7 +232,7 @@ def test_apply_completion_gate(tmp_path):
     assert readiness2["unresolved_junk"] == 0
 
     # Apply succeeds
-    apply_res2 = client.post("/api/plan/apply", json={"output_dir": str(out_dir), "operation": "copy"})
+    apply_res2 = client.post("/api/plan/apply", json={"operation": "copy"})
     assert apply_res2.status_code == 202
 
 

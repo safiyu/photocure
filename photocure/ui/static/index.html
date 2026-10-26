@@ -531,24 +531,8 @@
                 <select id="op">
                   <option value="move">Move them</option>
                   <option value="copy">Copy them</option>
-                  <option value="hardlink">Hard link them (same disk)</option>
-                  <option value="symlink">Symbolic link them</option>
                 </select>
-              </div>
-              <div class="field">
-                <label for="orgmode">Folder layout</label>
-                <select id="orgmode">
-                  <option value="category_first">Sort into category folders</option>
-                  <option value="in_place">Leave originals, add links</option>
-                </select>
-              </div>
-              <div class="field wide">
-                <label for="orgroot">Destination folder</label>
-                <div class="with-btn">
-                  <input id="orgroot" type="text" placeholder="Choose where organized photos go" autocomplete="off" spellcheck="false">
-                  <button class="btn" id="btn-browse-out" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
-                </div>
-                <p class="help">Pick a folder outside your photo library so the result is easy to review.</p>
+                <p class="help" id="copy-hint" hidden>Originals stay where they are, including the ones marked for delete. A copy of those goes to the trash folder.</p>
               </div>
               <div class="field">
                 <label for="onlycat">Apply to</label>
@@ -557,7 +541,7 @@
               <div class="field">
                 <span class="lbl">Junk handling</span>
                 <label class="toggle" style="align-self:flex-start"><input type="checkbox" id="trash" checked>Move photos marked for delete to a trash folder</label>
-                <p class="help">Photos you marked for delete are always left out of the result. With this on, they are moved to a trash folder that you can restore or purge later. Junk you did not mark stays in the junk review folder.</p>
+                <p class="help">Photos you marked for delete are always left out of the result. With this on, they go to the trash folder, where you can restore them or delete them for good. Junk you did not mark stays in the junk review folder.</p>
               </div>
             </div>
             <div class="btn-row">

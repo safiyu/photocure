@@ -2444,11 +2444,6 @@
         if (window.__syncScanPathDisplay) window.__syncScanPathDisplay();
       },
     });
-    $("#btn-browse-out").onclick = () => openPicker({
-      title: "Choose the destination folder", mode: "output", initial: $("#orgroot").value.trim(),
-      okLabel: "Use this folder",
-      onPick: (p) => { $("#orgroot").value = p; },
-    });
   }
 
   // ------------------------------------------------------------ triage keys
@@ -4875,13 +4870,12 @@
   // ------------------------------------------------------------------ plan UI
   function planBody() {
     return {
-      operation: $("#op").value, mode: $("#orgmode").value,
-      output_dir: $("#orgroot").value.trim(),
+      operation: $("#op").value,
       only_category: $("#onlycat").value || null, trash: $("#trash").checked,
     };
   }
 
-  const OPVERB = { move: "Move", copy: "Copy", hardlink: "Hard link", symlink: "Link" };
+  const OPVERB = { move: "Move", copy: "Copy" };
 
   function renderDiff(d, confirmable) {
     const el = $("#diff-panel");
@@ -4931,9 +4925,6 @@
         if (res.unapproved_junk) logLine(`${fmtN(res.unapproved_junk)} junk photos were not approved for deletion and stay in the junk review folder`, "warn");
         toast(`Organized ${fmtN(res.executed)} photos. You can undo this from this page.`, "ok");
         if (res.backup_warning) toast(res.backup_warning, "err");
-        if (num(res.copy_fallbacks) > 0) {
-          addBanner("copy", "Cross-filesystem link detected; files were copied instead of hardlinked.", [["Dismiss", (ev) => ev.currentTarget.parentNode.remove()]]);
-        }
         if (num(res.skipped_collisions) > 0) {
           addBanner("skip", `${fmtN(res.skipped_collisions)} files were left in place because their names were already taken.`, [["Dismiss", (ev) => ev.currentTarget.parentNode.remove()]]);
         }
@@ -5841,7 +5832,9 @@
       state.thresholds = cfg.thresholds || null;
       state.junk = new Set(cfg.categories.filter((c) => c.junk).map((c) => c.value));
       state.utility = new Set(cfg.categories.filter((c) => c.utility).map((c) => c.value));
-      if (!$("#orgroot").value) $("#orgroot").value = cfg.default_output_dir;
+      if (cfg.default_operation) $("#op").value = cfg.default_operation;
+      const hint = $("#copy-hint");
+      if (hint) hint.hidden = $("#op").value !== "copy";
     } catch (e) {
       state.cats = sortCats(["people", "food", "scenery", "animal", "screenshot", "document",
         "graphic", "accidental", "duplicate", "uncertain", "unknown"]);
@@ -6226,6 +6219,7 @@
       } catch (e) { toast(e.message, "err"); }
     };
 
+    $("#op").onchange = () => { $("#copy-hint").hidden = $("#op").value !== "copy"; };
     $("#btn-rebuild").onclick = async () => {
       try {
         const r = await post("/api/plan/rebuild", planBody());

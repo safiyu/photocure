@@ -1,7 +1,6 @@
 """C2 acceptance: hardlink/copy provenance + undo, collision policies, orphaned recovery."""
 from __future__ import annotations
 
-import errno
 import os
 
 import pytest
@@ -26,63 +25,6 @@ def _ledger(w, tid):
     with get_session(w.db) as s:
         rows = PhotoRepository(s).ledger_by_txn(tid)
         return [(r.actual_operation, r.target_dev, r.target_ino, r.status) for r in rows]
-
-
-def test_hardlink_undo_survives_source_deletion(tmp_path):
-    w = build_world(tmp_path, n=2)
-    rep = ActionEngine(w.cfg, db_path=w.db).execute(_acts(w, "hardlink"), transaction_id="TX_H")
-    assert rep.failures == 0 and rep.copy_fallbacks == 0
-    for op, dev, ino, status in _ledger(w, "TX_H"):
-        assert op == "hardlink" and dev is not None and ino is not None and status == "committed"
-    for p in w.paths:
-        p.unlink()  # user cleans up the import folder
-    out = RollbackEngine(w.cfg, db_path=w.db).rollback_transaction("TX_H")
-    assert out.failures == 0 and out.reversed == 2
-    assert not any((w.out / "A").glob("*.jpg")) if (w.out / "A").exists() else True
-
-
-def test_hardlink_undo_refuses_when_target_was_replaced(tmp_path):
-    w = build_world(tmp_path, n=1)
-    ActionEngine(w.cfg, db_path=w.db).execute(_acts(w, "hardlink"), transaction_id="TX_R")
-    target = w.out / "A" / sorted(w.paths)[0].name
-    target.unlink()
-    target.write_bytes(b"the user's own file")  # different inode now
-    out = RollbackEngine(w.cfg, db_path=w.db).rollback_transaction("TX_R")
-    assert out.failures == 1 and target.read_bytes() == b"the user's own file"
-
-
-def test_cross_filesystem_falls_back_to_copy_and_undo_verifies(tmp_path, monkeypatch):
-    w = build_world(tmp_path, n=2)
-    real = os.link
-
-    def exdev(src, dst, *a, **k):
-        raise OSError(errno.EXDEV, "cross-device link")
-    monkeypatch.setattr(os, "link", exdev)
-    rep = ActionEngine(w.cfg, db_path=w.db).execute(_acts(w, "hardlink"), transaction_id="TX_C")
-    monkeypatch.setattr(os, "link", real)
-    assert rep.failures == 0 and rep.copy_fallbacks == 2
-    assert {r[0] for r in _ledger(w, "TX_C")} == {"copy"}
-    for p in w.paths:
-        p.unlink()
-    out = RollbackEngine(w.cfg, db_path=w.db).rollback_transaction("TX_C")
-    assert out.failures == 0 and out.reversed == 2
-
-
-def test_copy_fallback_undo_refuses_modified_copy(tmp_path, monkeypatch):
-    w = build_world(tmp_path, n=1)
-    monkeypatch.setattr(os, "link", lambda *a, **k: (_ for _ in ()).throw(OSError(errno.EXDEV, "x")))
-    ActionEngine(w.cfg, db_path=w.db).execute(_acts(w, "hardlink"), transaction_id="TX_M")
-    target = w.out / "A" / sorted(w.paths)[0].name
-    target.write_bytes(b"edited after the fact")
-    out = RollbackEngine(w.cfg, db_path=w.db).rollback_transaction("TX_M")
-    assert out.failures == 1 and target.exists()
-
-
-def test_disk_full_is_not_masked_by_copy_fallback(tmp_path, monkeypatch):
-    w = build_world(tmp_path, n=1)
-    monkeypatch.setattr(os, "link", lambda *a, **k: (_ for _ in ()).throw(OSError(errno.ENOSPC, "full")))
-    rep = ActionEngine(w.cfg, db_path=w.db).execute(_acts(w, "hardlink"))
-    assert rep.failures == 1 and rep.copy_fallbacks == 0
 
 
 def _occupy(w):

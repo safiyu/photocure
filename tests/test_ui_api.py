@@ -36,6 +36,7 @@ def env(tmp_path):
     make_image(lib / "d_white.jpg", rng_seed=4, white=True)
     assert client.post("/api/scan", json={"path": str(lib)}).status_code == 200
     assert client.post("/api/infer", json={"device": "cpu"}).status_code == 200
+    assert client.post("/api/settings", json={"library_root": str(tmp_path / "out")}).status_code == 200
     return types.SimpleNamespace(app=app, client=client, lib=lib, out=tmp_path / "out",
                                  db=app.state.db, tmp=tmp_path)
 
@@ -51,7 +52,7 @@ def wait_job(client, job_id, timeout=30):
 
 
 def plan_body(env, **kw):
-    return {"output_dir": str(env.out), "operation": "move", **kw}
+    return {"operation": "move", **kw}
 
 
 # ---------------------------------------------------------------- security
@@ -70,8 +71,8 @@ MUTATING = [
     ("/api/scan", {"path": "/x"}), ("/api/infer", {}), ("/api/cluster", {}),
     ("/api/ingest", {"path": "/x"}), ("/api/images/1/reassign", {"bucket": "food"}),
     ("/api/images/1/lock", {"locked": True}),
-    ("/api/plan/rebuild", {"output_dir": "/x"}), ("/api/plan/diff", {"output_dir": "/x"}),
-    ("/api/plan/apply", {"output_dir": "/x"}), ("/api/undo", {}), ("/api/repair", {}),
+    ("/api/plan/rebuild", {}), ("/api/plan/diff", {}),
+    ("/api/plan/apply", {}), ("/api/undo", {}), ("/api/repair", {}),
     ("/api/events/cluster", {}), ("/api/events/1/rename", {"name": "n"}),
     ("/api/learn", {}), ("/api/stop", {}), ("/api/reset", {}),
 ]
@@ -101,7 +102,7 @@ def test_import_has_no_side_effects_and_lazy_app(tmp_path, monkeypatch):
 def test_config_endpoint(env):
     d = env.client.get("/api/config").json()
     assert "default_output_dir" not in d
-    assert d["library_root"] is None and d["library_root_source"] == "none"
+    assert d["library_root"] == str(env.out.resolve()) and d["library_root_source"] == "settings"
     assert d["default_operation"] == "move"
     vals = {c["value"]: c["junk"] for c in d["categories"]}
     assert vals["uncertain"] is False
@@ -214,27 +215,10 @@ def test_config_not_mutated_by_requests(env):
     assert env.app.state.cfg.device.face_batch_size != 7 or before == "cpu"
 
 
-# ------------------------------------------------------------- output dir
-@pytest.mark.parametrize("bad", ["Organized", "relative/dir", "/", "/etc/photos",
-                                 "/usr/local/x", ""])
-def test_output_dir_rejected(env, bad):
-    for path in ("/api/plan/rebuild", "/api/plan/diff", "/api/plan/apply"):
-        r = env.client.post(path, json={"output_dir": bad})
-        assert r.status_code == 400, (path, bad, r.status_code)
-
-
-def test_output_dir_inside_library_rejected_unless_in_place(env):
-    inside = str(env.lib / "organized")
-    r = env.client.post("/api/plan/diff", json={"output_dir": inside})
-    assert r.status_code == 400
-    r = env.client.post("/api/plan/diff", json={
-        "output_dir": inside, "mode": "in_place", "operation": "hardlink"})
-    assert r.status_code == 200
-
-
 def test_bad_enum_values_rejected(env):
     r = env.client.post("/api/plan/diff", json=plan_body(env, operation="explode"))
     assert r.status_code == 422
+    assert env.client.post("/api/plan/diff", json=plan_body(env, operation="hardlink")).status_code == 422
     r = env.client.post("/api/plan/diff", json=plan_body(env, only_category="bogus"))
     assert r.status_code == 400
 

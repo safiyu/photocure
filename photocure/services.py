@@ -244,13 +244,6 @@ def _alt_key() -> str:
     return member.value if member is not None else "burst_alternate"
 
 
-def _effective_op(mode: str, op: str) -> str:
-    """In-place plans never move originals: move becomes hardlink."""
-    if mode == OrganizeMode.IN_PLACE.value and op == "move":
-        return "hardlink"
-    return op
-
-
 def compute_inputs_hash(records) -> str:
     """Stable hash of every routing input; changes when the DB state changes."""
     h = hashlib.sha256()
@@ -407,7 +400,10 @@ class Planner:
         ``recluster=None`` reclusters only when no bursts exist yet, or when a
         threshold override is given.
         """
-        root = Path(organize_root or self.cfg.organize_root)
+        if operation not in OPERATIONS:
+            raise ValueError(f"unsupported operation: {operation}")
+        from .library import require_library_root
+        root = Path(organize_root) if organize_root else require_library_root(self.db_path, self.cfg)
         pid = plan_id or f"PLAN_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         if window_seconds is not None:
             self.cfg.burst.window_seconds = int(window_seconds)
@@ -442,7 +438,7 @@ class Planner:
                 target = organizer.full_target(r, dec)
                 actions.append(PlannedAction(
                     image_id=r.id, source=Path(r.path), target=target,
-                    operation=_effective_op(mode.value, operation),
+                    operation=operation,
                     category=dec.category, reason=dec.reason,
                     is_alternate=dec.is_alternate,
                     burst_name=organizer.burst_name_for(r) if dec.is_alternate else None,
@@ -593,18 +589,17 @@ class Planner:
                      cancel_check: Callable[[], bool] | None = None) -> ExecutionReport:
         """Apply a persisted (or in-memory) plan exactly as built.
 
-        ``operation`` is an explicit override only; in-place plans still never
-        move originals.
+        ``operation`` is an explicit override only ("move" or "copy").
         """
         plan = (self.load_plan(plan_or_plan_id)
                 if isinstance(plan_or_plan_id, str) else plan_or_plan_id)
         if not force:
             self.check_plan(plan)
         if operation:
+            if operation not in OPERATIONS:
+                raise ValueError(f"unsupported operation: {operation}")
             for a in plan.actions:
                 a.operation = operation
-        for a in plan.actions:
-            a.operation = _effective_op(plan.mode, a.operation)
         engine = ActionEngine(self.cfg, db_path=self.db_path)
         rep = engine.execute(plan.actions, organize_root=Path(plan.organize_root),
                              only_category=only_category, trash=trash,
@@ -760,7 +755,9 @@ class Planner:
             summary = dict(fn(session, self.cfg))
         out = {**summary, "uncertain_before": before, "plan_id": None}
         if rebuild:
-            out["plan_id"] = self.build_plan(persist=True).plan_id
+            from .library import library_root
+            root = library_root(self.db_path, self.cfg) or self.cfg.organize_root
+            out["plan_id"] = self.build_plan(organize_root=root, persist=True).plan_id
         with get_session(self.db_path) as session:
             after = PhotoRepository(session).count_category("uncertain")
         out["uncertain_after"] = after

@@ -105,14 +105,6 @@ def test_cli_apply_unknown_plan_id(tmp_path):
     assert r.exit_code == 1 and "Unknown plan id" in r.stdout
 
 
-def test_cli_apply_in_place_keeps_originals(tmp_path):
-    w = _world_cli(tmp_path)
-    r = runner.invoke(app, ["apply", "--db", str(w.db), "-o", str(w.out),
-                            "--mode", "in_place", "-y"])
-    assert r.exit_code == 0
-    assert all(p.exists() for p in w.paths)
-
-
 def test_cli_undo_no_verify_is_passed_through(tmp_path, monkeypatch):
     from photocure.services import Planner
     w = _world_cli(tmp_path, n=1)

@@ -51,21 +51,6 @@ def test_plan_cannot_be_applied_twice(tmp_path):
         w.planner.execute_plan(p.plan_id)
 
 
-def test_in_place_never_moves_originals_even_with_move_override(tmp_path):
-    w = build_world(tmp_path)
-    p = w.planner.build_plan(organize_root=w.out, operation="move",
-                             mode=OrganizeMode.IN_PLACE)
-    assert {a.operation for a in p.actions} == {"hardlink"}
-    rep = w.planner.execute_plan(p, operation="move")
-    assert rep.executed == 4
-    for src in w.paths:
-        assert src.exists()
-    for a in p.actions:
-        assert os.path.samefile(a.source, a.target)
-    for i in w.ids:
-        assert get_img(w, i).path in {str(x) for x in w.paths}
-
-
 def test_move_updates_db_path_and_undo_restores_it(tmp_path):
     w = build_world(tmp_path)
     p = w.planner.build_plan(organize_root=w.out, operation="move")
@@ -385,4 +370,3 @@ def test_trashed_photo_removed_from_index_and_undo_restores_it(tmp_path):
     with get_session(w.db) as s:
         assert PhotoRepository(s).stats()["total_images"] == 3
         assert PhotoRepository(s).count_category("graphic") == 1
-

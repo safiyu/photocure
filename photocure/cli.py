@@ -5,7 +5,7 @@ Commands:
     infer        Run quality + face + semantic inference over pending images.
     cluster      Cluster bursts and pick best shots.
     plan         Build a persisted dry-run routing plan (+ optional HTML report).
-    apply        Execute a persisted plan (move / copy / hardlink / symlink / trash).
+    apply        Execute a persisted plan (move or copy, optionally staging junk in trash).
     undo         Roll back a committed transaction.
     verify-txn   Re-hash every committed target of a transaction.
     repair       Fix images.path from the ledger.
@@ -115,9 +115,20 @@ def _call_flex(fn, *args, **kwargs):
     return fn(*args, **{k: v for k, v in kwargs.items() if k in params})
 
 
-def _mode(mode: str):
-    from .rules.organizer import OrganizeMode
-    return OrganizeMode.IN_PLACE if mode == "in_place" else OrganizeMode.CATEGORY_FIRST
+def _plan_root(cfg: CuratorConfig, override: Path | None) -> Path:
+    """The library folder from the flag, else the saved setting or PCUR_LIBRARY_ROOT."""
+    root = override or cfg.library_root
+    if root is None:
+        console.print("[red]No library folder is set.[/red] Set it in the app's Settings, "
+                      "with PCUR_LIBRARY_ROOT, or pass --library-root.")
+        raise typer.Exit(2)
+    return Path(root).expanduser().resolve()
+
+
+def _check_operation(operation: str | None) -> None:
+    if operation is not None and operation not in ("move", "copy"):
+        console.print(f"[red]Unknown operation '{operation}'. Choose move or copy.[/red]")
+        raise typer.Exit(2)
 
 
 def _print_diff(rep) -> None:
@@ -535,12 +546,9 @@ def recluster_faces(
 @app.command()
 def plan(
     db: Path = typer.Option(default_factory=default_db_path),
-    output_dir: Path = typer.Option(Path("Organized"), "--output-dir", "-o",
-                                    help="Organize root (Option 1)."),
-    mode: str = typer.Option("category_first", "--mode",
-                             help="category_first (Option 1) | in_place (Option 2)."),
-    operation: str = typer.Option("move", "--operation",
-                                  help="move|copy|hardlink|symlink."),
+    library_root: Path | None = typer.Option(None, "--library-root", "-o",
+                                             help="Library folder; default is the saved setting."),
+    operation: str = typer.Option("move", "--operation", help="move|copy."),
     report: Path | None = typer.Option(None, "--report", "-r",
                                           help="Write an HTML audit report here."),
     plan_id: str | None = typer.Option(None, "--plan-id"),
@@ -552,9 +560,11 @@ def plan(
 ):
     """Build and persist a dry-run routing plan and print a summary."""
     cfg = _config(db)
+    _check_operation(operation)
+    output_dir = _plan_root(cfg, library_root)
     planner = Planner(cfg, db_path=cfg.db_path)
     p = planner.build_plan(organize_root=output_dir, operation=operation,
-                           mode=_mode(mode), plan_id=plan_id,
+                           plan_id=plan_id,
                            include_duplicates=not exclude_duplicates,
                            recluster=recluster or None,
                            window_seconds=window_seconds,
@@ -564,8 +574,8 @@ def plan(
     _print_diff(planner.dry_run(p))
     if report:
         rp = planner.render_html_report(p, report, extra={
-            "Mode": mode, "Operation": operation,
-            "Organize root": str(output_dir), "DB": str(cfg.db_path),
+            "Operation": operation,
+            "Library folder": str(output_dir), "DB": str(cfg.db_path),
         })
         console.print(f"[green]Report written:[/green] {rp}")
     console.print(f"\n[dim]Plan ID: {p.plan_id} (saved in the state store)[/dim]")
@@ -581,12 +591,9 @@ def apply(
     db: Path = typer.Option(default_factory=default_db_path),
     plan_id: str | None = typer.Option(None, "--plan-id",
                                           help="Apply this persisted plan exactly as reviewed."),
-    operation: str | None = typer.Option(None, "--operation",
-                                         help="Override: move|copy|hardlink|symlink."),
-    output_dir: Path = typer.Option(Path("Organized"), "--output-dir", "-o",
-                                    help="Only used when no --plan-id is given."),
-    mode: str = typer.Option("category_first", "--mode",
-                             help="Only used when no --plan-id is given."),
+    operation: str | None = typer.Option(None, "--operation", help="Override: move|copy."),
+    library_root: Path | None = typer.Option(None, "--library-root", "-o",
+                                             help="Only used when no --plan-id is given."),
     exclude_duplicates: bool = typer.Option(False, "--exclude-duplicates",
                                             help="Only used when no --plan-id is given."),
     window_seconds: int | None = typer.Option(None, "--window-seconds"),
@@ -594,7 +601,7 @@ def apply(
     only_category: list[str] | None = typer.Option(
         None, "--only-category", help="Apply only these categories (repeatable)."),
     trash: bool = typer.Option(False, "--trash",
-                               help="Stage approved junk in <root>/.trash/<txn>/. "
+                               help="Stage approved junk in <library>/.trash/<txn>/. "
                                     "Unapproved junk stays in the junk review folder."),
     approve_deletes: bool = typer.Option(False, "--approve-deletes",
                                          help="With --trash, approve every junk photo in the plan first."),
@@ -605,6 +612,7 @@ def apply(
 ):
     """Execute a persisted plan (records a transaction for later undo)."""
     cfg = _config(db)
+    _check_operation(operation)
     planner = Planner(cfg, db_path=cfg.db_path)
     if plan_id:
         try:
@@ -616,8 +624,8 @@ def apply(
             console.print("[yellow]--exclude-duplicates is ignored with --plan-id; "
                           "the plan was fixed when it was built.[/yellow]")
     else:
-        p = planner.build_plan(organize_root=output_dir, operation=operation or "move",
-                               mode=_mode(mode),
+        p = planner.build_plan(organize_root=_plan_root(cfg, library_root),
+                               operation=operation or "move",
                                include_duplicates=not exclude_duplicates,
                                window_seconds=window_seconds,
                                similarity_threshold=similarity_threshold)
@@ -740,13 +748,14 @@ def repair(db: Path = typer.Option(default_factory=default_db_path)):
 @app.command("trash-purge")
 def trash_purge(
     db: Path = typer.Option(default_factory=default_db_path),
-    output_dir: Path = typer.Option(Path("Organized"), "--output-dir", "-o"),
+    library_root: Path | None = typer.Option(None, "--library-root", "-o"),
     older_than_days: float | None = typer.Option(
         None, "--older-than-days", help="Default 30."),
     yes: bool = typer.Option(False, "--yes", "-y"),
 ):
     """Permanently delete trash staging older than the retention window."""
     cfg = _config(db)
+    output_dir = _plan_root(cfg, library_root)
     days = 30 if older_than_days is None else older_than_days
     if not yes and not typer.confirm(
             f"Permanently delete trash under {output_dir} older than {days} days?"):

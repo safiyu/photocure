@@ -17,10 +17,7 @@ Option 1 (default, category-first date hierarchy)::
 With ``use_events`` the day folder carries the event label, e.g.
 ``People/2024/05/12_Event3/``.
 
-Option 2 (in-place, non-destructive): originals stay put; a hardlink or
-symlink is created in the same target tree. ``build_destination_plan`` returns
-the identical target layout; the *operation* (hardlink/symlink vs move) is a
-concern of the ActionEngine.
+Only move and copy are supported; the ActionEngine performs the operation.
 """
 from __future__ import annotations
 
@@ -38,8 +35,7 @@ from ..rules.taxonomy import CategoryType
 
 
 class OrganizeMode(str, Enum):
-    CATEGORY_FIRST = "category_first"   # Option 1
-    IN_PLACE = "in_place"               # Option 2
+    CATEGORY_FIRST = "category_first"
 
 
 @dataclass
@@ -50,7 +46,7 @@ class PlannedAction:
     source: Path
     target: Path
     category: CategoryType
-    operation: str = "move"   # move | copy | hardlink | symlink
+    operation: str = "move"   # move | copy
     reason: str = ""
     is_alternate: bool = False
     burst_name: str | None = None
@@ -173,10 +169,7 @@ class FolderOrganizer:
             ) -> list[PlannedAction]:
         """Produce the ordered list of :class:`PlannedAction` for the plan."""
         plan: list[PlannedAction] = []
-        # Option 2 uses hardlinks by default (non-destructive, no extra space).
         op = operation
-        if self.mode == OrganizeMode.IN_PLACE and op == "move":
-            op = "hardlink"
         for rec, dec in zip(records, decisions):
             target = self.full_target(rec, dec)
             plan.append(PlannedAction(

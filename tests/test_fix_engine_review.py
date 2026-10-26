@@ -31,17 +31,6 @@ def test_reapply_move_does_not_rename_organized_photos(tmp_path):
         assert get_img(w, i).route_status == "executed"
 
 
-def test_reapply_hardlink_in_place_is_idempotent(tmp_path):
-    w = build_world(tmp_path, n=2)
-    from photocure.rules.organizer import OrganizeMode
-    for _ in range(3):
-        p = w.planner.build_plan(organize_root=w.out, operation="move",
-                                 mode=OrganizeMode.IN_PLACE)
-        w.planner.execute_plan(p)
-    assert len(_files(w.root)) == 2
-    assert not list(w.root.rglob("* (*).jpg"))
-
-
 def test_reapply_copy_does_not_duplicate_library(tmp_path):
     w = build_world(tmp_path, n=3)
     w.planner.execute_plan(w.planner.build_plan(organize_root=w.out, operation="copy"))

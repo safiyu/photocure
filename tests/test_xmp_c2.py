@@ -117,21 +117,3 @@ class TestDivergenceTracking:
             # Update rating.
             update_xmp_sidecar(photo, rating=2)
             assert get_on_disk_rating(photo) == 2
-
-
-class TestHardlinkFallback:
-    """C2 §3.3: hardlink with EXDEV fallback & undo (stubs)."""
-
-    def test_hardlink_same_filesystem(self):
-        """Acceptance: hardlink succeeds on same filesystem."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            src = Path(tmpdir) / "src.txt"
-            src.write_text("test content")
-            dst = Path(tmpdir) / "dst.txt"
-            from photocure.engine.action_engine import ExecutionReport, ActionEngine
-            rep = ExecutionReport(transaction_id="TX_test")
-            op = ActionEngine._link_or_copy(src, dst, rep)
-            assert op == "hardlink"
-            assert dst.exists()
-            assert src.stat().st_ino == dst.stat().st_ino, "Hardlink should have same inode"
-            assert rep.copy_fallbacks == 0

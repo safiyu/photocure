@@ -123,7 +123,7 @@ def validate_library_root(raw: str, dbp: Path, *, browse_roots: list[Path] | Non
         raise LibraryRootError("library folder must not be the photocure data directory")
     src = None if inside_source_ok else source_library_root(dbp)
     if src is not None and (p == src or src in p.parents):
-        raise LibraryRootError(f"library folder must not be inside your photo folder ({src})")
+        raise LibraryRootError(f"library folder must not be inside your photo library ({src})")
     return p
 
 

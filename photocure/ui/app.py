@@ -73,7 +73,7 @@ from ..services import Planner
 STATIC_DIR = Path(__file__).parent / "static"
 TOKEN_HEADER = "X-PCUR-Token"
 TOKEN_PLACEHOLDER = "__PCUR_TOKEN__"
-OPERATIONS = ("move", "copy", "hardlink", "symlink")
+OPERATIONS = ("move", "copy")
 CATEGORY_VALUES = tuple(c.value for c in CategoryType)
 JUNK_VALUES = tuple(c.value for c in CategoryType if c.is_junk)
 UTILITY_VALUES = tuple(c.value for c in CategoryType if c.is_utility)
@@ -109,11 +109,9 @@ class ReassignFaceReq(BaseModel):
 
 
 class PlanReq(BaseModel):
-    output_dir: str
-    operation: Literal["move", "copy", "hardlink", "symlink"] = "move"
-    mode: Literal["category_first", "in_place"] = "category_first"
+    operation: Literal["move", "copy"] = "move"
     only_category: str | None = None
-    trash: bool = False
+    trash: bool = True
     include_duplicates: bool = True
 
 
@@ -775,9 +773,16 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def make_planner(c: CuratorConfig) -> Planner:
         return Planner(c, db_path=dbp)
 
+    def plan_root() -> Path:
+        from ..library import LibraryRootMissing, require_library_root
+        try:
+            return require_library_root(dbp, app.state.cfg)
+        except LibraryRootMissing as e:
+            raise HTTPException(409, str(e)) from None
+
     def build(planner: Planner, body: PlanReq, root: Path, persist: bool):
-        m = OrganizeMode.IN_PLACE if body.mode == "in_place" else OrganizeMode.CATEGORY_FIRST
-        kw = {"organize_root": root, "operation": body.operation, "mode": m}
+        kw = {"organize_root": root, "operation": body.operation,
+              "mode": OrganizeMode.CATEGORY_FIRST}
         if _accepts(planner.build_plan, "include_duplicates"):
             kw["include_duplicates"] = body.include_duplicates
         if _accepts(planner.build_plan, "persist"):
@@ -935,6 +940,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
             from ..services import apply_settings, save_settings
         except ImportError:
             raise _not_impl("settings")
+        if payload.get("library_root"):
+            from ..library import LibraryRootError, validate_library_root
+            try:
+                payload = {**payload, "library_root": str(validate_library_root(
+                    str(payload["library_root"]), dbp,
+                    browse_roots=_browse_roots() if _confined() else None))}
+            except LibraryRootError as e:
+                raise HTTPException(e.status, str(e)) from None
         try:
             saved = save_settings(dbp, payload)
         except ValueError as e:
@@ -2472,7 +2485,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.post("/api/plan/rebuild", dependencies=auth)
     def rebuild_plan(body: PlanReq):
         _check_category(body.only_category, "only_category")
-        root = validate_output_dir(body.output_dir, dbp, body.mode == "in_place")
+        root = plan_root()
         with exclusive():
             p = build(make_planner(req_cfg()), body, root, persist=True)
             return {"plan_id": p.plan_id, "total": p.total, "by_category": p.by_category,
@@ -2481,7 +2494,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.post("/api/plan/diff", dependencies=auth)
     def plan_diff(body: PlanReq):
         only = _check_category(body.only_category, "only_category")
-        root = validate_output_dir(body.output_dir, dbp, body.mode == "in_place")
+        root = plan_root()
         with exclusive():
             p = build(make_planner(req_cfg()), body, root, persist=False)
         actions = [a for a in p.actions if not only or str(
@@ -2512,7 +2525,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 crossdev = anc.stat().st_dev != st.st_dev
             except OSError:
                 pass
-            if a.operation in ("move", "hardlink") and crossdev:
+            if a.operation == "move" and crossdev:
                 cross += 1
             if a.operation == "copy" or (a.operation == "move" and crossdev):
                 need_bytes += st.st_size
@@ -2530,7 +2543,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             by_cat[k] = by_cat.get(k, 0) + 1
         return {
             "plan_id": p.plan_id, "total": len(actions), "by_category": by_cat,
-            "operation": body.operation, "mode": body.mode, "organize_root": str(root),
+            "operation": body.operation, "mode": "category_first", "organize_root": str(root),
             "collisions": len(collisions), "collision_samples": collisions[:20],
             "cross_device": cross, "missing_sources": missing,
             "bytes_total": total_bytes, "bytes_to_write": need_bytes,
@@ -2546,16 +2559,22 @@ def create_app(db_path: str | None = None) -> FastAPI:
             pending_analysis = sum(1 for r in recs if r.infer_status not in ("inferred", "failed"))
             uncertain_count = sum(1 for r in recs if (r.manual_bucket or r.category) == "uncertain" and not r.delete_approved)
             unresolved_junk = sum(1 for r in recs if (r.manual_bucket or r.category) in JUNK_VALUES and not r.delete_approved)
+            from ..library import library_root as _lib_root
+            root_set = _lib_root(dbp, app.state.cfg) is not None
             issues = []
+            if not root_set:
+                issues.append("library folder not set")
             if pending_analysis > 0:
                 issues.append(f"{pending_analysis} photo(s) pending analysis")
             if uncertain_count > 0:
                 issues.append(f"{uncertain_count} photo(s) in Finalize need category assignment or delete approval")
             if unresolved_junk > 0:
                 issues.append(f"{unresolved_junk} junk/duplicate photo(s) need delete approval")
-            ready = (pending_analysis == 0 and uncertain_count == 0 and unresolved_junk == 0 and len(recs) > 0)
+            ready = (root_set and pending_analysis == 0 and uncertain_count == 0
+                     and unresolved_junk == 0 and len(recs) > 0)
             return {
                 "ready": ready,
+                "library_root_set": root_set,
                 "total_pipeline": len(recs),
                 "pending_analysis": pending_analysis,
                 "uncertain_count": uncertain_count,
@@ -2661,7 +2680,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.post("/api/plan/apply", dependencies=auth, status_code=202)
     def apply_plan(body: PlanReq):
         only = _check_category(body.only_category, "only_category")
-        root = validate_output_dir(body.output_dir, dbp, body.mode == "in_place")
+        root = plan_root()
 
         # Completion gate check before apply
         with get_session(dbp) as s:
@@ -2742,7 +2761,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     "skipped_collisions": getattr(rep, "skipped_collisions", 0),
                     "unapproved_junk": getattr(rep, "unapproved_junk", 0),
                     "marked_left_out": getattr(rep, "marked_left_out", 0),
-                    "copy_fallbacks": getattr(rep, "copy_fallbacks", 0),
                     "failures": rep.failures, "errors": list(rep.errors)[:50]}
 
         job = spawn("apply", work)

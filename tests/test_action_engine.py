@@ -192,26 +192,6 @@ def test_copy_keeps_source_and_creates_target(cfg, seeded_repo, tmp_path):
 # Hardlink
 # ---------------------------------------------------------------------------
 
-def test_hardlink_same_inode(cfg, seeded_repo, tmp_path):
-    records, paths = seeded_repo
-    target = tmp_path / "Organized"
-    actions = _plan_actions(records, target, op="hardlink")
-
-    engine = ActionEngine(cfg, db_path=cfg.db_path)
-    rep = engine.execute(actions)
-    assert rep.failures == 0
-    for r in records:
-        src = Path(r.path)
-        tgt = target / r.filename
-        assert tgt.exists()
-        if os.path.samefile(src, tgt):
-            # Same device: real hardlink (same inode).
-            assert src.stat().st_ino == tgt.stat().st_ino
-
-
-# ---------------------------------------------------------------------------
-# Collision rename
-# ---------------------------------------------------------------------------
 
 def test_collision_renames_target(cfg, seeded_repo, tmp_path):
     records, paths = seeded_repo
@@ -286,53 +266,6 @@ def test_rollback_copy_removes_target(cfg, seeded_repo, tmp_path):
 # Rollback: hardlink
 # ---------------------------------------------------------------------------
 
-def test_rollback_hardlink_removes_link(cfg, seeded_repo, tmp_path):
-    records, paths = seeded_repo
-    target = tmp_path / "Organized"
-    actions = _plan_actions(records, target, op="hardlink")
-    txn = new_transaction_id()
-
-    before = _snapshot_tree(tmp_path)
-
-    engine = ActionEngine(cfg, db_path=cfg.db_path)
-    rep = engine.execute(actions, transaction_id=txn)
-    assert rep.failures == 0
-
-    rb = RollbackEngine(cfg, db_path=cfg.db_path)
-    rrep = rb.rollback_transaction(txn)
-    assert rrep.failures == 0
-
-    after = _snapshot_tree(tmp_path)
-    _assert_trees_equal(before, after, "rollback-hardlink")
-
-
-# ---------------------------------------------------------------------------
-# Rollback: symlink
-# ---------------------------------------------------------------------------
-
-def test_rollback_symlink_removes_link(cfg, seeded_repo, tmp_path):
-    records, paths = seeded_repo
-    target = tmp_path / "Organized"
-    actions = _plan_actions(records, target, op="symlink")
-    txn = new_transaction_id()
-
-    before = _snapshot_tree(tmp_path)
-
-    engine = ActionEngine(cfg, db_path=cfg.db_path)
-    rep = engine.execute(actions, transaction_id=txn)
-    assert rep.failures == 0
-
-    rb = RollbackEngine(cfg, db_path=cfg.db_path)
-    rrep = rb.rollback_transaction(txn)
-    assert rrep.failures == 0
-
-    after = _snapshot_tree(tmp_path)
-    _assert_trees_equal(before, after, "rollback-symlink")
-
-
-# ---------------------------------------------------------------------------
-# Rollback hash verification
-# ---------------------------------------------------------------------------
 
 def test_rollback_refuses_on_hash_mismatch(cfg, seeded_repo, tmp_path):
     records, paths = seeded_repo
