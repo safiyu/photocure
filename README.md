@@ -168,9 +168,9 @@ Choose a folder and press **Scan**, then **Analyze Now**. **Run All** does both 
 
 ### Library
 
-Every photo, oldest first. Narrow it down by category, camera, rating, country, favourites, or a date range (quick buttons for this year, last 90 days and last 30 days). The size slider changes thumbnail size. Click a photo to open it large, rate it, mark it as a favourite, change its category or lock it so a re-analysis never changes it. Click the tick on photos to select several and move them together.
+Every photo, oldest first. Narrow it down by category, camera, rating, country, favourites, or a date range (quick buttons for this year, last 90 days and last 30 days). The size slider changes thumbnail size. Click a photo to open it large, rate it, mark it as a favourite, change its category or lock it so nothing changes it by mistake. Click the tick on photos to select several and move them together.
 
-**Mark for delete.** Every photo, in every section, has a small trash icon (and the photo viewer and the selection bar have a **Mark for delete** button). A marked photo is dimmed and tagged, and it is left out of the result when you apply. With the trash option on (the default) it is moved to a trash folder you can restore or purge later; otherwise, or when you copy instead of move, your original stays where it is. Nothing is deleted just by marking, and unmarked photos are never removed. To mark everything Photocure flags as junk in one go, tick **Approve all proposed deletions** before you analyze.
+**Mark for delete.** Every photo, in every section, has a small trash icon (and the photo viewer and the selection bar have a **Mark for delete** button). A marked photo is dimmed and tagged, and it is left out of the result when you apply. With the trash option on (the default) it goes to the trash folder, where you can restore it or delete it for good: a move puts the file there, and a copy puts a copy there while your original stays where it is. With the trash option off, a marked photo stays where it is. Nothing is deleted just by marking, and unmarked photos are never removed. To mark everything Photocure flags as junk in one go, tick **Approve all proposed deletions** before you analyze.
 
 **Clean export.** With photos selected, press **Clean export** to make copies that are safe to share. Location, camera serial and other hidden details are removed, files get neutral names, and you can add a simple web gallery. Photocure can also check the selection for license plates, payment cards, screens, house numbers and ID documents, then blur those areas or leave those photos out. This check is a helper, not a guarantee: it can miss small details, so look over what you share. Your originals are never changed.
 
@@ -252,7 +252,7 @@ Press **?** in the app to see this list any time.
 | **0** | Clear the rating |
 | **x** | Reject, or un-reject (nothing is deleted) |
 | **f** | Favourite, or remove from favourites |
-| **l** | Lock or unlock a photo so re-analysis never changes it |
+| **l** | Lock or unlock a photo so nothing changes it by mistake |
 | **j** and **k** | Next and previous photo in Finalize and Junk |
 | **1** to **9** | In Finalize and Junk: choose a category |
 | **u** | Undo the last category change |
@@ -269,10 +269,9 @@ Press **?** in the app to see this list any time.
 
 ## Optional extras
 
-**Place names.** To see city, region and country for photos with GPS, install the add-on once, then fill in places for photos you imported earlier:
+**Place names.** To see city, region and country for photos with GPS, fill in places for photos you imported earlier:
 
 ```bash
-pip install "photocure[geo]"
 photocure geocode
 ```
 
@@ -301,10 +300,10 @@ A JSON file works the same way. Describe what is in the photo with a few differe
 
 ```bash
 pip install "photocure[mcp]"
-claude mcp add photocure -- photocure mcp --db /full/path/to/photo_curator.db
+claude mcp add photocure -- photocure mcp --db /full/path/to/photocure.db
 ```
 
-Other agents take the same command in their MCP settings: `photocure mcp --db /full/path/to/photo_curator.db`. Use the full path to the database. The agent gets eight tools. Six only read: library overview, search by description, browse by date or category, photo details, view a photo, and list bursts. Two write new files: `create_composite` and `clean_export`.
+Other agents take the same command in their MCP settings: `photocure mcp --db /full/path/to/photocure.db`. Use the full path to the database. The agent gets ten tools. Eight only read: library overview, search by description, browse by date or category, photo details, view a photo, and list bursts. Two write new files: `create_composite` and `clean_export`.
 
 ## Command line
 
