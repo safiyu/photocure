@@ -395,7 +395,7 @@ def bulk_delete_people(db_path: Path | str, person_ids: list[int], stage: str = 
         return {"deleted_count": count}
 
 
-def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
+def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = "new") -> dict:
     """Recluster faces on New Pipeline photos while anchoring on existing named/library PersonCluster centroids.
 
     - Preserves existing named clusters and Library photos.
@@ -413,22 +413,22 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
             .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
             .where(M.FaceDetection.embedding_json.isnot(None))
             .where(M.FaceDetection.ignored == False)
-            .where(M.ImageRecord.route_status != "executed")
-            .where(M.ImageRecord.scan_status != "missing")
+            .where(stage_clause(stage))
         ).all()
 
         if not faces:
             return {"clusters_created": 0, "faces_clustered": 0}
 
         # Keep existing custom names mapped to old person_id
-        old_clusters = s.exec(select(M.PersonCluster)).all()
+        cluster_stage = _cluster_stage(stage)
+        old_clusters = s.exec(select(M.PersonCluster).where(M.PersonCluster.stage == cluster_stage)).all()
         custom_names = {c.id: c.name for c in old_clusters if c.name}
 
         # Seed anchored clusters from existing clusters with centroids
         clusters: list[dict] = []
         anchored_cluster_ids = set()
         for c in old_clusters:
-            if not c.centroid_json:
+            if not c.centroid_json or stage == "trash":  # trash people are rebuilt from scratch
                 continue
             # Only anchor on clusters that have faces in finalized Library photos
             lib_face_cnt = s.exec(
@@ -436,7 +436,7 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
                 .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
                 .where(M.FaceDetection.person_id == c.id)
                 .where(M.FaceDetection.ignored == False)
-                .where(M.ImageRecord.route_status == "executed")
+                .where(M.ImageRecord.stage == "library")
             ).one()
             if not lib_face_cnt or lib_face_cnt <= 0:
                 continue
@@ -457,7 +457,7 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
                 select(M.FaceDetection.image_id)
                 .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
                 .where(M.FaceDetection.person_id == c.id)
-                .where(M.ImageRecord.route_status == "executed")
+                .where(M.ImageRecord.stage == "library")
             ).all())
 
             clusters.append({
@@ -556,6 +556,7 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
                     centroid_json=quantize_embedding(centroid_list),
                     face_count=len(c_data["face_ids"]),
                     name=cluster_name,
+                    stage=cluster_stage,
                 )
                 s.add(new_c)
                 s.flush()
@@ -600,5 +601,54 @@ def detach_faces(s, image_id: int) -> int:
 
 
 def attach_faces_to_library(s, image_id: int, threshold: float = 0.64) -> dict:
-    """Match a restored photo's faces to the people already in the library (filled in with the people stages)."""
-    return {"matched": 0, "created": 0}
+    """Match a restored photo's faces to the people already in the library.
+
+    A face joins the closest library person at or above ``threshold``, otherwise it starts a new
+    person. Two faces of one photo never share a person. Faces leave their trash person, and a
+    trash person left with no faces is deleted. Faces ignored while trashed come back.
+    """
+    from .clustering.face_identity import ClusterCentroid, assign_cluster, update_centroid
+
+    faces = [f for f in s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == image_id)).all()
+             if f.embedding_json]
+    faces.sort(key=lambda f: f.face_sharpness or 0.0, reverse=True)
+    centroids = {c.id: ClusterCentroid(c.id, dequantize_embedding(c.centroid_json) or [], c.face_count)
+                 for c in s.exec(select(M.PersonCluster).where(M.PersonCluster.stage == "library")).all()
+                 if c.centroid_json and c.face_count > 0}
+    claimed: set[int] = set()
+    matched = created = 0
+    for f in faces:
+        emb = dequantize_embedding(f.embedding_json)
+        if not emb:
+            continue
+        old_pid = f.person_id
+        pid = assign_cluster(emb, [c for c in centroids.values() if c.person_id not in claimed], threshold)
+        if pid is not None:
+            c = centroids[pid]
+            person = s.get(M.PersonCluster, pid)
+            new_centroid = update_centroid(c.centroid, c.face_count, emb)
+            person.centroid_json = quantize_embedding(new_centroid)
+            person.face_count = c.face_count + 1
+            centroids[pid] = ClusterCentroid(pid, new_centroid, person.face_count)
+            matched += 1
+        else:
+            person = M.PersonCluster(name=None, face_count=1, stage="library",
+                                     centroid_json=quantize_embedding(emb))
+            s.add(person)
+            s.flush()
+            pid = person.id
+            centroids[pid] = ClusterCentroid(pid, list(emb), 1)
+            created += 1
+        claimed.add(pid)
+        if old_pid is not None and old_pid != pid:
+            old = s.get(M.PersonCluster, old_pid)
+            if old is not None:
+                old.face_count = max(0, old.face_count - 1)
+                if old.stage == "trash" and old.face_count <= 0:
+                    s.flush()
+                    f.person_id = pid
+                    s.delete(old)
+        f.person_id = pid
+        f.ignored = False
+    s.flush()
+    return {"matched": matched, "created": created}

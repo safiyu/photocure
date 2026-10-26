@@ -1577,10 +1577,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
             raise HTTPException(e.status, str(e)) from None
 
     @app.post("/api/people/recluster", dependencies=auth)
-    def recluster_people_endpoint(threshold: float = Query(0.64, ge=0.0, le=1.0)):
+    def recluster_people_endpoint(threshold: float = Query(0.64, ge=0.0, le=1.0),
+                                  stage: Literal["new", "trash"] = Query("new")):
         """Recluster all detected faces with strict identity threshold (default 0.64)."""
         from ..people_actions import recluster_people
-        return recluster_people(dbp, threshold=threshold)
+        return recluster_people(dbp, threshold=threshold, stage=stage)
 
     @app.get("/api/people/{person_id}/photos")
     def person_photos_endpoint(person_id: int, stage: StageFilter = Query("all")):

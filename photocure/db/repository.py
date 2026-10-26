@@ -255,8 +255,8 @@ class PhotoRepository:
     def all_person_clusters(self) -> list[PersonCluster]:
         return list(self.s.exec(sselect(PersonCluster)).all())
 
-    def create_person_cluster(self, embedding: Sequence[float]) -> PersonCluster:
-        p = PersonCluster(name=None, face_count=1, centroid_json=quantize_embedding(embedding))
+    def create_person_cluster(self, embedding: Sequence[float], stage: str = "library") -> PersonCluster:
+        p = PersonCluster(name=None, face_count=1, stage=stage, centroid_json=quantize_embedding(embedding))
         self.s.add(p)
         self.s.flush()
         return p

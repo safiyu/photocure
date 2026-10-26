@@ -197,6 +197,8 @@ class InferencePipeline:
         self.bs.retry_downgraded()
         self.quality = QualityEngine(self.cfg.quality)
 
+    _cluster_stage = "library"
+
     def _faces_stale(self, rec: ImageRecord) -> bool:
         return (self.bs.face_backend != "stub" and self.cfg.face.enabled
                 and rec.faces_schema_version < self.cfg.face.schema_version)
@@ -267,6 +269,8 @@ class InferencePipeline:
         with ``reanalyze`` redoes every trashed photo whose file is still there."""
         if stage not in ("new", "trash"):
             raise ValueError(f"cannot analyse photos in the {stage} stage")
+        # People found in the trash stay in their own clusters, apart from the library's.
+        self._cluster_stage = "trash" if stage == "trash" else "library"
         db = db_path or self.cfg.db_path
         result = InferResult()
         t0 = time.monotonic()
@@ -411,7 +415,8 @@ class InferencePipeline:
         # images, without re-reading every centroid from the DB on each face.
         centroids: dict[int, ClusterCentroid] = {
             c.id: ClusterCentroid(c.id, dequantize_embedding(c.centroid_json) or [], c.face_count)
-            for c in repo.all_person_clusters() if c.centroid_json and c.face_count > 0
+            for c in repo.all_person_clusters()
+            if c.centroid_json and c.face_count > 0 and c.stage == self._cluster_stage
         }
         try:
             for chunk in chunks:
@@ -723,7 +728,7 @@ class InferencePipeline:
                     if pid is None or self._live_cluster(repo, centroids, pid) is not None:
                         break
                 if pid is None:
-                    created = repo.create_person_cluster(f.embedding)
+                    created = repo.create_person_cluster(f.embedding, stage=self._cluster_stage)
                     pid = created.id
                     undo.created.append(pid)
                     centroids[pid] = ClusterCentroid(pid, list(f.embedding), 1)
