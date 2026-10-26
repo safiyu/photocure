@@ -580,3 +580,20 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
 
 
 
+
+
+def detach_faces(s, image_id: int) -> int:
+    """Take a photo's faces out of their people (it left the library); empty unnamed people go."""
+    n = 0
+    for f in s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == image_id)).all():
+        if f.person_id is not None:
+            c = s.get(M.PersonCluster, f.person_id)
+            if c is not None:
+                c.face_count = max(0, c.face_count - 1)
+                if c.face_count <= 0 and not c.name:
+                    s.delete(c)
+        f.ignored = True
+        f.person_id = None
+        n += 1
+    s.flush()
+    return n

@@ -65,7 +65,7 @@ def test_organizer_flat_categories(cfg):
 
 
 def test_shared_people_and_ignored_faces(tmp_path):
-    """Verify deleting a person marks faces ignored=True, reanalyze=True on pipeline never resurrects deleted faces,
+    """Verify deleting a person marks faces ignored=True, analysing new photos never resurrects deleted faces,
     Library photos are never re-analysed, and new pipeline imports match against named Library people centroids.
     """
     db_file = tmp_path / "people_test.db"
@@ -154,15 +154,15 @@ def test_shared_people_and_ignored_faces(tmp_path):
         assert f.ignored is True
         assert f.person_id is None
 
-    # 2. Trigger reanalyze=True -> Library photo must NOT be re-analyzed
-    infer_res = client.post("/api/infer", json={"reanalyze": True})
+    # 2. Analyze runs on new photos only -> a Library photo is never re-analyzed
+    infer_res = client.post("/api/infer", json={})
     assert infer_res.status_code == 200
 
     with get_session(db_file) as s:
         lib_rec = s.get(ImageRecord, lib_img_id)
         assert lib_rec.faces_schema_version == cfg.face.schema_version  # untouched!
         pipe_rec = s.get(ImageRecord, pipe_img_id)
-        assert pipe_rec.faces_schema_version == 0  # reset for pipeline!
+        assert pipe_rec.faces_schema_version == cfg.face.schema_version  # nothing pending, nothing redone
 
 
 def test_apply_completion_gate(tmp_path):
@@ -315,15 +315,16 @@ def test_pipeline_vs_library_scopes(tmp_path):
         assert updated.path == str(new_path)
         assert updated.category == "scenery"
 
-    # 4. Delete photo in Library mode moves to .trash immediately
+    # 4. Delete photo in Library mode moves it into the trash (a ledger transaction folder)
     del_res = client.delete(f"/api/images/{lib_img_id}")
     assert del_res.status_code == 200
     assert not new_path.exists()
-    assert (lib_root / ".trash" / "food_photo.jpg").exists()
+    assert list((lib_root / ".trash").rglob("food_photo.jpg"))
 
     with get_session(db_file) as s:
         trashed = s.get(ImageRecord, lib_img_id)
         assert trashed.route_status == "trashed"
+        assert trashed.stage == "trash"
         assert trashed.scan_status == "missing"
 
 

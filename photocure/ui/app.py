@@ -1827,37 +1827,18 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     m.delete_approved = False  # choosing a frame to keep clears its delete mark
             bg.best_shot_id = body.image_id
 
-            # If in library mode (route_status == "executed"), move files on disk immediately
             promoted = next((m for m in members if m.id == body.image_id), None)
-            if promoted and promoted.route_status == "executed" and Path(promoted.path).exists():
-                lib_root = Path(cfg.library_root).resolve() if cfg.library_root else Path(promoted.path).parent.parent.parent
-                from ..rules.taxonomy import get_taxonomy
-                tax = get_taxonomy(cfg)
-                cat_name = promoted.manual_bucket or promoted.category or "People"
-                cat_enum = tax.category_of(cat_name)
-                cat_folder = tax.folder_override_of(cat_name) or (cat_enum.folder if cat_enum else cat_name)
-
-                cat_dir = lib_root / cat_folder
-                cat_dir.mkdir(parents=True, exist_ok=True)
-                new_best_path = cat_dir / Path(promoted.path).name
-                if new_best_path != Path(promoted.path):
-                    shutil.move(promoted.path, new_best_path)
-                    promoted.path = str(new_best_path)
-                    promoted.target_path = str(new_best_path)
-
-                b_name = bg.name or f"Burst_{bg.id:06d}"
-                alt_dir = lib_root / "Bursts" / b_name / "alternates"
-                alt_dir.mkdir(parents=True, exist_ok=True)
-                for m in members:
-                    if m.id != body.image_id and m.route_status == "executed" and Path(m.path).exists():
-                        target_alt = alt_dir / Path(m.path).name
-                        if target_alt != Path(m.path):
-                            shutil.move(m.path, target_alt)
-                            m.path = str(target_alt)
-                            m.target_path = str(target_alt)
-
-            s.flush()
-            return {"ok": True, "burst_id": burst_id, "best_shot_id": body.image_id}
+            promote_in_library = bool(promoted and promoted.stage == "library"
+                                      and Path(promoted.path).exists())
+            promoted_category = (promoted.manual_bucket or promoted.category) if promoted else None
+            s.commit()
+        if promote_in_library and promoted_category:
+            from ..library_actions import move_to_category
+            try:
+                move_to_category(dbp, app.state.cfg, body.image_id, promoted_category)
+            except (OSError, LookupError, ValueError):
+                pass  # the best shot is chosen either way; its folder is already a category folder
+        return {"ok": True, "burst_id": burst_id, "best_shot_id": body.image_id}
 
     @app.get("/api/overview")
     def overview(stage: StageFilter = Query("all")):
@@ -2363,88 +2344,42 @@ def create_app(db_path: str | None = None) -> FastAPI:
             rec = s.get(M.ImageRecord, image_id)
             if rec is None:
                 raise HTTPException(404, "image not found")
+            in_library = rec.stage == "library"
+        if in_library and effective:
+            # A finished photo moves to its new category folder first; nothing changes if it cannot.
+            from ..library import LibraryRootMissing
+            from ..library_actions import move_to_category
+            try:
+                move_to_category(dbp, app.state.cfg, image_id, effective)
+            except FileNotFoundError:
+                raise HTTPException(409, "file is missing on disk") from None
+            except LibraryRootMissing as e:
+                raise HTTPException(409, str(e)) from None
+            except OSError as e:
+                raise HTTPException(409, f"could not move the file: {e}") from None
+        with get_session(dbp) as s:
+            rec = s.get(M.ImageRecord, image_id)
             PhotoRepository(s).set_manual_bucket(image_id, effective)
-
-            # In Photo Library mode, move file on disk immediately
-            if rec.route_status == "executed" and effective and Path(rec.path).exists():
-                from ..rules.taxonomy import get_taxonomy
-                tax = get_taxonomy(cfg)
-                cat_enum = tax.category_of(effective)
-                new_folder = tax.folder_override_of(effective) or (cat_enum.folder if cat_enum else effective)
-
-                lib_root = Path(cfg.library_root).resolve() if cfg.library_root else Path(rec.path).parent.parent
-                dst_dir = lib_root / new_folder
-                dst_dir.mkdir(parents=True, exist_ok=True)
-                src_path = Path(rec.path)
-                dst_path = dst_dir / src_path.name
-                if dst_path != src_path:
-                    if dst_path.exists():
-                        seq = 1
-                        while (dst_dir / f"{src_path.stem}_{seq}{src_path.suffix}").exists():
-                            seq += 1
-                        dst_path = dst_dir / f"{src_path.stem}_{seq}{src_path.suffix}"
-                    shutil.move(src_path, dst_path)
-                    xmp_src = src_path.with_suffix(".xmp")
-                    if xmp_src.exists():
-                        try:
-                            shutil.move(xmp_src, dst_path.with_suffix(".xmp"))
-                        except OSError:
-                            pass
-                    rec.path = str(dst_path)
-                    rec.target_path = str(dst_path)
+            if in_library and effective:
                 rec.category = effective
-                s.flush()
-
+            s.flush()
             return {"ok": True, "id": image_id, "manual_bucket": rec.manual_bucket,
                     "category": rec.category, "locked": bool(rec.locked)}
 
     @app.delete("/api/images/{image_id}", dependencies=auth)
     def delete_image(image_id: int):
-        """Delete photo: moves to .trash, marks missing/trashed, prunes bursts and face counts."""
-        with get_session(dbp) as s:
-            rec = s.get(M.ImageRecord, image_id)
-            if rec is None:
-                raise HTTPException(404, "image not found")
-
-            src_path = Path(rec.path)
-            if src_path.exists():
-                lib_root = Path(cfg.library_root).resolve() if cfg.library_root else src_path.parent
-                trash_dir = lib_root / ".trash"
-                trash_dir.mkdir(parents=True, exist_ok=True)
-                dst_path = trash_dir / src_path.name
-                if dst_path.exists():
-                    seq = 1
-                    while (trash_dir / f"{src_path.stem}_{seq}{src_path.suffix}").exists():
-                        seq += 1
-                    dst_path = trash_dir / f"{src_path.stem}_{seq}{src_path.suffix}"
-                shutil.move(src_path, dst_path)
-                xmp_src = src_path.with_suffix(".xmp")
-                if xmp_src.exists():
-                    try:
-                        shutil.move(xmp_src, dst_path.with_suffix(".xmp"))
-                    except OSError:
-                        pass
-                rec.target_path = str(dst_path)
-
-            rec.scan_status = "missing"
-            rec.route_status = "trashed"
-            rec.delete_approved = True
-
-            faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == image_id)).all()
-            for f in faces:
-                if f.person_id is not None:
-                    c = s.get(M.PersonCluster, f.person_id)
-                    if c is not None:
-                        c.face_count = max(0, c.face_count - 1)
-                        if c.face_count <= 0 and not c.name:
-                            s.delete(c)
-                f.ignored = True
-                f.person_id = None
-
-            repo = PhotoRepository(s)
-            repo.prune_bursts()
-            s.commit()
-            return {"ok": True, "id": image_id, "deleted": True}
+        """Delete a photo: a library photo moves into the trash; a new photo is only marked."""
+        from ..library import LibraryRootMissing
+        from ..library_actions import trash_image
+        try:
+            out = trash_image(dbp, app.state.cfg, image_id)
+        except LookupError:
+            raise HTTPException(404, "image not found") from None
+        except LibraryRootMissing as e:
+            raise HTTPException(409, str(e)) from None
+        except OSError as e:
+            raise HTTPException(409, f"could not move the file to the trash: {e}") from None
+        return {"ok": True, "id": image_id, "deleted": out["trashed"], "marked": out.get("marked", False)}
 
     @app.post("/api/images/{image_id}/lock", dependencies=auth)
     def lock_image(image_id: int, body: LockReq = LockReq()):
@@ -2562,25 +2497,25 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.post("/api/library/sync", dependencies=auth)
     def sync_library():
         """Sync photo library with disk changes (moved category folders or deleted files)."""
-        lib_root_str = cfg.library_root
-        if not lib_root_str:
-            from ..services import load_settings
-            st = load_settings(dbp)
-            lib_root_str = st.get("library_root")
-        if not lib_root_str:
-            return {"ok": True, "checked": 0, "moved": 0, "missing": 0, "message": "no library_root configured"}
+        from ..library import library_root as _library_root_setting
+        lib_root_path = _library_root_setting(dbp, app.state.cfg)
+        if lib_root_path is None:
+            return {"ok": True, "checked": 0, "moved": 0, "missing": 0, "missing_ids": [],
+                    "message": "no library folder configured"}
 
-        lib_root = Path(lib_root_str).expanduser().resolve()
+        lib_root = Path(lib_root_path).expanduser().resolve()
         if not lib_root.exists():
-            return {"ok": True, "checked": 0, "moved": 0, "missing": 0, "message": "library_root does not exist on disk"}
+            return {"ok": True, "checked": 0, "moved": 0, "missing": 0, "missing_ids": [],
+                    "message": "library folder does not exist on disk"}
 
         with get_session(dbp) as s:
             repo = PhotoRepository(s)
             I = M.ImageRecord
-            recs = s.exec(select(I).where(I.route_status == "executed", I.scan_status != "missing")).all()
+            recs = s.exec(select(I).where(I.stage == "library", I.scan_status != "missing")).all()
             checked_count = len(recs)
             moved_count = 0
             missing_count = 0
+            missing_ids: list[int] = []
 
             # Scan files inside library_root excluding .trash
             disk_files: dict[str, list[Path]] = {}
@@ -2637,9 +2572,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
                         pass
                     moved_count += 1
                 else:
-                    rec.scan_status = "missing"
+                    rec.scan_status = "missing"  # stays in the library stage, counted in the header
                     rec.route_status = "removed"
                     missing_count += 1
+                    missing_ids.append(rec.id)
                     faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == rec.id)).all()
                     for f in faces:
                         if f.person_id:
@@ -2652,7 +2588,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             if missing_count > 0:
                 repo.prune_bursts()
             s.commit()
-            return {"ok": True, "checked": checked_count, "moved": moved_count, "missing": missing_count}
+            return {"ok": True, "checked": checked_count, "moved": moved_count,
+                    "missing": missing_count, "missing_ids": missing_ids}
 
     @app.post("/api/plan/apply", dependencies=auth, status_code=202)
     def apply_plan(body: PlanReq):
