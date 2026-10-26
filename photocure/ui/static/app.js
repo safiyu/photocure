@@ -2365,7 +2365,7 @@
     info.className = "grow";
     ok.disabled = false;
     if (pk.mode === "output") {
-      if (data.writable) { info.textContent = "Organized photos will be written into this folder."; info.classList.add("good"); }
+      if (data.writable) { info.textContent = "Your finished photos will be stored in this folder."; info.classList.add("good"); }
       else { info.textContent = "You cannot write to this folder."; info.classList.add("bad"); ok.disabled = true; }
     } else {
       info.textContent = data.photos
@@ -2461,6 +2461,11 @@
         if (bar) bar.classList.remove("input-error");
         if (window.__syncScanPathDisplay) window.__syncScanPathDisplay();
       },
+    });
+    $("#btn-browse-library").onclick = () => openPicker({
+      title: "Choose the library folder", mode: "output", initial: $("#set-library-root").value.trim(),
+      okLabel: "Use this folder",
+      onPick: (p) => { $("#set-library-root").value = p; },
     });
   }
 
@@ -5223,6 +5228,16 @@
     if (!st) return;
     const saved = st.settings || {};
     state.draft = { device: saved.device || "auto", device_index: num(saved.device_index) };
+    const root = st.library_root, rootSource = st.library_root_source || "none";
+    $("#set-library-root").value = root || "";
+    $("#btn-browse-library").hidden = !!root;
+    $("#library-root-source").textContent = rootSource === "settings"
+      ? "Chosen in Settings. It cannot change here; use Move library to use another folder."
+      : rootSource === "environment"
+        ? "Set by PCUR_LIBRARY_ROOT. Change that variable or the mounted folder to use another one."
+        : "Not set yet. Choose where finished photos go.";
+    $("#btn-move-library").hidden = !(root && rootSource === "settings");
+    $("#set-default-op").value = st.default_operation || "move";
     const accs = st.accelerators || [];
     const active = accs.find((a) => a.id === st.selected);
     const activeLabel = active ? accShort(active) : String(st.selected || "CPU").toUpperCase();
@@ -5313,9 +5328,13 @@
       return;
     }
     const body = Object.assign({ device: state.draft.device, device_index: num(state.draft.device_index),
-      collision_policy: $("#set-collision").value }, workers);
+      collision_policy: $("#set-collision").value, default_operation: $("#set-default-op").value }, workers);
+    const chosenRoot = $("#set-library-root").value.trim();
+    if (!$("#btn-browse-library").hidden && chosenRoot) body.library_root = chosenRoot;
     try {
       state.settings = await post("/api/settings", body);
+      $("#op").value = state.settings.default_operation || "move";
+      $("#copy-hint").hidden = $("#op").value !== "copy";
       renderChip();
       fillDeviceSelect();
       renderSettings();

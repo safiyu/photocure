@@ -588,6 +588,30 @@
 
         <!-- SETTINGS -->
         <section id="tab-settings" class="panel">
+          <div class="sect" id="sect-library">
+            <h2>Library folder</h2>
+            <p class="lede">Every finished photo lives in this one folder, sorted by category. You choose it once. To use another folder later, move the whole library there.</p>
+            <div class="field wide">
+              <label for="set-library-root">Folder</label>
+              <div class="with-btn">
+                <input id="set-library-root" type="text" readonly placeholder="Not set yet" autocomplete="off" spellcheck="false">
+                <button class="btn" id="btn-browse-library" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+              </div>
+              <p class="help" id="library-root-source"></p>
+            </div>
+            <div class="btn-row">
+              <button id="btn-move-library" class="btn secondary" type="button" hidden>Move library to another folder</button>
+            </div>
+            <div class="field">
+              <label for="set-default-op">New plans start with</label>
+              <select id="set-default-op">
+                <option value="move">Move the photos</option>
+                <option value="copy">Copy the photos</option>
+              </select>
+              <p class="help">Copy leaves your originals where they are, which suits read-only folders.</p>
+            </div>
+          </div>
+
           <div class="sect">
             <h2>Processing device</h2>
             <p class="lede">Choose what runs the analysis. Automatic picks the fastest device that works on this computer.</p>
