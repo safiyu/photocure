@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from collections.abc import Iterator, Sequence
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import joinedload
 from sqlmodel import Session, col, delete as sdelete, select as sselect, update as supdate
 
@@ -55,6 +55,21 @@ def dequantize_embedding(blob: str) -> list[float] | None:
         return [float(v) for v in raw]
     arr = np.fromiter(raw, dtype=np.int16, count=len(raw)).view(np.float16)
     return [float(v) for v in arr]
+
+
+def stage_clause(stage: str | None):
+    """SQL filter for one stage. "all" (or None) is new and library photos together.
+
+    Trashed rows are marked missing so features skip them, so only the trash stage
+    ignores scan_status; purged rows are gone from every stage.
+    """
+    I = ImageRecord
+    if stage == "trash":
+        return and_(I.stage == "trash", I.route_status != "purged")
+    active = I.scan_status != "missing"
+    if stage in ("new", "library"):
+        return and_(active, I.stage == stage)
+    return active
 
 
 class PhotoRepository:

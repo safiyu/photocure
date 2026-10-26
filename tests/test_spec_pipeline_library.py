@@ -94,6 +94,7 @@ def test_shared_people_and_ignored_faces(tmp_path):
             path=str(f_lib),
             filename="lib_alice.jpg",
             route_status="executed",
+            stage="library",
             scan_status="active",
             infer_status="inferred",
             faces_schema_version=cfg.face.schema_version,
@@ -145,7 +146,7 @@ def test_shared_people_and_ignored_faces(tmp_path):
         pipe_img_id = pipe_img.id
 
     # 1. Deleting a person marks faces ignored=True
-    del_res = client.delete(f"/api/people/{pipe_person_id}?scope=pipeline")
+    del_res = client.delete(f"/api/people/{pipe_person_id}?stage=new")
     assert del_res.status_code == 200
 
     with get_session(db_file) as s:
@@ -275,6 +276,7 @@ def test_pipeline_vs_library_scopes(tmp_path):
             filename="food_photo.jpg",
             category="food",
             route_status="executed",
+            stage="library",
             scan_status="active",
             infer_status="inferred",
         )
@@ -283,21 +285,21 @@ def test_pipeline_vs_library_scopes(tmp_path):
         lib_img_id = rec_lib.id
 
     # 1. Check /api/images scoped
-    imgs_pipe = client.get("/api/images?scope=pipeline").json()
+    imgs_pipe = client.get("/api/images?stage=new").json()
     assert imgs_pipe["total"] == 1
     assert imgs_pipe["items"][0]["filename"] == "pipe.jpg"
 
-    imgs_lib = client.get("/api/images?scope=library").json()
+    imgs_lib = client.get("/api/images?stage=library").json()
     assert imgs_lib["total"] == 1
     assert imgs_lib["items"][0]["filename"] == "food_photo.jpg"
 
     # 2. Check /api/overview scoped
-    ov_pipe = client.get("/api/overview?scope=pipeline").json()
+    ov_pipe = client.get("/api/overview?stage=new").json()
     assert ov_pipe["total"] == 1
     assert ov_pipe["pipeline_count"] == 1
     assert ov_pipe["library_count"] == 1
 
-    ov_lib = client.get("/api/overview?scope=library").json()
+    ov_lib = client.get("/api/overview?stage=library").json()
     assert ov_lib["total"] == 1
 
     # 3. Manual category change in Library mode moves file on disk immediately
@@ -355,6 +357,7 @@ def test_library_sync_external_changes(tmp_path):
             filename="moving.jpg",
             category="food",
             route_status="executed",
+            stage="library",
             scan_status="active",
             infer_status="inferred",
             file_size=f1.stat().st_size,
@@ -364,6 +367,7 @@ def test_library_sync_external_changes(tmp_path):
             filename="deleting.jpg",
             category="food",
             route_status="executed",
+            stage="library",
             scan_status="active",
             infer_status="inferred",
             file_size=f2.stat().st_size,

@@ -64,7 +64,7 @@ from ..clustering.group_shots import burst_face_matrix, group_matrix_payload
 from ..config import CuratorConfig, default_db_path
 from ..db import models as M
 from ..engine.locks import LEDGER_WRITING as _LEDGER_WRITING
-from ..db.repository import PhotoRepository
+from ..db.repository import PhotoRepository, stage_clause
 from ..db.session import get_session, init_db, snapshot_database
 from ..rules.organizer import OrganizeMode
 from ..rules.taxonomy import CategoryType
@@ -85,6 +85,9 @@ _BUSY = threading.Lock()
 def _pid_file(port: int) -> Path:
     from ..lifecycle import pid_file_path
     return pid_file_path(port)
+
+StageFilter = Literal["new", "library", "trash", "all"]
+
 
 class ReassignReq(BaseModel):
     bucket: str | None = None  # None clears a manual override
@@ -1008,15 +1011,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
         sort: Literal["id", "taken"] = Query("id"),
         limit: int = Query(200, ge=1, le=1000),
         offset: int = Query(0, ge=0),
-        scope: Literal["pipeline", "library", "all"] | None = Query(None),
+        stage: StageFilter = Query("all"),
     ):
         I = M.ImageRecord
         eff = func.coalesce(I.manual_bucket, I.category)
-        conds = [I.scan_status != "missing"]
-        if scope == "pipeline":
-            conds.append(I.route_status != "executed")
-        elif scope == "library":
-            conds.append(I.route_status == "executed")
+        conds = [stage_clause(stage)]
         if issue:
             conds.append(_issue_clause(issue))
         if category:
@@ -1529,26 +1528,26 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.get("/api/people")
     def list_people_endpoint(
         sort: Literal["similarity", "count", "name"] = "similarity",
-        scope: str = Query("all")
+        stage: StageFilter = Query("all")
     ):
         """Known people clusters, arranged by similarity (default), count, or name."""
         from ..people_actions import list_people
-        return {"items": list_people(dbp, sort=sort, scope=scope)}
+        return {"items": list_people(dbp, sort=sort, stage=stage)}
 
     @app.delete("/api/people/{person_id}", dependencies=auth)
-    def delete_person_endpoint(person_id: int, scope: str = Query("all")):
+    def delete_person_endpoint(person_id: int, stage: StageFilter = Query("all")):
         """Delete a person cluster and unassign all its associated faces."""
         from ..people_actions import ActionError, delete_person
         try:
-            return delete_person(dbp, person_id, scope=scope)
+            return delete_person(dbp, person_id, stage=stage)
         except ActionError as e:
             raise HTTPException(e.status, str(e)) from None
 
     @app.post("/api/people/bulk-delete", dependencies=auth)
-    def bulk_delete_people_endpoint(body: BulkDeletePeopleReq, scope: str = Query("all")):
+    def bulk_delete_people_endpoint(body: BulkDeletePeopleReq, stage: StageFilter = Query("all")):
         """Delete multiple person clusters in a single atomic transaction."""
         from ..people_actions import bulk_delete_people
-        return bulk_delete_people(dbp, body.person_ids, scope=scope)
+        return bulk_delete_people(dbp, body.person_ids, stage=stage)
 
     @app.post("/api/people/{person_id}/rename", dependencies=auth)
     def rename_person_endpoint(person_id: int, body: RenamePersonReq):
@@ -1575,7 +1574,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return recluster_people(dbp, threshold=threshold)
 
     @app.get("/api/people/{person_id}/photos")
-    def person_photos_endpoint(person_id: int, scope: str = Query("all")):
+    def person_photos_endpoint(person_id: int, stage: StageFilter = Query("all")):
         """All distinct photos that contain a face belonging to *person_id*, newest first."""
         with get_session(dbp) as s:
             person = s.get(M.PersonCluster, person_id)
@@ -1599,11 +1598,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
             if not image_ids:
                 return {"person": {"id": person.id, "name": person.name, "face_count": 0},
                         "photos": []}
-            all_recs = [r for r in _by_ids(s, image_ids) if r.scan_status != "missing"]
-            if scope == "pipeline":
-                all_recs = [r for r in all_recs if r.route_status != "executed"]
-            elif scope == "library":
-                all_recs = [r for r in all_recs if r.route_status == "executed"]
+            all_recs = _by_ids(s, image_ids)
+            if stage == "trash":
+                all_recs = [r for r in all_recs if r.stage == "trash" and r.route_status != "purged"]
+            else:
+                all_recs = [r for r in all_recs if r.scan_status != "missing"
+                            and (stage == "all" or r.stage == stage)]
 
             recs = sorted(all_recs,
                           key=lambda r: (r.taken_at is not None, r.taken_at),
@@ -1859,31 +1859,21 @@ def create_app(db_path: str | None = None) -> FastAPI:
             return {"ok": True, "burst_id": burst_id, "best_shot_id": body.image_id}
 
     @app.get("/api/overview")
-    def overview(scope: str = Query("all")):
-        """Library composition by effective category, for the composition strip."""
+    def overview(stage: StageFilter = Query("all")):
+        """Composition by effective category for one stage, plus the photo count of every stage."""
         I = M.ImageRecord
         eff = func.coalesce(I.manual_bucket, I.category)
-        active = I.scan_status != "missing"
+        scope_filter = stage_clause(stage)
         with get_session(dbp) as s:
-            scope_filter = active
-            if scope == "pipeline":
-                scope_filter = and_(active, I.route_status != "executed")
-            elif scope == "library":
-                scope_filter = and_(active, I.route_status == "executed")
-
             rows = s.exec(select(eff, func.count()).where(scope_filter).group_by(eff)).all()
             by_cat = {(k or "unrouted"): int(n) for k, n in rows}
             stats_ = PhotoRepository(s).stats()
             manual = s.exec(select(func.count()).select_from(I).where(
                 scope_filter, I.manual_bucket.is_not(None))).one()
-            pipeline_count = s.exec(select(func.count()).select_from(I).where(
-                active, I.route_status != "executed")).one() or 0
-            library_count = s.exec(select(func.count()).select_from(I).where(
-                active, I.route_status == "executed")).one() or 0
+        counts = stats_["stages"]
         return {"by_category": by_cat, "total": sum(by_cat.values()), "stats": stats_,
-                "manual_count": int(manual or 0),
-                "pipeline_count": int(pipeline_count),
-                "library_count": int(library_count)}
+                "manual_count": int(manual or 0), "stage_counts": counts,
+                "pipeline_count": counts["new"], "library_count": counts["library"]}
 
     @app.get("/api/browse", dependencies=auth)
     def browse(path: str | None = Query(None), hidden: bool = Query(False)):
@@ -1954,7 +1944,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return {"path": str(new)}
 
     @app.get("/api/bursts")
-    def bursts(scope: str = Query("all")):
+    def bursts(stage: StageFilter = Query("all")):
         with get_session(dbp) as s:
             repo = PhotoRepository(s)
             if repo.prune_bursts():
@@ -1962,15 +1952,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
             out = []
             for b in repo.all_bursts():
                 best = repo.get_by_id(b.best_shot_id) if b.best_shot_id else None
-                if scope in ("pipeline", "library"):
+                if stage != "all":
                     m_q = select(func.count(M.ImageRecord.id)).where(
-                        M.ImageRecord.burst_id == b.id,
-                        M.ImageRecord.scan_status != "missing",
-                    )
-                    if scope == "pipeline":
-                        m_q = m_q.where(M.ImageRecord.route_status != "executed")
-                    else:
-                        m_q = m_q.where(M.ImageRecord.route_status == "executed")
+                        M.ImageRecord.burst_id == b.id, stage_clause(stage))
                     cnt = s.exec(m_q).one()
                     if not cnt:
                         continue

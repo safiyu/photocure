@@ -658,8 +658,8 @@
       renderSkeleton: () => el("div", { class: "skel" }),
       async fetchPage(offset, limit) {
         const qs = cfg.params();
-        const sc = state.scope || "pipeline";
-        const scopeParam = (qs && qs.includes("scope=")) ? "" : `&scope=${encodeURIComponent(sc)}`;
+        const sc = state.stage || "new";
+        const scopeParam = (qs && qs.includes("stage=")) ? "" : `&stage=${encodeURIComponent(sc)}`;
         const data = await api(`/api/images?${qs}${qs ? "&" : ""}limit=${limit}&offset=${offset}${scopeParam}`);
         data.items.forEach((it) => { state.byId[it.id] = it; });
         return data;
@@ -2648,8 +2648,8 @@
 
   // ------------------------------------------------------------------ bursts
   async function renderBursts(keepId) {
-    const sc = state.scope || "pipeline";
-    const data = await api(`/api/bursts?scope=${encodeURIComponent(sc)}`);
+    const sc = state.stage || "new";
+    const data = await api(`/api/bursts?stage=${encodeURIComponent(sc)}`);
     const list = $("#burstlist");
     const scroll = list.scrollTop;
     if (!data.items.length) {
@@ -3072,8 +3072,8 @@
   async function renderPeople(force = false) {
     const host = $("#peoplegrid");
     const sort = state.peopleSort || "similarity";
-    const sc = state.scope || "pipeline";
-    const data = await api(`/api/people?sort=${encodeURIComponent(sort)}&scope=${encodeURIComponent(sc)}`);
+    const sc = state.stage || "new";
+    const data = await api(`/api/people?sort=${encodeURIComponent(sort)}&stage=${encodeURIComponent(sc)}`);
     (data.items || []).forEach((p) => { if (p.name) allKnownPeopleNames.add(p.name); });
     const allItems = (data.items || []).filter((p) => p.face_count > 0 && (p.sample_face_id != null || p.name));
     const items = allItems.filter((p) => !pendingPeopleDeletions.has(p.id));
@@ -3535,8 +3535,8 @@
     document.body.style.overflow = "hidden";
 
     try {
-      const sc = state.scope || "pipeline";
-      const data = await api(`/api/people/${personId}/photos?scope=${encodeURIComponent(sc)}`);
+      const sc = state.stage || "new";
+      const data = await api(`/api/people/${personId}/photos?stage=${encodeURIComponent(sc)}`);
       const { person, photos } = data;
 
       // Header
@@ -5474,8 +5474,8 @@
 
   async function loadStats() {
     try {
-      const sc = state.scope || "pipeline";
-      const ov = await api(`/api/overview?scope=${encodeURIComponent(sc)}`);
+      const sc = state.stage || "new";
+      const ov = await api(`/api/overview?stage=${encodeURIComponent(sc)}`);
       state.overview = ov;
       state.manualCount = num(ov.manual_count);
       updateLearn();
@@ -5853,7 +5853,7 @@
     $$(".tab").forEach((t) => (t.onclick = () => showTab(t.dataset.tab)));
 
     function setMode(mode) {
-      state.scope = mode;
+      state.stage = mode === "library" ? "library" : "new";
       const pBtn = $("#btn-mode-pipeline");
       const lBtn = $("#btn-mode-library");
       const pipeGroup = $("#navgroup-pipeline");
