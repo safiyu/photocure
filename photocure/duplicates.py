@@ -193,6 +193,13 @@ def resolve_group(session, keep_id: int, discard_ids: list[int], kind: str) -> d
     if missing:
         raise LookupError(f"unknown photo {missing[0]}")
     keeper = rows[keep_id]
+    if keeper.scan_status == "missing" or keeper.stage == "trash":
+        raise ValueError("the photo to keep is missing or in the trash")
+    if kind == "exact":
+        if not keeper.sha256 or any(rows[i].sha256 != keeper.sha256 for i in discard_ids):
+            raise ValueError("exact duplicates must have identical content")
+    elif keeper.is_duplicate:
+        raise ValueError("the photo to keep was already junked as a duplicate")
     now = _now()
     link = "duplicate_of" if kind == "exact" else "near_dup_of"
     # Anything that pointed at a photo being discarded now points at the keeper.
@@ -240,7 +247,10 @@ def resolve_all(session, near_min_cosine: float = DEFAULT_NEAR_COSINE) -> dict:
     done = discarded = saved = 0
     for g in find_groups(session, near_min_cosine=near_min_cosine):
         others = [m["id"] for m in g["members"] if m["id"] != g["keeper_id"]]
-        out = resolve_group(session, g["keeper_id"], others, g["kind"])
+        try:
+            out = resolve_group(session, g["keeper_id"], others, g["kind"])
+        except ValueError:
+            continue  # an earlier group changed these photos; the next run sees the new state
         done += 1
         discarded += len(out["discarded"])
         saved += out["reclaimable_bytes"]

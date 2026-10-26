@@ -75,7 +75,10 @@ class SidecarQueue:
                     rec = s.get(ImageRecord, image_id)
                     if rec is None:
                         continue
-                    rating = rec.rating if rec.rating is not None else 0
+                    rating = rec.rating
+                    if rating is None and rec.xmp_written_rating not in (None, 0):
+                        rating = 0  # the user cleared a rating Photocure wrote earlier
+                    # an unrated photo leaves the sidecar's rating alone (it may be another program's)
                     tags = desired_tags(rec)
                     if feats["write_keywords"]:
                         tags += keyword_tags(s, rec, weights)
