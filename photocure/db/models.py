@@ -25,6 +25,13 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Where a photo lives in the app: not yet applied, in the library root, or in the trash.
+STAGE_NEW = "new"
+STAGE_LIBRARY = "library"
+STAGE_TRASH = "trash"
+STAGES = (STAGE_NEW, STAGE_LIBRARY, STAGE_TRASH)
+
+
 class ImageRecord(SQLModel, table=True):
     __tablename__ = "images"
 
@@ -62,6 +69,11 @@ class ImageRecord(SQLModel, table=True):
     country_code: str = Field(default="", index=True)
     # Local favourite. Never written to a sidecar.
     is_favorite: bool = Field(default=False, index=True)
+
+    # "new", "library" or "trash"; the single source of truth for which section a photo is in.
+    stage: str = Field(default="new", index=True)
+    # Where the file was first scanned, so Return to origin knows where to put it back.
+    origin_path: str | None = Field(default=None)
 
     # Scan state machine.
     scan_status: str = Field(default="scanned", index=True)
@@ -273,6 +285,8 @@ class PersonCluster(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str | None = Field(default=None)
     face_count: int = 0
+    # "library" (shared by New and Library photos) or "trash" (clusters made inside Trash).
+    stage: str = Field(default="library", index=True)
     # Running-mean embedding (same JSON/float16 encoding as FaceDetection.embedding_json).
     centroid_json: str | None = Field(default=None)
 

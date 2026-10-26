@@ -526,7 +526,13 @@ class PhotoRepository:
             sselect(func.count()).select_from(PersonCluster)
             .where(PersonCluster.face_count > 0)
         ).one()
+        stage_rows = self.s.exec(
+            sselect(ImageRecord.stage, func.count()).where(active).group_by(ImageRecord.stage)
+        ).all()
+        stages = {"new": 0, "library": 0, "trash": 0}
+        stages.update({k: int(n) for k, n in stage_rows if k in stages})
         return {
+            "stages": stages,
             "total_images": int(total or 0),
             "pending_inference": int(pending or 0),
             "duplicates": int(dupes or 0),

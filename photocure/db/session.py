@@ -68,7 +68,7 @@ def get_engine(db_path: Path | str = "photocure.db", echo: bool = False):
     return engine
 
 
-SCHEMA_VERSION = 10  # 10: face ignored column; 9: delete_approved; 8: aesthetic_model, preference, preference_models; 7: file_mtime; 6: geo/favourite columns and indexes; 5: blink/face columns; 4: xmp_written_*
+SCHEMA_VERSION = 11  # 11: image stage and origin_path, person stage; 10: face ignored column; 9: delete_approved; 8: aesthetic_model, preference, preference_models; 7: file_mtime; 6: geo/favourite columns and indexes; 5: blink/face columns; 4: xmp_written_*
 
 
 def _sql_type(col) -> str:
@@ -112,6 +112,7 @@ def _callable_default_literal(col, fn) -> str:
 def migrate(engine) -> int:
     """Add columns missing from existing tables and bump PRAGMA user_version."""
     added = 0
+    added_cols: set[tuple[str, str]] = set()
     with engine.begin() as conn:
         for table in SQLModel.metadata.sorted_tables:
             rows = conn.exec_driver_sql(f'PRAGMA table_info("{table.name}")').fetchall()
@@ -125,6 +126,13 @@ def migrate(engine) -> int:
                        f"{_sql_type(col)}{_default_clause(col)}")
                 conn.exec_driver_sql(ddl)
                 added += 1
+                added_cols.add((table.name, col.name))
+        if ("images", "stage") in added_cols:
+            # Rows from before stages existed take their stage from how they were routed.
+            conn.exec_driver_sql("UPDATE images SET stage='library' WHERE route_status='executed'")
+            conn.exec_driver_sql("UPDATE images SET stage='trash' WHERE route_status='trashed'")
+            conn.exec_driver_sql(
+                "UPDATE images SET origin_path=path WHERE stage='library' AND origin_path IS NULL")
         # Columns added above are not indexed by create_all on an existing table, so create any
         # index the models declare that the database does not have yet.
         for table in SQLModel.metadata.sorted_tables:
