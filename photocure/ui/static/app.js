@@ -196,6 +196,7 @@
     let isTrapping = false;
     const onDocFocusIn = (e) => {
       if (isTrapping) return;
+      if (e.target.closest && e.target.closest("#auth-modal, #confirm-modal")) return;  // these must stay usable
       if (activeTraps[activeTraps.length - 1] !== trapRecord) return;
       if (!container.contains(e.target)) {
         const items = getFocusable();
@@ -741,8 +742,16 @@
   }
   function itemUpdated(it) {
     state.byId[it.id] = it;
+    const wasCurrent = lb.open && lbIdAt(lb.i) === it.id;
     allGrids().forEach((g) => g.rerender(it));
-    if (lb.open && lbIdAt(lb.i) === it.id) lbRender();
+    if (!lb.open) return;
+    if (lbIdAt(lb.i) === it.id) { lbRender(); return; }
+    if (!wasCurrent) return;
+    // The photo left the grid under the viewer: show what now sits at this place, or close it.
+    const n = lbCount();
+    if (n === 0) { closeLightbox(); return; }
+    lb.i = Math.min(lb.i, n - 1);
+    lbRender();
   }
 
   function setupGrids() {
@@ -1201,7 +1210,7 @@
     if (!ok) return;
     try {
       for (const p of sel) {
-        await api(`/api/people/${p.id}`, { method: "DELETE" });
+        await api(`/api/people/${p.id}?stage=${encodeURIComponent(state.stage)}`, { method: "DELETE" });
         state.peoplePicks.delete(p.id);
         await rippleDeleteCard(p.card, p.id);
       }
@@ -1297,19 +1306,25 @@
     file_missing: "the file is gone",
     origin_missing: "the original folder is missing",
     origin_occupied: "a file already sits at the origin",
+    outside_trash: "it is not inside the trash folder",
   };
 
   function skippedText(res) {
     const parts = Object.entries(res.skipped_reasons || {}).filter(([, n]) => n > 0)
       .map(([k, n]) => `${SKIP_WORDS[k] || k} (${fmtN(n)})`);
-    return num(res.skipped) > 0 ? ` ${fmtN(res.skipped)} skipped: ${parts.join(", ") || "see the activity log"}.` : "";
+    const skipN = Math.max(0, num(res.skipped) - num(res.failed));  // a failed move is counted as skipped too
+    const skipped = skipN > 0 ? ` ${fmtN(skipN)} skipped: ${parts.join(", ") || "see the activity log"}.` : "";
+    const failed = num(res.failed) > 0 ? ` ${fmtN(res.failed)} failed: ${(res.errors || [])[0] || "see the activity log"}.` : "";
+    return skipped + failed;
   }
 
   async function runTrashJob(label, path, body, summary) {
     const res = await runTask(label, async () => followJob((await post(path, body)).job_id, label));
     if (!res) return null;
-    toast(summary(res) + skippedText(res), num(res.skipped) > 0 ? "warn" : "ok");
-    libLog(summary(res) + skippedText(res), num(res.skipped) > 0 ? "warn" : "ok");
+    const flag = num(res.skipped) > 0 || num(res.failed) > 0 ? "warn" : "ok";
+    toast(summary(res) + skippedText(res), flag);
+    libLog(summary(res) + skippedText(res), flag);
+    if (lb.open) closeLightbox();  // the photo it shows may be gone
     clearPicks();
     resetVisibleGrids();
     loadStats();
@@ -1329,9 +1344,10 @@
   }
 
   async function purgePhotos(ids) {
+    const one = ids.length === 1 ? state.byId[ids[0]] : null;
     const ok = await showConfirmDialog({
       title: `Delete ${photos(ids.length)} permanently?`,
-      message: "The files are removed from your disk. This cannot be undone.",
+      message: `${one && one.filename ? one.filename + " is" : "The files are"} removed from your disk. This cannot be undone.`,
       confirmText: "Delete permanently", variant: "danger" });
     if (!ok) return;
     await runTrashJob("Deleting", "/api/trash/delete", { ids }, (r) => `Deleted ${photos(num(r.deleted))} permanently.`);
@@ -1383,10 +1399,11 @@
 
   async function bulkLock() {
     const ids = Array.from(state.picks);
+    let kept = 0;
     for (const id of ids) {
-      try { await setLock(id, true); } catch (e) { toast(e.message, "err"); break; }
+      try { await setLock(id, true); kept += 1; } catch (e) { toast(e.message, "err"); break; }
     }
-    toast(`Kept ${fmtN(ids.length)} photo${ids.length === 1 ? "" : "s"}. Re-analysis will not change them.`, "ok");
+    if (kept) toast(`Kept ${fmtN(kept)} photo${kept === 1 ? "" : "s"}. Nothing will change them by mistake.`, "ok");
     clearPicks();
   }
 
@@ -1400,6 +1417,7 @@
     if (!n) return;
     ce.scanned = false;
     ce.unavailable = false;
+    ce.ids = Array.from(state.picks);
     $("#ce-title").textContent = `Clean export of ${fmtN(n)} photo${n === 1 ? "" : "s"}`;
     $("#ce-flagged").replaceChildren();
     $("#ce-status").textContent = "";
@@ -1414,7 +1432,7 @@
     out.textContent = "Checking...";
     list.replaceChildren();
     try {
-      const { job_id } = await post("/api/export/clean/scan", { ids: Array.from(state.picks) });
+      const { job_id } = await post("/api/export/clean/scan", { ids: ce.ids });
       const r = await followJob(job_id, "Privacy scan");
       if (r.unavailable) {
         ce.unavailable = true;
@@ -1448,7 +1466,7 @@
     go.disabled = true;
     $("#ce-status").textContent = "Exporting...";
     try {
-      const { job_id } = await post("/api/export/clean", { ids: Array.from(state.picks), output_dir: dest,
+      const { job_id } = await post("/api/export/clean", { ids: ce.ids, output_dir: dest,
         policy, html: $("#ce-html").checked, rename: $("#ce-rename").checked });
       const r = await followJob(job_id, "Clean export");
       const bits = [`${fmtN(r.exported)} exported`];
@@ -1556,7 +1574,9 @@
     toast(now ? "Locked. Re-analysis will not change it." : "Unlocked", "ok");
   }
 
+  let similarSeq = 0;
   async function showSimilar(id) {
+    const seq = ++similarSeq;
     const panel = $("#similar-panel");
     const it = state.byId[id];
     $("#similar-title").textContent = "Photos similar to " + (it ? it.filename : "#" + num(id));
@@ -1564,12 +1584,14 @@
     sg.replaceChildren(...Array.from({ length: 8 }, () => el("div", { class: "skel" })));
     openOverlay($("#similar-panel"));
     try {
-      const data = await api(`/api/images/${num(id)}/similar?k=24`);
+      const data = await api(`/api/images/${num(id)}/similar?k=24&stage=${encodeURIComponent(state.stage)}`);
+      if (seq !== similarSeq) return;  // a newer click already owns the panel
       data.items.forEach((x) => { state.byId[x.id] = x; });
       sg.replaceChildren(...(data.items.length
         ? data.items.map(cardNode)
         : [emptyNode({ icon: "copy", title: "No similar photos", text: "Analyze the library first, then try again." })]));
     } catch (e) {
+      if (seq !== similarSeq) return;
       sg.replaceChildren(emptyNode({ icon: "alert", title: "Search failed", text: e.message }));
     }
   }
@@ -1828,8 +1850,8 @@
   }
 
   function dupMemberNode(g, m, chosenId) {
-    const it = m.item || { id: m.id, filename: m.filename };
-    state.byId[m.id] = it;
+    const it = m.item || state.byId[m.id] || { id: m.id, filename: m.filename };
+    if (m.item) state.byId[m.id] = it;
     const chosen = m.id === chosenId;
     const stars = m.rating === -1 ? "Rejected" : (m.rating > 0 ? "\u2605".repeat(m.rating) : "");
     const facts = [`${num(m.width)}\u00d7${num(m.height)}`, fmtBytes(m.file_size),
@@ -1879,7 +1901,9 @@
     $("#btn-dup-all").disabled = !(sm && sm.groups) || $("#dup-reviewed").checked;
   }
 
+  let dupSeq = 0;
   async function loadDuplicates(append) {
+    const seq = ++dupSeq;
     const host = $("#dup-list");
     if (!append) {
       dup.groups = [];
@@ -1891,6 +1915,7 @@
       if (kind) qs.set("kind", kind);
       if ($("#dup-reviewed").checked) qs.set("reviewed", "true");
       const data = await api("/api/duplicates?" + qs);
+      if (seq !== dupSeq) return;  // a newer filter change owns the list
       dup.total = data.total;
       dup.groups = dup.groups.concat(data.groups);
       setDupCount(data.summary);
@@ -1904,6 +1929,7 @@
       }
       $("#btn-dup-more").hidden = dup.groups.length >= dup.total;
     } catch (e) {
+      if (seq !== dupSeq) return;
       host.replaceChildren(emptyNode({ icon: "alert", title: "Could not load duplicates", text: e.message }));
     }
   }
@@ -2575,7 +2601,8 @@
   }
 
   const isTriage = (g) => g === grids.uncertain || g === grids.junk;
-  const MODALS = ["#picker", "#help", "#facepanel", "#person-photos-overlay", "#similar-panel"];
+  const MODALS = ["#picker", "#help", "#facepanel", "#person-photos-overlay", "#similar-panel",
+    "#firstrun", "#movelib", "#cleanexport"];
   const SELF_MANAGED = ["#confirm-modal", "#auth-modal", "#restart-overlay"];  // they handle their own keys
   const open = (sel) => { const e = $(sel); return !!(e && !e.hidden); };
   const anyModal = () => MODALS.some(open) || !!catPicker;
@@ -2621,7 +2648,10 @@
     const typing = tag === "input" || tag === "select" || tag === "textarea";
 
     if (ev.key === "Escape") {
+      if (open("#firstrun")) return;  // the first-run popup cannot be dismissed
       if (open("#picker")) closePicker();
+      else if (open("#movelib")) $("#movelib-cancel").click();
+      else if (open("#cleanexport")) closeOverlay($("#cleanexport"));
       else if (open("#help")) closeHelp();
       else if (open("#facepanel")) { if (!closeFaceRename()) closeBiometricProjection(); }
       else if (lb.open) closeLightbox();
@@ -2863,7 +2893,7 @@
     if (tbBtn) tbBtn.disabled = true;
 
     try {
-      const res = await post("/api/people/bulk-delete", { person_ids: ids });
+      const res = await post(`/api/people/bulk-delete?stage=${encodeURIComponent(state.stage)}`, { person_ids: ids });
       const delCount = res.deleted_count || ids.length;
       toast(`Deleted ${fmtN(delCount)} ${delCount === 1 ? "person" : "people"} ✓`, "ok");
       pendingPeopleDeletions.clear();
@@ -3171,7 +3201,7 @@
     }
 
     if (count === 0) {
-      host.innerHTML = `<div class="people-empty"><svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><p>No identified people yet.</p></div>`;
+      host.innerHTML = `<div class="people-empty"><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg><p>No identified people yet.</p></div>`;
     }
 
     if (_pc.fp) {
@@ -3230,6 +3260,10 @@
     if (reclusterBtn && !reclusterBtn._wired) {
       reclusterBtn._wired = true;
       reclusterBtn.addEventListener("click", async () => {
+        if (state.stage === "library") {
+          toast("Re-cluster works on New or Trash photos. Switch there first.", "err");
+          return;
+        }
         const ok = await showConfirmDialog({
           title: "Re-cluster all faces?",
           message: "This will separate faces that were mistakenly grouped together by applying the strict facial identity threshold (0.64). Custom names will be preserved.",
@@ -3240,7 +3274,7 @@
         reclusterBtn.disabled = true;
         toast("Re-clustering faces with strict threshold…", "ok");
         try {
-          const res = await post("/api/people/recluster", {});
+          const res = await post(`/api/people/recluster?stage=${encodeURIComponent(state.stage)}`, {});
           toast(`Done! Formed ${fmtN(res.clusters_created)} person clusters across ${fmtN(res.faces_clustered)} faces.`, "ok");
           _pc.fp = null;
           await renderPeople(true);
@@ -3771,7 +3805,7 @@
       });
       if (!ok) return;
       try {
-        await api(`/api/people/${activePpoPersonId}`, { method: "DELETE" });
+        await api(`/api/people/${activePpoPersonId}?stage=${encodeURIComponent(state.stage)}`, { method: "DELETE" });
         const targetPid = activePpoPersonId;
         closePersonPhotos();
         toast("Person deleted", "ok");
@@ -4723,7 +4757,9 @@
   const GM_WORDS = { open: "eyes open", possible: "eyes may be closing", closed: "eyes closed",
     unknown: "eyes not measured", missing: "not seen in this frame" };
 
+  let burstSeq = 0;
   async function showBurst(id) {
+    const seq = ++burstSeq;
     currentBurstId = id;
     closeBiometricProjection();
     clearPicks();
@@ -4732,7 +4768,8 @@
       r.classList.toggle("on", on);
       r.classList.toggle("is-active", on);
     });
-    const data = await api("/api/burst/" + num(id));
+    const data = await api(`/api/burst/${num(id)}?stage=${encodeURIComponent(state.stage)}`);
+    if (seq !== burstSeq) return;  // another burst was opened while this one loaded
     state.burst = data;
     const group = data.group;
     const gmById = {};
@@ -4757,13 +4794,13 @@
     $("#burstdetail").innerHTML = `
       <div class="burst-header anim-fade">
         <div class="detail-head">
-          <h1 class="burst-title" id="title">${esc(data.burst)}</h1>
-          <span class="count" id="count">${fmtN(data.members.length)} frames</span>
+          <h1 class="burst-title" id="burst-title">${esc(data.burst)}</h1>
+          <span class="count" id="burst-count">${fmtN(data.members.length)} frames</span>
         </div>
         ${banner}
         <div class="toolbar" id="blinkbar"></div>
       </div>
-      <section class="burstgrid grid anim-in" id="grid" aria-label="Frames">` +
+      <section class="burstgrid grid anim-in" id="burst-frames" aria-label="Frames">` +
       data.members.map((m) => {
         const sharp = m.sharpness_norm != null ? num(m.sharpness_norm) : 1.0;
         const face = m.face_confidence != null ? num(m.face_confidence) : (m.face_count ? 0.9 : 0.85);
@@ -5296,7 +5333,13 @@
     pv.className = "help";
     start.disabled = true;
     let release = null;
-    const close = () => { if (release) release(); release = null; closeOverlay(modal); };
+    const opener = document.activeElement;
+    const close = () => {
+      if (release) release();
+      release = null;
+      closeOverlay(modal);
+      if (opener && opener.focus) opener.focus();
+    };
     openOverlay(modal);
     release = trapFocus(modal, close);
     $("#movelib-close").onclick = $("#movelib-cancel").onclick = close;
@@ -5650,6 +5693,10 @@
 
     const stageCounts = ov.stage_counts || {};
     $$("[data-stage-count]").forEach((b) => { b.textContent = fmtN(num(stageCounts[b.dataset.stageCount])); });
+    ["#btn-trash-empty", "#btn-trash-return-all"].forEach((sel) => {
+      const b = $(sel);
+      if (b) b.disabled = num(stageCounts.trash) === 0;  // nothing to empty or return
+    });
 
     const total = ov.total, pending = num(s.pending_inference), bursts = num(s.burst_groups);
     let stored = null;
@@ -5722,7 +5769,15 @@
     $("#bulk-cat").innerHTML = '<option value="" disabled selected>Move to category</option>' + opts;
   }
 
+  // A tab is reachable only in the stages its nav button lists (settings has no list: always).
+  function tabAllowed(name, stage = state.stage) {
+    const btn = $(`.navitem[data-tab="${name}"]`);
+    const stages = btn && btn.dataset.stages;
+    return !stages || stages.split(" ").includes(stage);
+  }
+
   function showTab(name, keepPicks) {
+    if (!tabAllowed(name)) name = state.stage === "new" ? "library" : "categories";
     const changed = state.tab !== name;
     state.tab = name;
     state.triageGrid = null;

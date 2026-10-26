@@ -1444,7 +1444,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             return {"ok": True, "changed": changed, "approved_total": int(total)}
 
     @app.get("/api/images/{image_id}/similar")
-    def similar(image_id: int, k: int = Query(12, ge=1, le=100)):
+    def similar(image_id: int, k: int = Query(12, ge=1, le=100), stage: StageFilter = Query("all")):
         try:
             from ..clustering.similarity import find_similar
         except ImportError:
@@ -1453,9 +1453,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
             if s.get(M.ImageRecord, image_id) is None:
                 raise HTTPException(404, "image not found")
             try:
-                pairs = list(find_similar(s, image_id, k))
+                pairs = list(find_similar(s, image_id, k if stage == "all" else min(k * 6, 600)))
             except ValueError as e:  # no embedding yet: the photo has not been analysed
                 raise HTTPException(409, str(e)) from None
+            if stage != "all":
+                allowed = set(s.exec(select(M.ImageRecord.id).where(
+                    M.ImageRecord.id.in_([int(i) for i, _ in pairs]), stage_clause(stage))).all())
+                pairs = [(i, sc) for i, sc in pairs if int(i) in allowed][:k]
             items = _load_items(s, [int(i) for i, _ in pairs], app.state.cfg)
             score = {int(i): float(sc) for i, sc in pairs}
             for it in items:
@@ -1983,14 +1987,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
             return {"count": len(out), "items": out}
 
     @app.get("/api/burst/{burst_id}")
-    def burst_detail(burst_id: int):
+    def burst_detail(burst_id: int, stage: StageFilter = Query("all")):
         with get_session(dbp) as s:
             bg = s.get(M.BurstGroup, burst_id)
             if bg is None:
                 raise HTTPException(404, "burst not found")
             members = s.exec(select(M.ImageRecord).where(
                 M.ImageRecord.burst_id == burst_id,
-                M.ImageRecord.scan_status != "missing",
+                stage_clause(stage),
                 M.ImageRecord.infer_status == "inferred").options(
                 selectinload(M.ImageRecord.quality),
                 selectinload(M.ImageRecord.faces))).all()
