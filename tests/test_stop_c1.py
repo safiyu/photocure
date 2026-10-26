@@ -86,10 +86,11 @@ def test_stop_with_nothing_running_exits_zero(runtime):
     assert r.exit_code == 0 and "No active Photocure server found on port 8103" in r.output
 
 
-def test_kill_is_stop_force():
-    import inspect
-    assert "stop(port=port, force=True)" in inspect.getsource(cli_mod.kill)
-    assert os.name  # keeps the module import honest on all platforms
+def test_kill_is_stop_force(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(cli_mod, "stop", lambda port, force: seen.update(port=port, force=force))
+    r = runner.invoke(cli_mod.app, ["kill", "--port", "8104"])
+    assert r.exit_code == 0 and seen == {"port": 8104, "force": True}
 
 
 def test_db_restore_roundtrip_and_refusals(tmp_path, monkeypatch):

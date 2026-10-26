@@ -206,7 +206,7 @@ class ActionEngine:
                             continue
                     elif trash and action.operation == "move" and _is_junk(action):
                         rep.unapproved_junk += 1  # not approved: stays in the junk review folder
-                    if self._is_in_place(action, repo):
+                    if action.reuse_existing and self._is_in_place(action, repo):
                         self._mark_in_place(action, repo, root)
                         session.commit()
                         rep.skipped += 1
@@ -426,7 +426,18 @@ class ActionEngine:
         if target.exists() and os.path.samefile(src, target):
             return  # already in place
         if ActionEngine._same_device(src, target.parent):
-            os.replace(src, target)
+            # Link then unlink instead of os.replace: a link fails if the name was taken since the
+            # check, where replace would silently overwrite whatever just appeared there.
+            try:
+                os.link(src, target, follow_symlinks=False)
+            except FileExistsError:
+                raise
+            except (OSError, NotImplementedError):  # no hard links on this filesystem
+                if os.path.lexists(target):
+                    raise FileExistsError(str(target)) from None
+                os.replace(src, target)
+                return
+            os.unlink(src)
             return
         # Cross-device: copy, verify against the ledger hash, then remove the source.
         if src.is_symlink():

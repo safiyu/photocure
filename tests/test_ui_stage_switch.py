@@ -14,7 +14,7 @@ def _read(name: str) -> str:
 def test_switch_has_three_stages_with_icons_and_counts():
     html = _read("index.html")
     sw = re.search(r'<div class="top-mode-switch" id="stage-switch".*?</div>', html, re.S).group(0)
-    assert 'role="tablist"' in sw
+    assert 'role="group"' in sw
     for stage in ("new", "library", "trash"):
         assert f'data-stage="{stage}"' in sw, stage
         assert f'data-stage-count="{stage}"' in sw, stage

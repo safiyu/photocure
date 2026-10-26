@@ -122,16 +122,16 @@
           <h1 id="page-title">Pipeline</h1>
           <div class="sub" id="page-sub"></div>
         </div>
-        <div class="top-mode-switch" id="stage-switch" role="tablist" aria-label="Where your photos are">
-          <button class="top-mode-btn active" role="tab" aria-selected="true" data-stage="new">
+        <div class="top-mode-switch" id="stage-switch" role="group" aria-label="Where your photos are">
+          <button class="top-mode-btn active" type="button" aria-pressed="true" data-stage="new">
             <svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span>New</span>
             <span class="mode-badge" data-stage-count="new">0</span>
           </button>
-          <button class="top-mode-btn" role="tab" aria-selected="false" data-stage="library">
+          <button class="top-mode-btn" type="button" aria-pressed="false" data-stage="library">
             <svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span>Library</span>
             <span class="mode-badge" data-stage-count="library">0</span>
           </button>
-          <button class="top-mode-btn" role="tab" aria-selected="false" data-stage="trash">
+          <button class="top-mode-btn" type="button" aria-pressed="false" data-stage="trash">
             <svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Trash</span>
             <span class="mode-badge" data-stage-count="trash">0</span>
           </button>
@@ -160,7 +160,7 @@
             <span id="progress-counts"></span>
           </div>
         </div>
-        <button id="header-version-badge" class="version-pill" type="button" title="Click to view About Photocure Studio" data-goto="settings"></button>
+        <button id="header-version-badge" class="version-pill" type="button" title="Click to view About Photocure Studio" data-goto="settings" tabindex="-1" aria-hidden="true"></button>
       </header>
 
       <main id="main">

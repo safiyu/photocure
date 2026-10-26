@@ -227,7 +227,7 @@ def rename_person(db_path: Path | str, person_id: int, name: str) -> dict:
         p = s.get(M.PersonCluster, person_id)
         if p is None:
             raise ActionError(f"no person with id {person_id}", 404)
-        existing = repo.find_person_by_name(name)
+        existing = repo.find_person_by_name(name, stage=p.stage)  # never merge across library and trash
         if existing is not None and existing.id != person_id:
             faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.person_id == person_id)).all()
             for f in faces:
@@ -260,10 +260,12 @@ def reassign_face(db_path: Path | str, face_id: int, *, person_id: int | None = 
             if target is None:
                 raise ActionError(f"no person with id {person_id}", 404)
         else:
-            target = repo.find_person_by_name(new_name)
+            image = s.get(M.ImageRecord, face.image_id)
+            person_stage = _cluster_stage(image.stage if image is not None else "new")
+            target = repo.find_person_by_name(new_name, stage=person_stage)
             if target is None:
                 embedding = dequantize_embedding(face.embedding_json) or []
-                target = repo.create_person_cluster(embedding)
+                target = repo.create_person_cluster(embedding, stage=person_stage)
                 target = repo.rename_person(target.id, new_name)
                 created_fresh = True
 

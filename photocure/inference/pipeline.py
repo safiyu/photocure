@@ -703,10 +703,11 @@ class InferencePipeline:
         lost its occurrence here and the cluster shrinks by one. Faces with no embedding (too
         small or blurry) are left unassigned.
         """
+        old_faces = repo.faces_for_image(image_id)
         old = [OldFace(f.person_id, dequantize_embedding(f.embedding_json))
-               for f in repo.faces_for_image(image_id)
-               if f.person_id is not None and f.embedding_json]
-        old_person_ids = {o.person_id for o in old}
+               for f in old_faces if f.person_id is not None and f.embedding_json]
+        # A face the user assigned by hand may have no embedding; it still counts towards its person.
+        old_person_ids = {f.person_id for f in old_faces if f.person_id is not None}
         new = [NewFace(i, f.embedding) for i, f in enumerate(faces) if f.embedding is not None]
         remap = remap_person_ids(old, new, self.cfg.face.cluster_remap_threshold)
 

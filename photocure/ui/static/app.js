@@ -14,7 +14,7 @@
   const state = {
     tab: "library", stage: "new", libraryMissing: 0, cats: [], junk: new Set(), utility: new Set(), utilityKind: "", byId: {}, busy: false, taskRunning: false,
     inferred: false,
-    triageSel: -1, triageGrid: null, undo: [], picks: new Set(), peoplePicks: new Set(), lastPick: null,
+    triageGrid: null, undo: [], picks: new Set(), peoplePicks: new Set(), lastPick: null,
     overview: null, eventId: null,
     backend: null, thresholds: null, manualCount: 0,
     settings: null, draft: { device: "auto", device_index: 0 }, busyBtn: null,
@@ -684,8 +684,8 @@
       async fetchPage(offset, limit) {
         const qs = cfg.params();
         const sc = state.stage || "new";
-        const scopeParam = (qs && qs.includes("stage=")) ? "" : `&stage=${encodeURIComponent(sc)}`;
-        const data = await api(`/api/images?${qs}${qs ? "&" : ""}limit=${limit}&offset=${offset}${scopeParam}`);
+        const stageParam = (qs && qs.includes("stage=")) ? "" : `&stage=${encodeURIComponent(sc)}`;
+        const data = await api(`/api/images?${qs}${qs ? "&" : ""}limit=${limit}&offset=${offset}${stageParam}`);
         data.items.forEach((it) => { state.byId[it.id] = it; });
         return data;
       },
@@ -1050,7 +1050,7 @@
   }
 
   async function loadFacets() {
-    try { applyFacets(await api("/api/facets")); } catch (e) { /* the filters just stay as they were */ }
+    try { applyFacets(await api(`/api/facets?stage=${encodeURIComponent(state.stage)}`)); } catch (e) { /* the filters just stay as they were */ }
   }
 
   function bindFilters() {
@@ -1651,7 +1651,7 @@
     const story = $("#hl-view").value === "story";
     host.replaceChildren(...Array.from({ length: 6 }, () => el("div", { class: "skel" })));
     try {
-      const data = await api(`/api/highlights/events?per_event=${story ? 8 : 3}` + (story ? "&balanced=true" : "") +
+      const data = await api(`/api/highlights/events?stage=${encodeURIComponent(state.stage)}&per_event=${story ? 8 : 3}` + (story ? "&balanced=true" : "") +
         (m !== "" ? "&min_score=" + encodeURIComponent(m) : ""));
       $("#highlightcount").textContent = `${fmtN(data.events.length)} event${data.events.length === 1 ? "" : "s"}`;
       if (!data.events.length) {
@@ -2477,7 +2477,7 @@
     info.className = "grow";
     ok.disabled = false;
     if (pk.mode === "output") {
-      if (data.writable) { info.textContent = "Your finished photos will be stored in this folder."; info.classList.add("good"); }
+      if (data.writable) { info.textContent = pk.info || "Files will be written into this folder."; info.classList.add("good"); }
       else { info.textContent = "You cannot write to this folder."; info.classList.add("bad"); ok.disabled = true; }
     } else {
       info.textContent = data.photos
@@ -2490,6 +2490,7 @@
     pk.opener = document.activeElement;
     pk.onPick = opts.onPick;
     pk.mode = opts.mode || "photos";
+    pk.info = opts.info || "";
     $("#picker-title").textContent = opts.title || "Choose a folder";
     $("#picker-ok").textContent = opts.okLabel || "Use this folder";
     openOverlay($("#picker"));
@@ -2577,7 +2578,7 @@
     $("#btn-move-library").onclick = openMoveLibrary;
     $("#btn-browse-library").onclick = () => openPicker({
       title: "Choose the library folder", mode: "output", initial: $("#set-library-root").value.trim(),
-      okLabel: "Use this folder",
+      okLabel: "Use this folder", info: "Your finished photos will be stored in this folder.",
       onPick: (p) => { $("#set-library-root").value = p; },
     });
   }
@@ -3209,11 +3210,14 @@
     }
   }
 
+  let peopleSeq = 0;
   async function renderPeople(force = false) {
+    const seq = ++peopleSeq;
     const host = $("#peoplegrid");
     const sort = state.peopleSort || "similarity";
     const sc = state.stage || "new";
     const data = await api(`/api/people?sort=${encodeURIComponent(sort)}&stage=${encodeURIComponent(sc)}`);
+    if (seq !== peopleSeq) return;  // another sort or stage was requested meanwhile
     (data.items || []).forEach((p) => { if (p.name) allKnownPeopleNames.add(p.name); });
     const allItems = (data.items || []).filter((p) => p.face_count > 0 && (p.sample_face_id != null || p.name));
     const items = allItems.filter((p) => !pendingPeopleDeletions.has(p.id));
@@ -3890,11 +3894,6 @@
 
   function setFaceZoom(multiplier) {
     faceZoomMultiplier = multiplier;
-    if (activeOverlayImageId) renderBiometricOverlay();
-  }
-
-  function setSpeed(speed) {
-    document.documentElement.style.setProperty('--speed', speed || 0.5);
     if (activeOverlayImageId) renderBiometricOverlay();
   }
 
@@ -4698,19 +4697,11 @@
   window.closeBiometricProjection = closeBiometricProjection;
   window.setOverlayLayout = setOverlayLayout;
   window.setFaceZoom = setFaceZoom;
-  window.setSpeed = setSpeed;
   window.setHoveredFace = setHoveredFace;
   window.selectFaceInOverlay = selectFaceInOverlay;
   window.makeOverlayBestShot = makeOverlayBestShot;
   window.toggleOverlayMarkDelete = toggleOverlayMarkDelete;
   window.reassignFace = reassignFace;
-
-  // Compatibility alias
-  async function showFaces(imageId, host, filename) {
-    if (currentBurstId) {
-      await openBiometricProjection(currentBurstId, imageId);
-    }
-  }
 
   async function rejectBlinks(burstId, count) {
     const yes = await showConfirmDialog({
@@ -5345,6 +5336,7 @@
     $("#movelib-close").onclick = $("#movelib-cancel").onclick = close;
     $("#movelib-browse").onclick = () => openPicker({
       title: "Choose the new library folder", mode: "output", initial: path.value.trim(), okLabel: "Use this folder",
+      info: "The whole library will be copied into this folder.",
       onPick: async (p) => {
         path.value = p;
         start.disabled = true;
@@ -5401,6 +5393,7 @@
     };
     $("#firstrun-browse").onclick = () => openPicker({
       title: "Choose the library folder", mode: "output", initial: root.value.trim(), okLabel: "Use this folder",
+      info: "Your finished photos will be stored in this folder.",
       onPick: (p) => { root.value = p; next.disabled = false; msg.textContent = ""; },
     });
     next.onclick = () => show(2);
@@ -5746,10 +5739,13 @@
     if (hint) hint.textContent = nextHint(flow, total);
   }
 
+  let statsSeq = 0;
   async function loadStats() {
+    const seq = ++statsSeq;
     try {
       const sc = state.stage || "new";
       const ov = await api(`/api/overview?stage=${encodeURIComponent(sc)}`);
+      if (seq !== statsSeq) return;  // a newer stage or refresh already owns the counts
       state.overview = ov;
       state.manualCount = num(ov.manual_count);
       updateLearn();
@@ -5891,7 +5887,7 @@
   async function resetLibrary() {
     const okReset = await showConfirmDialog({
       title: "Clear the indexed library?",
-      message: "This removes every indexed photo, AI analysis, burst and plan from the Photocure database. Your original photo files are not deleted or modified.",
+      message: "This removes every indexed photo, AI analysis, burst and plan from the Photocure database. Your original photo files are not deleted or modified. A library folder chosen in the app is forgotten too (its files stay on disk), so you will be asked for one again.",
       confirmText: "Clear library", variant: "danger" });
     if (!okReset) return;
     const btns = [$("#btn-reset-library"), $("#btn-import-reset")];
@@ -5903,7 +5899,7 @@
       }
     });
     try {
-      await post("/api/reset");
+      const resetRes = await post("/api/reset");
       toast("Library cleared successfully", "ok");
       libLog("Library cleared: all indexed images and metadata removed.", "warn");
       const pathInput = $("#scan-path");
@@ -5918,6 +5914,8 @@
       renderProgress({ active: false, done: 0, total: 0, percent: 0, message: "" });
       await Promise.all([loadStats(), loadTransactions(), refreshBackend()]);
       resetVisibleGrids();
+      await refreshSettings(true);
+      if (resetRes && resetRes.library_root_cleared) maybeFirstRun();  // the folder was forgotten: ask again
     } catch (e) {
       toast("Failed to reset library: " + e.message, "err");
     } finally {
@@ -6140,7 +6138,7 @@
       $$("#stage-switch [data-stage]").forEach((btn) => {
         const on = btn.dataset.stage === stage;
         btn.classList.toggle("active", on);
-        btn.setAttribute("aria-selected", String(on));
+        btn.setAttribute("aria-pressed", String(on));
       });
       $$(".navitem[data-stages]").forEach((btn) => {
         btn.style.display = btn.dataset.stages.split(" ").includes(stage) ? "" : "none";
@@ -6338,7 +6336,7 @@
     $("#ce-close").onclick = $("#ce-cancel").onclick = () => closeOverlay($("#cleanexport"));
     $("#ce-browse").onclick = () => openPicker({
       title: "Choose where the clean copies go", mode: "output", initial: $("#ce-dest").value.trim(),
-      okLabel: "Use this folder", onPick: (p) => { $("#ce-dest").value = p; },
+      okLabel: "Use this folder", info: "The clean copies will be written into this folder.", onPick: (p) => { $("#ce-dest").value = p; },
     });
     $("#bulk-cat").onchange = (e) => { if (e.target.value) bulkReassign(e.target.value); e.target.selectedIndex = 0; };
 

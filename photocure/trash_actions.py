@@ -58,7 +58,8 @@ def restore(dbp: Path, cfg: CuratorConfig, ids: list[int], *, cancel_check: Call
             category = _effective_category(rec)
             actions.append(PlannedAction(
                 image_id=rec.id, source=src, target=library_target(cfg, root, rec, category),
-                operation="move", category=_category_enum(cfg, category), reason="restored from trash"))
+                operation="move", category=_category_enum(cfg, category), reason="restored from trash",
+                reuse_existing=False))
     txn = ""
     restored = 0
     if actions:
@@ -105,7 +106,8 @@ def return_to_origin(dbp: Path, cfg: CuratorConfig, ids: list[int] | None, *,
             else:
                 actions.append(PlannedAction(
                     image_id=rec.id, source=src, target=origin, operation="move",
-                    category=_category_enum(cfg, _effective_category(rec)), reason="returned to origin"))
+                    category=_category_enum(cfg, _effective_category(rec)), reason="returned to origin",
+                    reuse_existing=False))
     txn = ""
     returned = 0
     if actions:

@@ -157,17 +157,18 @@ def test_restore_does_not_adopt_an_identical_file_that_already_sits_at_the_targe
 
 
 def test_migration_rewrites_paths_when_the_old_root_is_given_through_a_symlink(env, tmp_path):
+    from photocure.services import save_settings
     real = tmp_path / "real_lib"
     real.mkdir()
     link = tmp_path / "link_lib"
     link.symlink_to(real)
-    from photocure.services import save_settings
-    save_settings(env.db, {"library_root": str(link)}, force=True)
-    # the settings file stores the resolved path, so apply with the unresolved one like an env root would
+    save_settings(env.db, {"library_root": None}, force=True)
+    env.app.state.cfg.library_root = link  # a root from the environment is used exactly as given
     r = env.client.post("/api/plan/apply", json={"operation": "copy", "trash": False})
     wait_job(env.client, r.json()["job_id"])
-    cfg = env.app.state.cfg
-    out = library_migration.migrate_library(env.db, cfg, tmp_path / "moved")
+    with get_session(env.db) as s:
+        assert all(str(link) in x.path for x in s.exec(select(M.ImageRecord).where(M.ImageRecord.stage == "library")).all())
+    out = library_migration.migrate_library(env.db, env.app.state.cfg, tmp_path / "moved")
     assert out["ok"]
     with get_session(env.db) as s:
         rows = s.exec(select(M.ImageRecord).where(M.ImageRecord.stage == "library")).all()
@@ -187,11 +188,13 @@ def test_facets_and_highlights_can_be_limited_to_a_stage(lib):
 
 
 # ------------------------------------------------------------------ rules and taxonomy
-def test_a_custom_class_can_opt_into_date_folders(cfg, tmp_path):
+def test_the_library_layout_is_flat_even_for_a_class_that_asks_for_date_folders(cfg, tmp_path):
     org = FolderOrganizer(cfg, organize_root=tmp_path / "L")
     rec = M.ImageRecord(path="/in/a.jpg", filename="a.jpg", taken_at=datetime(2024, 5, 12, 9, tzinfo=timezone.utc))
     dec = Decision(CategoryType.CUSTOM, "x", needs_date=True, folder="Trips")
-    assert org.resolve_target(rec, dec) == tmp_path / "L" / "Trips" / "2024" / "05" / "12"
+    assert org.resolve_target(rec, dec) == tmp_path / "L" / "Trips"
+    tax = parse_taxonomy([{"name": "trips", "prompts": ["a trip"], "folder": "Trips", "date_grouped": True}])
+    assert tax.category_of("trips") is not None  # old files that still say date_grouped keep loading
 
 
 @pytest.mark.parametrize("bad", ["a,b", "a/b", "a\\b", "x" * 80, "line\nbreak"])
@@ -229,7 +232,8 @@ def test_a_manually_assigned_face_without_an_embedding_still_counts_down_on_rean
                                 confidence=0.9, x1=0.1, y1=0.1, x2=0.2, y2=0.2))  # no embedding
     session.flush()
     InferencePipeline(cfg)._assign_people(repo, {}, img.id, [])
-    assert session.get(M.PersonCluster, person.id).face_count == 0
+    gone = session.get(M.PersonCluster, person.id)
+    assert gone is None or gone.face_count == 0  # an empty unnamed person is dropped
 
 
 def test_naming_a_trash_face_makes_a_trash_person_and_never_joins_a_library_one(session, tmp_db):

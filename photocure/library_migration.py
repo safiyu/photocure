@@ -56,12 +56,14 @@ def _copy_verified(src: Path, dst: Path) -> None:
         raise OSError(f"copy does not match the original: {src}")
 
 
-def _swap(value: str | None, old: Path, new: Path) -> str | None:
+def _swap(value: str | None, olds: tuple[Path, ...], new: Path) -> str | None:
+    """Re-root a stored path; the old root may be stored resolved or as given (a symlink, an env path)."""
     if not value:
         return value
     p = Path(value)
-    if p == old or old in p.parents:
-        return str(new / p.relative_to(old))
+    for old in olds:
+        if p == old or old in p.parents:
+            return str(new / p.relative_to(old))
     return value
 
 
@@ -70,17 +72,19 @@ def migrate_library(dbp: Path, cfg: CuratorConfig, new_root: Path, *,
                     cancel_check: Callable[[], bool] | None = None) -> dict:
     """Copy every file to the same place under ``new_root``, verify it, then point the
     database and the library setting at the new folder in one step. The old folder is left alone."""
-    old = require_library_root(dbp, cfg).resolve()
+    as_given = require_library_root(dbp, cfg)
+    old = as_given.resolve()
+    olds = tuple(dict.fromkeys((old, as_given)))
     new = Path(new_root).resolve()
     problem = _target_problem(old, new)
     if problem:
         return {"ok": False, "error": problem, "copied": 0, "bytes": 0, "failed": [],
                 "old_root": str(old), "new_root": str(new)}
     with LEDGER_WRITING:  # nothing else moves a file between the first copy and the database switch
-        return _copy_and_switch(dbp, old, new, on_progress, cancel_check)
+        return _copy_and_switch(dbp, old, olds, new, on_progress, cancel_check)
 
 
-def _copy_and_switch(dbp: Path, old: Path, new: Path, on_progress, cancel_check) -> dict:
+def _copy_and_switch(dbp: Path, old: Path, olds: tuple[Path, ...], new: Path, on_progress, cancel_check) -> dict:
     from .services import load_settings, save_settings
 
     files = _files(old)
@@ -107,11 +111,11 @@ def _copy_and_switch(dbp: Path, old: Path, new: Path, on_progress, cancel_check)
     previous = load_settings(dbp).get("library_root")
     with get_session(dbp) as s:
         for rec in s.exec(select(M.ImageRecord).where(M.ImageRecord.stage.in_(("library", "trash")))).all():
-            rec.path = _swap(rec.path, old, new) or rec.path
-            rec.target_path = _swap(rec.target_path, old, new)
+            rec.path = _swap(rec.path, olds, new) or rec.path
+            rec.target_path = _swap(rec.target_path, olds, new)
         for e in s.exec(select(M.ActionLedger)).all():
-            e.target_path = _swap(e.target_path, old, new) or e.target_path
-            e.source_path = _swap(e.source_path, old, new) or e.source_path
+            e.target_path = _swap(e.target_path, olds, new) or e.target_path
+            e.source_path = _swap(e.source_path, olds, new) or e.source_path
         s.flush()
         save_settings(dbp, {"library_root": str(new)}, force=True)
         try:

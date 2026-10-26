@@ -212,6 +212,7 @@ class FileScanner:
         """Scan only the given files (used by watch mode); never prunes."""
         root = Path(root).expanduser().resolve()
         exts = {e.lower() for e in self.cfg.extensions}
+        lib_root = Path(self.cfg.library_root).expanduser().resolve() if self.cfg.library_root else None
         files: list[Path] = []
         for p in paths:
             if cancel_check and cancel_check():
@@ -222,6 +223,8 @@ class FileScanner:
                 p.relative_to(root)
             except (ValueError, OSError):
                 continue
+            if lib_root is not None and (p == lib_root or lib_root in p.parents):
+                continue  # the library is Photocure's own output, never a source
             rel = p.relative_to(root).parts
             if (any(part.startswith(".") or _is_library_bundle(part) for part in rel)
                     or p.suffix.lower() not in exts):

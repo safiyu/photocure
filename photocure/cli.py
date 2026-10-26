@@ -67,6 +67,18 @@ cli = app  # alias for the console-script entry point (photocure.cli:cli)
 console = Console()
 
 
+def _show_version(value: bool) -> None:
+    if value:
+        console.print(f"photocure {__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(version: bool = typer.Option(False, "--version", callback=_show_version, is_eager=True,
+                                       help="Show the version and exit.")) -> None:
+    """Photocure command line."""
+
+
 def _config(db: Path, refresh: bool = True) -> CuratorConfig:
     """Return a config bound to ``db`` (initializing the schema on first use)."""
     reset_backend_cache() if refresh else None
@@ -609,9 +621,11 @@ def apply(
         except KeyError:
             console.print(f"[red]Unknown plan id:[/red] {plan_id}")
             raise typer.Exit(1) from None
-        if exclude_duplicates:
-            console.print("[yellow]--exclude-duplicates is ignored with --plan-id; "
-                          "the plan was fixed when it was built.[/yellow]")
+        for flag, given in (("--exclude-duplicates", exclude_duplicates), ("--library-root", library_root),
+                            ("--window-seconds", window_seconds), ("--similarity-threshold", similarity_threshold)):
+            if given:
+                console.print(f"[yellow]{flag} is ignored with --plan-id:[/yellow]")
+                console.print("[yellow]  the saved plan is applied as it was built.[/yellow]")
     else:
         p = planner.build_plan(organize_root=_plan_root(cfg, library_root),
                                operation=operation or "move",

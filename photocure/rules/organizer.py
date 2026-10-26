@@ -1,21 +1,17 @@
 """Folder organizer: resolve destination paths for a routing plan.
 
-Option 1 (default, category-first date hierarchy)::
+Category-first layout, flat inside each category (no date subfolders)::
 
-    Organized/
-    ├── People/2024/05/12/IMG_1024.JPG
-    ├── People/Unknown_Date/IMG_0001.JPG          (no usable date)
-    ├── Non-Human/Food/2024/05/12/IMG_1025.JPG
-    ├── Non-Human/Scenery/2024/06/01/IMG_1050.JPG
+    Library/
+    ├── People/IMG_1024.JPG
+    ├── Non-Human/Food/IMG_1025.JPG
+    ├── Non-Human/Scenery/IMG_1050.JPG
     ├── Utility_Reference/{Screenshots,Documents,Notes_and_Whiteboards,
     │                      Labels_and_Signs}/...
     ├── Junk_Review/{Graphics,Accidental,Duplicates,Near_Duplicates,Unreadable}/...
     ├── Uncertain_Review/...
     ├── Bursts/Burst_<id>/alternates/...
     └── Unknown_Date/...
-
-With ``use_events`` the day folder carries the event label, e.g.
-``People/2024/05/12_Event3/``.
 
 Only move and copy are supported; the ActionEngine performs the operation.
 """
@@ -55,6 +51,8 @@ class PlannedAction:
     # Filled by the ActionEngine at execution time (ledger provenance).
     sha256: str = ""
     file_size: int = 0
+    # False for restores and returns: an identical file already at the target is a different photo.
+    reuse_existing: bool = True
 
 
 _SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -132,7 +130,7 @@ class FolderOrganizer:
 
         cat = decision.category
         base = self.root / self._folder_for(decision)
-        if decision.needs_date and cat.is_date_grouped:
+        if decision.needs_date and cat.is_date_grouped:  # no class is date-grouped any more: the layout is flat
             date = _date_components(rec.taken_at)
             if date is None:
                 # Date-grouped class without a usable date (never 1970).

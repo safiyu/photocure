@@ -386,8 +386,8 @@ def parse_taxonomy(data: object, source: str = "inline") -> Taxonomy:
     """Build a :class:`Taxonomy` from parsed YAML/JSON data.
 
     Accepted shapes: a list of entries, or ``{"classes": [...]}``. Each entry is
-    ``{"name": str, "prompts": [str, ...], "folder": str?, "date_grouped": bool?,
-    "group": str?}``
+    ``{"name": str, "prompts": [str, ...], "folder": str?, "group": str?}``
+    (``date_grouped`` is still accepted in older files but no longer changes the folders)
     where ``name`` is either a built-in category value (food, scenery, ...) or a
     new custom class that requires ``folder``.
     """
@@ -403,6 +403,9 @@ def parse_taxonomy(data: object, source: str = "inline") -> Taxonomy:
         name = str(item.get("name") or item.get("category") or "").strip()
         if not name:
             raise ValueError("taxonomy entry is missing 'name'")
+        if len(name) > 64 or re.search(r"[,/\\\x00-\x1f]", name):
+            raise ValueError(f"class name {name!r} must be 64 characters or fewer and must not contain "
+                             "commas, slashes or control characters")
         if name in seen:
             raise ValueError(f"duplicate taxonomy class {name!r}")
         seen.add(name)

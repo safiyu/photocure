@@ -289,12 +289,13 @@ class PhotoRepository:
         self.s.flush()
         return p
 
-    def find_person_by_name(self, name: str) -> PersonCluster | None:
+    def find_person_by_name(self, name: str, stage: str | None = None) -> PersonCluster | None:
+        """A person by name; with ``stage`` only among the people of that stage (library or trash)."""
         target = name.strip().lower()
-        return self.s.exec(
-            sselect(PersonCluster).where(
-                func.lower(func.trim(PersonCluster.name)) == target)
-        ).first()
+        stmt = sselect(PersonCluster).where(func.lower(func.trim(PersonCluster.name)) == target)
+        if stage is not None:
+            stmt = stmt.where(PersonCluster.stage == stage)
+        return self.s.exec(stmt).first()
 
     # -------------------------------------------------------------- semantic
     def upsert_semantic(self, sem: SemanticScore) -> SemanticScore:

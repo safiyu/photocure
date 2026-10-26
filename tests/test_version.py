@@ -55,7 +55,8 @@ def test_ci_extracts_version_dynamically():
 
 def test_web_app_serves_single_source_version():
     """UI root endpoint and API dynamically inject and report photocure.__version__."""
-    client = TestClient(create_app())
+    app = create_app()
+    client = TestClient(app)
     res = client.get("/")
     assert res.status_code == 200
     html = res.text
@@ -75,6 +76,7 @@ def test_web_app_serves_single_source_version():
     assert f"style.css?v={__version__}" not in static_html
 
     # /api/about endpoint reports __version__
+    client.headers["X-PCUR-Token"] = app.state.token  # the about page needs the token
     about_res = client.get("/api/about")
     assert about_res.status_code == 200
     assert about_res.json()["version"] == __version__
