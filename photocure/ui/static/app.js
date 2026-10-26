@@ -12,7 +12,7 @@
 
   const PAGE = 200;
   const state = {
-    tab: "library", cats: [], junk: new Set(), utility: new Set(), utilityKind: "", byId: {}, busy: false, taskRunning: false,
+    tab: "library", stage: "new", libraryMissing: 0, cats: [], junk: new Set(), utility: new Set(), utilityKind: "", byId: {}, busy: false, taskRunning: false,
     inferred: false,
     triageSel: -1, triageGrid: null, undo: [], picks: new Set(), peoplePicks: new Set(), lastPick: null,
     overview: null, eventId: null,
@@ -36,6 +36,24 @@
     settings: ["Settings", "Choose what runs the analysis and how many workers it uses."],
     actions: ["Apply and undo", "Review the plan, then organize your files. Every change can be undone."],
   };
+
+  const TRASH_SUB = "Photos you removed. Restore them, send them back where they came from, or delete them for good.";
+
+  // Title and subtitle for a tab, adjusted for the stage: Trash renames the grid, Library flags missing files.
+  function stageTitles(name) {
+    const [title, sub] = TITLES[name] || [name, ""];
+    if (state.stage === "trash" && name === "categories") return ["Trash", TRASH_SUB];
+    if (state.stage === "library" && num(state.libraryMissing) > 0) {
+      const n = num(state.libraryMissing);
+      return [title, `${sub} ${fmtN(n)} photo${n === 1 ? " is" : "s are"} missing on disk.`];
+    }
+    return [title, sub];
+  }
+  function applyStageTitles() {
+    const [title, sub] = stageTitles(state.tab);
+    $("#page-title").textContent = title;
+    $("#page-sub").textContent = sub;
+  }
 
   // ------------------------------------------------------------------ utils
   function toast(msg, cls, action) {
@@ -5419,10 +5437,8 @@
     set("utility", Object.entries(ov.by_category).reduce((a, [c, n]) => a + (state.utility.has(c) ? n : 0), 0));
     set("actions", s.planned_actions);
 
-    const pBadge = $("#badge-mode-pipeline");
-    if (pBadge && ov.pipeline_count != null) pBadge.textContent = fmtN(ov.pipeline_count);
-    const lBadge = $("#badge-mode-library");
-    if (lBadge && ov.library_count != null) lBadge.textContent = fmtN(ov.library_count);
+    const stageCounts = ov.stage_counts || {};
+    $$("[data-stage-count]").forEach((b) => { b.textContent = fmtN(num(stageCounts[b.dataset.stageCount])); });
 
     const total = ov.total, pending = num(s.pending_inference), bursts = num(s.burst_groups);
     let stored = null;
@@ -5517,7 +5533,7 @@
       afterAnim(entering, moMs("--mo-std", 260) + 40).then(() => { if (entering._enterSeq === seq) entering.classList.remove("enter"); });
     }
     positionNavIndicator();
-    const [title, sub] = TITLES[name] || [name, ""];
+    const [title, sub] = stageTitles(name);
     $("#page-title").textContent = title;
     $("#page-sub").textContent = sub;
     document.title = title + " - Photocure Studio";
@@ -5852,39 +5868,37 @@
 
     $$(".tab").forEach((t) => (t.onclick = () => showTab(t.dataset.tab)));
 
-    function setMode(mode) {
-      state.stage = mode === "library" ? "library" : "new";
-      const pBtn = $("#btn-mode-pipeline");
-      const lBtn = $("#btn-mode-library");
-      const pipeGroup = $("#navgroup-pipeline");
-      const revGroup = $("#navgroup-review");
-      if (mode === "library") {
-        if (pBtn) { pBtn.classList.remove("active"); pBtn.setAttribute("aria-selected", "false"); }
-        if (lBtn) { lBtn.classList.add("active"); lBtn.setAttribute("aria-selected", "true"); }
-        if (pipeGroup) pipeGroup.style.display = "none";
-        if (revGroup) revGroup.style.display = "none";
-        post("/api/library/sync", {}).catch(() => {});
-        resetVisibleGrids();
-        loadStats();
-        if (["library", "uncertain", "duplicates", "junk", "actions"].includes(state.tab)) {
-          showTab("categories");
-        } else {
-          showTab(state.tab);
-        }
-      } else {
-        if (lBtn) { lBtn.classList.remove("active"); lBtn.setAttribute("aria-selected", "false"); }
-        if (pBtn) { pBtn.classList.add("active"); pBtn.setAttribute("aria-selected", "true"); }
-        if (pipeGroup) pipeGroup.style.display = "";
-        if (revGroup) revGroup.style.display = "";
-        resetVisibleGrids();
-        loadStats();
-        showTab(state.tab);
+    function setStage(stage) {
+      state.stage = stage;
+      document.body.dataset.stage = stage;
+      $$("#stage-switch [data-stage]").forEach((btn) => {
+        const on = btn.dataset.stage === stage;
+        btn.classList.toggle("active", on);
+        btn.setAttribute("aria-selected", String(on));
+      });
+      $$(".navitem[data-stages]").forEach((btn) => {
+        btn.style.display = btn.dataset.stages.split(" ").includes(stage) ? "" : "none";
+      });
+      $$(".navgroup").forEach((g) => {
+        g.style.display = $$(".navitem", g).some((btn) => btn.style.display !== "none") ? "" : "none";
+      });
+      const gridLabel = $('.navitem[data-tab="categories"] > span');
+      if (gridLabel) gridLabel.textContent = stage === "trash" ? "Trash" : "Library";
+      state.libraryMissing = 0;
+      if (stage === "library") {
+        post("/api/library/sync", {}).then((r) => {
+          state.libraryMissing = num(r && r.missing);
+          applyStageTitles();
+        }).catch(() => {});
       }
+      resetVisibleGrids();
+      loadStats();
+      const cur = $(`.navitem[data-tab="${state.tab}"]`);
+      const allowed = !cur || cur.style.display !== "none" || state.tab === "settings";
+      showTab(allowed ? state.tab : (stage === "new" ? "library" : "categories"));
     }
-    const btnModePipe = $("#btn-mode-pipeline");
-    if (btnModePipe) btnModePipe.onclick = () => setMode("pipeline");
-    const btnModeLib = $("#btn-mode-library");
-    if (btnModeLib) btnModeLib.onclick = () => setMode("library");
+    $$("#stage-switch [data-stage]").forEach((btn) => { btn.onclick = () => setStage(btn.dataset.stage); });
+    document.body.dataset.stage = state.stage;
 
     $("#menu-btn").onclick = () => document.body.classList.toggle("nav-open");
     document.addEventListener("click", (e) => {
