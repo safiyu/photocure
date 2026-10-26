@@ -989,6 +989,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def get_progress():
         return {**progress_mgr.get(), "busy": _BUSY.locked()}
 
+    def _lib_root_for_plan():
+        from ..library import library_root
+        return library_root(dbp, app.state.cfg)
+
     @app.get("/api/plan")
     def plan():
         """Summarize the currently planned routing (route_status == planned)."""
@@ -999,12 +1003,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 M.ImageRecord.route_status == "planned").group_by(eff)).all()
             by_cat = {(k or "unrouted"): int(n) for k, n in rows}
             return {"total_planned": sum(by_cat.values()), "by_category": by_cat,
-                    "organize_root": str(cfg.organize_root)}
+                    "organize_root": str(_lib_root_for_plan())}
 
     @app.get("/api/images")
     def images(
         category: str | None = Query(None),
-        categories: str | None = Query(None),
+        categories: str | None = Query(None, max_length=2000),
         group: Literal["junk", "utility"] | None = Query(None),
         manual: bool = Query(False),
         q: str | None = Query(None),
@@ -1020,7 +1024,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         favorite: bool | None = Query(None),
         issue: str | None = Query(None, max_length=100),
         date_from: date | None = Query(None),
-        date_to: date | None = Query(None),
+        date_to: date | None = Query(None, le=date(9999, 12, 30)),
         sort: Literal["id", "taken"] = Query("id"),
         limit: int = Query(200, ge=1, le=1000),
         offset: int = Query(0, ge=0),
@@ -1115,6 +1119,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.post("/api/features", dependencies=auth)
     def post_features(payload: dict = Body(...)):
         from ..features import DEFAULTS, save_features
+        wp = payload.get("watch_path")
+        if isinstance(wp, str) and wp.strip() and _confined() and not _within(
+                Path(wp.strip()).expanduser(), _browse_roots()):
+            raise HTTPException(403, "that folder is outside the allowed locations")
         try:
             saved = save_features(dbp, payload)
         except ValueError as e:
@@ -1444,7 +1452,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
         with get_session(dbp) as s:
             if s.get(M.ImageRecord, image_id) is None:
                 raise HTTPException(404, "image not found")
-            pairs = list(find_similar(s, image_id, k))
+            try:
+                pairs = list(find_similar(s, image_id, k))
+            except ValueError as e:  # no embedding yet: the photo has not been analysed
+                raise HTTPException(409, str(e)) from None
             items = _load_items(s, [int(i) for i, _ in pairs], app.state.cfg)
             score = {int(i): float(sc) for i, sc in pairs}
             for it in items:
@@ -1655,7 +1666,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if v is not None and not _FP_RE.fullmatch(v):
             raise HTTPException(400, "invalid cache key")
         stem, dot, ext = face_name.rpartition(".")
-        if ext != "jpg" or not re.fullmatch(r"[0-9]+", stem):
+        if ext != "jpg" or not re.fullmatch(r"[0-9]{1,18}", stem):
             raise HTTPException(404, "face not found")
         face_id = int(stem)
         with get_session(dbp) as s:
@@ -1753,28 +1764,34 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 return {"ok": False, "unavailable": str(e), "scanned": 0, "flagged": []}
             progress_mgr.start("Privacy scan", "Looking for sensitive details", len(recs), "Scanning...")
             flagged = []
+            failed: list[int] = []
             try:
                 for n, (iid, name, path, target, orient) in enumerate(recs, 1):
                     if progress_mgr.is_stopped():
                         break
-                    app.state.pii[iid] = False  # scanned, nothing found, unless a finding replaces it
+                    app.state.pii.pop(iid, None)  # unscanned until a scan really finishes
                     src = next((x for x in (path, target) if x and os.path.exists(x)), None)
-                    if src is not None:
+                    if src is None:
+                        jlog(job, f"could not scan {name}: the file is missing", "warn")
+                        failed.append(iid)
+                    else:
                         try:
                             bgr = load_image(src, max_side=1600, orientation=orient).bgr
                             f = scanner.scan_image(iid, bgr)
                         except Exception as e:
                             jlog(job, f"could not scan {name}: {e}", "warn")
-                            f = None
-                        if f is not None:
-                            app.state.pii[iid] = f
-                            flagged.append({"id": iid, "filename": name, "labels": f.labels,
-                                            "score": round(f.score, 3), "localized": f.localized})
+                            failed.append(iid)
+                        else:
+                            app.state.pii[iid] = f if f is not None else False
+                            if f is not None:
+                                flagged.append({"id": iid, "filename": name, "labels": f.labels,
+                                                "score": round(f.score, 3), "localized": f.localized})
                     progress_mgr.update(n, len(recs), name, detail=f"{n} / {len(recs)}")
             finally:
                 scanner.release()
             progress_mgr.finish(f"Scan complete: {len(flagged)} photos flagged")
-            return {"ok": True, "unavailable": "", "scanned": len(recs), "flagged": flagged}
+            return {"ok": True, "unavailable": "", "scanned": len(recs) - len(failed), "flagged": flagged,
+                    "failed": failed}
 
         return {"ok": True, "job_id": spawn("pii-scan", work)["id"]}
 
@@ -2346,6 +2363,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
                         th.unlink(missing_ok=True)
                     except OSError:
                         pass
+            app.state.pii.clear()  # ids restart at 1, so old scan results would match other photos
+            app.state.last_analyzed_ids = set()
             progress_mgr.reset()
             return {"ok": True, "deleted": counts}
 
@@ -2928,6 +2947,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
         saved = load_features(dbp)
         if saved["watch_enabled"] and saved["watch_path"]:
             try:
+                if _confined() and not _within(Path(saved["watch_path"]), _browse_roots()):
+                    raise FileNotFoundError("the folder is outside the allowed locations")
                 app.state.watch.start(saved["watch_path"])
             except FileNotFoundError as e:
                 logging.getLogger("photocure.ui").warning("watched folder not resumed: %s", e)
