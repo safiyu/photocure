@@ -664,7 +664,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     # Every request: Host allowlist. Everything except the static shell, /healthz and
     # /auth/exchange also needs a valid session; mutating requests need a matching Origin.
-    _OPEN = ("/", "/healthz", "/auth/exchange", "/api/about", "/licenses")
+    _OPEN = ("/", "/healthz", "/auth/exchange", "/licenses")
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
@@ -1281,7 +1281,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.get("/api/highlights/events")
     def highlights_by_event(per_event: int = Query(1, ge=1, le=12),
                             min_score: float | None = Query(None, ge=0, le=2),
-                            balanced: bool = Query(False)):
+                            balanced: bool = Query(False), stage: StageFilter = Query("all")):
         from .. import narrative
         from .. import search as search_mod
         from ..highlights import best_of_events
@@ -1294,7 +1294,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                         if encoder is None:
                             encoder = app.state.text_encoder = search_mod.default_encoder(run_cfg())
                     return narrative.scale_labels(s, ids, encoder)
-            events = best_of_events(s, hl_weights(), per_event, min_score, scale_of)
+            events = best_of_events(s, hl_weights(), per_event, min_score, scale_of, stage=stage)
             items = {it["id"]: it for it in _load_items(
                 s, [i for e in events for i, _ in e["items"]], app.state.cfg)}
             out = []
@@ -1337,10 +1337,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "Content-Disposition": f'attachment; filename="highlights-{year}.html"'})
 
     @app.get("/api/facets")
-    def facets():
-        """What the library contains, for the filter controls and the date scrubber."""
+    def facets(stage: StageFilter = Query("all")):
+        """What the photos in one stage contain, for the filter controls and the date scrubber."""
         I = M.ImageRecord
-        active = I.scan_status != "missing"
+        active = stage_clause(stage)
         with get_session(dbp) as s:
             cams = s.exec(select(I.camera_model, func.count()).where(active, I.camera_model != "")
                           .group_by(I.camera_model).order_by(func.count().desc(), I.camera_model)).all()
@@ -1964,20 +1964,17 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def bursts(stage: StageFilter = Query("all")):
         with get_session(dbp) as s:
             repo = PhotoRepository(s)
-            if repo.prune_bursts():
-                s.commit()
             out = []
+            counts = dict(s.exec(select(M.ImageRecord.burst_id, func.count(M.ImageRecord.id)).where(
+                M.ImageRecord.burst_id.is_not(None), stage_clause(stage),
+                M.ImageRecord.route_status.not_in(["trashed", "purged"]) if stage != "trash"
+                else M.ImageRecord.route_status != "purged").group_by(M.ImageRecord.burst_id)).all())
             for b in repo.all_bursts():
                 best = repo.get_by_id(b.best_shot_id) if b.best_shot_id else None
-                if stage != "all":
-                    m_q = select(func.count(M.ImageRecord.id)).where(
-                        M.ImageRecord.burst_id == b.id, stage_clause(stage))
-                    cnt = s.exec(m_q).one()
-                    if not cnt:
-                        continue
-                    b_count = int(cnt)
-                else:
-                    b_count = b.image_count
+                cnt = int(counts.get(b.id, 0))
+                if cnt < (1 if stage == "trash" else 2):  # a lone frame is not a burst
+                    continue
+                b_count = cnt
                 out.append({
                     "id": b.id, "name": b.name, "image_count": b_count,
                     "best_shot_id": b.best_shot_id,
@@ -2370,7 +2367,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
             app.state.pii.clear()  # ids restart at 1, so old scan results would match other photos
             app.state.last_analyzed_ids = set()
             progress_mgr.reset()
-            return {"ok": True, "deleted": counts}
+            # The library files stay on disk but no row knows them; forgetting the folder lets the
+            # first-run popup ask again, and the old folder can then be scanned like any other.
+            from ..library import library_root_source
+            from ..services import save_settings
+            cleared = library_root_source(dbp, app.state.cfg) == "settings"
+            if cleared:
+                save_settings(dbp, {"library_root": None}, force=True)
+            return {"ok": True, "deleted": counts, "library_root_cleared": cleared}
 
     @app.post("/api/images/{image_id}/reassign", dependencies=auth)
     def reassign(image_id: int, body: ReassignReq):
@@ -2548,97 +2552,88 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def _sync_library():
         from ..library import library_root as _library_root_setting
         lib_root_path = _library_root_setting(dbp, app.state.cfg)
+        empty = {"ok": True, "checked": 0, "moved": 0, "missing": 0, "revived": 0, "missing_ids": []}
         if lib_root_path is None:
-            return {"ok": True, "checked": 0, "moved": 0, "missing": 0, "missing_ids": [],
-                    "message": "no library folder configured"}
-
+            return {**empty, "message": "no library folder configured"}
         lib_root = Path(lib_root_path).expanduser().resolve()
         if not lib_root.exists():
-            return {"ok": True, "checked": 0, "moved": 0, "missing": 0, "missing_ids": [],
-                    "message": "library folder does not exist on disk"}
+            return {**empty, "message": "library folder does not exist on disk"}
 
+        # Read phase: no write transaction is open while the disk is walked and files are hashed.
+        I = M.ImageRecord
         with get_session(dbp) as s:
-            repo = PhotoRepository(s)
-            I = M.ImageRecord
-            recs = s.exec(select(I).where(I.stage == "library", I.scan_status != "missing")).all()
-            checked_count = len(recs)
-            moved_count = 0
-            missing_count = 0
-            missing_ids: list[int] = []
-
-            # Scan files inside library_root excluding .trash
-            disk_files: dict[str, list[Path]] = {}
-            skip_dirs = {".trash", ".git", ".cache", ".thumbnails", "__pycache__"}
-            for dirpath, dirnames, filenames in os.walk(lib_root):
-                dirnames[:] = [d for d in dirnames if d.lower() not in skip_dirs and not d.startswith(".")]
-                for fn in filenames:
-                    if fn.startswith("."):
-                        continue
+            rows = [(r.id, r.path, r.filename, r.file_size, r.sha256, r.scan_status)
+                    for r in s.exec(select(I).where(I.stage == "library")).all()]
+        disk_files: dict[str, list[Path]] = {}
+        skip_dirs = {".trash", ".git", ".cache", ".thumbnails", "__pycache__"}
+        for dirpath, dirnames, filenames in os.walk(lib_root):
+            dirnames[:] = [d for d in dirnames if d.lower() not in skip_dirs and not d.startswith(".")]
+            for fn in filenames:
+                if not fn.startswith("."):
                     disk_files.setdefault(fn, []).append(Path(dirpath, fn))
 
-            for rec in recs:
-                cur_path = Path(rec.path)
-                if cur_path.exists():
+        from ..rules.taxonomy import get_taxonomy
+        from ..scanner.hasher import compute_sha256
+        tax = get_taxonomy(cfg)
+        moved: list[tuple[int, str, str | None]] = []   # id, new path, category from the folder
+        missing_ids: list[int] = []
+        revived: list[int] = []
+        checked = 0
+        for iid, path, filename, size, sha, status in rows:
+            if status == "missing":
+                if Path(path).exists():  # the file came back (a drive was remounted, a folder put back)
+                    revived.append(iid)
+                continue
+            checked += 1
+            if Path(path).exists():
+                continue
+            match = None
+            for cand in disk_files.get(filename, []):
+                try:
+                    if cand.stat().st_size == size and (not sha or compute_sha256(cand) == sha):
+                        match = cand
+                        break
+                except OSError:
                     continue
+            if match is None:
+                missing_ids.append(iid)
+                continue
+            inferred = None
+            try:
+                folder = str(match.relative_to(lib_root).parent).replace("\\", "/")
+                if folder and folder != ".":
+                    for entry in tax.entries:
+                        entry_folder = entry.folder_override or entry.category.folder
+                        if folder == entry_folder or folder.startswith(entry_folder + "/"):
+                            inferred = entry.key
+                            break
+                    inferred = inferred or folder.split("/")[-1].lower()
+            except ValueError:
+                pass
+            moved.append((iid, str(match), inferred))
 
-                candidates = disk_files.get(rec.filename, [])
-                matched_path = None
-                for cand in candidates:
-                    try:
-                        cand_size = cand.stat().st_size
-                        if cand_size == rec.file_size:
-                            if rec.sha256:
-                                from ..scanner.hasher import compute_sha256
-                                if compute_sha256(cand) == rec.sha256:
-                                    matched_path = cand
-                                    break
-                            else:
-                                matched_path = cand
-                                break
-                    except OSError:
-                        continue
-
-                if matched_path is not None:
-                    rec.path = str(matched_path)
-                    rec.target_path = str(matched_path)
-                    try:
-                        rel = matched_path.relative_to(lib_root)
-                        folder_part = str(rel.parent).replace("\\", "/")
-                        if folder_part and folder_part != ".":
-                            from ..rules.taxonomy import get_taxonomy
-                            tax = get_taxonomy(cfg)
-                            inferred_cat = None
-                            for entry in tax.entries:
-                                entry_folder = entry.folder_override or entry.category.folder
-                                if folder_part == entry_folder or folder_part.startswith(entry_folder + "/"):
-                                    inferred_cat = entry.key
-                                    break
-                            if not inferred_cat:
-                                inferred_cat = folder_part.split("/")[-1].lower()
-                            rec.category = inferred_cat
-                            rec.manual_bucket = inferred_cat
-                    except Exception:
-                        pass
-                    moved_count += 1
-                else:
-                    rec.scan_status = "missing"  # stays in the library stage, counted in the header
-                    rec.route_status = "removed"
-                    missing_count += 1
-                    missing_ids.append(rec.id)
-                    faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == rec.id)).all()
-                    for f in faces:
-                        if f.person_id:
-                            c = s.get(M.PersonCluster, f.person_id)
-                            if c:
-                                c.face_count = max(0, c.face_count - 1)
-                                if c.face_count <= 0 and not c.name:
-                                    s.delete(c)
-
-            if missing_count > 0:
-                repo.prune_bursts()
+        # Write phase: one short transaction.
+        from ..people_actions import attach_faces_to_library, detach_faces
+        with get_session(dbp) as s:
+            for iid, new_path, inferred in moved:
+                rec = s.get(I, iid)
+                rec.path = rec.target_path = new_path
+                if inferred:
+                    rec.category = rec.manual_bucket = inferred
+            for iid in missing_ids:
+                rec = s.get(I, iid)
+                rec.scan_status = "missing"  # stays in the library stage, counted in the header
+                rec.route_status = "removed"
+                detach_faces(s, iid)
+            for iid in revived:
+                rec = s.get(I, iid)
+                rec.scan_status, rec.route_status = "scanned", "executed"
+                attach_faces_to_library(s, iid)
+            if missing_ids:
+                PhotoRepository(s).prune_bursts()
             s.commit()
-            return {"ok": True, "checked": checked_count, "moved": moved_count,
-                    "missing": missing_count, "missing_ids": missing_ids}
+        return {"ok": True, "checked": checked, "moved": len(moved), "missing": len(missing_ids),
+                "revived": len(revived), "missing_ids": missing_ids}
 
     def trash_job(kind: str, label: str, run):
         """Run one trash action as a background job holding the busy lock."""
@@ -2829,8 +2824,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def undo(body: UndoReq):
         tid = body.transaction_id or latest_undoable()
         if not tid:
-            return JSONResponse({"ok": False, "error": "no transactions found"},
-                                status_code=200)
+            raise HTTPException(404, "no transactions found")
         planner = make_planner(req_cfg())
         if not body.verify and not _accepts(planner.undo, "verify"):
             raise _not_impl("undo without verification")
@@ -2872,6 +2866,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.post("/api/learn", dependencies=auth, status_code=202)
     def learn():
         """Re-sort uncertain photos using the user's manual choices (background job)."""
+        plan_root()  # learning rebuilds the plan: refuse early when no library folder is set
         planner = make_planner(req_cfg())
         if not hasattr(planner, "learn_from_corrections"):
             raise _not_impl("learning from corrections")

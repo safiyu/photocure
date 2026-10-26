@@ -535,11 +535,17 @@ class PhotoRepository:
             sselect(func.count()).select_from(ImageRecord)
             .where(active, ImageRecord.route_status == "planned")
         ).one()
-        self.prune_bursts()
-        bursts = self.s.exec(sselect(func.count()).select_from(BurstGroup)).one()
+        # Read-only: a burst counts when two or more of its frames are still in the library.
+        live_bursts = (
+            sselect(ImageRecord.burst_id)
+            .where(ImageRecord.burst_id.is_not(None), active,
+                   col(ImageRecord.route_status).not_in(["trashed", "purged"]))
+            .group_by(ImageRecord.burst_id).having(func.count() >= 2).subquery()
+        )
+        bursts = self.s.exec(sselect(func.count()).select_from(live_bursts)).one()
         people = self.s.exec(
             sselect(func.count()).select_from(PersonCluster)
-            .where(PersonCluster.face_count > 0)
+            .where(PersonCluster.face_count > 0, PersonCluster.stage != "trash")
         ).one()
         stage_rows = self.s.exec(
             sselect(ImageRecord.stage, func.count()).where(active).group_by(ImageRecord.stage)
