@@ -1848,8 +1848,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if promote_in_library and promoted_category:
             from ..library_actions import move_to_category
             try:
-                move_to_category(dbp, app.state.cfg, body.image_id, promoted_category)
-            except (OSError, LookupError, ValueError):
+                with exclusive():
+                    move_to_category(dbp, app.state.cfg, body.image_id, promoted_category)
+            except (OSError, LookupError, ValueError, HTTPException):
                 pass  # the best shot is chosen either way; its folder is already a category folder
         return {"ok": True, "burst_id": burst_id, "best_shot_id": body.image_id}
 
@@ -2363,7 +2364,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             from ..library import LibraryRootMissing
             from ..library_actions import move_to_category
             try:
-                move_to_category(dbp, app.state.cfg, image_id, effective)
+                with exclusive():  # no file moves while a trash job or a library move runs
+                    move_to_category(dbp, app.state.cfg, image_id, effective)
             except FileNotFoundError:
                 raise HTTPException(409, "file is missing on disk") from None
             except LibraryRootMissing as e:
@@ -2384,8 +2386,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
         """Delete a photo: a library photo moves into the trash; a new photo is only marked."""
         from ..library import LibraryRootMissing
         from ..library_actions import trash_image
+        with get_session(dbp) as s:
+            rec = s.get(M.ImageRecord, image_id)
+            in_library = rec is not None and rec.stage == "library"
         try:
-            out = trash_image(dbp, app.state.cfg, image_id)
+            if in_library:
+                with exclusive():  # no file moves while a trash job or a library move runs
+                    out = trash_image(dbp, app.state.cfg, image_id)
+            else:
+                out = trash_image(dbp, app.state.cfg, image_id)
         except LookupError:
             raise HTTPException(404, "image not found") from None
         except LibraryRootMissing as e:
@@ -2510,6 +2519,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.post("/api/library/sync", dependencies=auth)
     def sync_library():
         """Sync photo library with disk changes (moved category folders or deleted files)."""
+        with exclusive():
+            return _sync_library()
+
+    def _sync_library():
         from ..library import library_root as _library_root_setting
         lib_root_path = _library_root_setting(dbp, app.state.cfg)
         if lib_root_path is None:
@@ -2898,6 +2911,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                         M.ImageRecord.path.like(tpat))).all():
                     r.scan_status = "missing"
                     r.route_status = "trashed"
+                    r.stage = "trash"
         except Exception:
             pass
         from .. import models as bundled

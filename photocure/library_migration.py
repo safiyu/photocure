@@ -70,14 +70,19 @@ def migrate_library(dbp: Path, cfg: CuratorConfig, new_root: Path, *,
                     cancel_check: Callable[[], bool] | None = None) -> dict:
     """Copy every file to the same place under ``new_root``, verify it, then point the
     database and the library setting at the new folder in one step. The old folder is left alone."""
-    from .services import load_settings, save_settings
-
     old = require_library_root(dbp, cfg).resolve()
     new = Path(new_root).resolve()
     problem = _target_problem(old, new)
     if problem:
         return {"ok": False, "error": problem, "copied": 0, "bytes": 0, "failed": [],
                 "old_root": str(old), "new_root": str(new)}
+    with LEDGER_WRITING:  # nothing else moves a file between the first copy and the database switch
+        return _copy_and_switch(dbp, old, new, on_progress, cancel_check)
+
+
+def _copy_and_switch(dbp: Path, old: Path, new: Path, on_progress, cancel_check) -> dict:
+    from .services import load_settings, save_settings
+
     files = _files(old)
     copied = nbytes = 0
     failed: list[str] = []
@@ -100,20 +105,19 @@ def migrate_library(dbp: Path, cfg: CuratorConfig, new_root: Path, *,
         return result
 
     previous = load_settings(dbp).get("library_root")
-    with LEDGER_WRITING:
-        with get_session(dbp) as s:
-            for rec in s.exec(select(M.ImageRecord).where(M.ImageRecord.stage.in_(("library", "trash")))).all():
-                rec.path = _swap(rec.path, old, new) or rec.path
-                rec.target_path = _swap(rec.target_path, old, new)
-            for e in s.exec(select(M.ActionLedger)).all():
-                e.target_path = _swap(e.target_path, old, new) or e.target_path
-                e.source_path = _swap(e.source_path, old, new) or e.source_path
-            s.flush()
-            save_settings(dbp, {"library_root": str(new)}, force=True)
-            try:
-                s.commit()
-            except Exception:
-                if previous:
-                    save_settings(dbp, {"library_root": previous}, force=True)
-                raise
+    with get_session(dbp) as s:
+        for rec in s.exec(select(M.ImageRecord).where(M.ImageRecord.stage.in_(("library", "trash")))).all():
+            rec.path = _swap(rec.path, old, new) or rec.path
+            rec.target_path = _swap(rec.target_path, old, new)
+        for e in s.exec(select(M.ActionLedger)).all():
+            e.target_path = _swap(e.target_path, old, new) or e.target_path
+            e.source_path = _swap(e.source_path, old, new) or e.source_path
+        s.flush()
+        save_settings(dbp, {"library_root": str(new)}, force=True)
+        try:
+            s.commit()
+        except Exception:
+            if previous:
+                save_settings(dbp, {"library_root": previous}, force=True)
+            raise
     return result

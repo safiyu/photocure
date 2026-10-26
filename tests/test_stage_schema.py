@@ -56,7 +56,7 @@ def test_migrate_backfills_stage_from_route_status(tmp_path):
     init_db(db)
     con = sqlite3.connect(db)
     got = {r[0]: (r[1], r[2]) for r in con.execute("SELECT filename, stage, origin_path FROM images")}
-    assert got["a.jpg"] == ("library", "/lib/a.jpg")
+    assert got["a.jpg"] == ("library", None)  # no ledger row: the origin is unknown, never the library path
     assert got["b.jpg"] == ("trash", None)
     assert got["c.jpg"] == ("new", None)
     assert got["d.jpg"] == ("new", None)

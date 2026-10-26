@@ -131,8 +131,12 @@ def migrate(engine) -> int:
             # Rows from before stages existed take their stage from how they were routed.
             conn.exec_driver_sql("UPDATE images SET stage='library' WHERE route_status='executed'")
             conn.exec_driver_sql("UPDATE images SET stage='trash' WHERE route_status='trashed'")
+            # The origin is where the first committed move or copy took the photo from; if the ledger
+            # does not know, it stays empty and Return to origin skips the photo instead of guessing.
             conn.exec_driver_sql(
-                "UPDATE images SET origin_path=path WHERE stage='library' AND origin_path IS NULL")
+                "UPDATE images SET origin_path=(SELECT l.source_path FROM action_ledger l"
+                " WHERE l.image_id=images.id AND l.status='committed' AND l.operation_type IN ('move','copy')"
+                " ORDER BY l.id LIMIT 1) WHERE stage='library' AND origin_path IS NULL")
         # Columns added above are not indexed by create_all on an existing table, so create any
         # index the models declare that the database does not have yet.
         for table in SQLModel.metadata.sorted_tables:
