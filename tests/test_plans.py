@@ -307,7 +307,7 @@ def test_any_marked_photo_is_trashed_and_unmarked_ones_are_not(tmp_path):
     assert any(w.out.rglob(_src(w, 1).name))
 
 
-def test_marked_photo_is_left_out_without_trash_or_when_copying(tmp_path):
+def test_marked_photo_is_left_out_without_trash(tmp_path):
     w = build_world(tmp_path, n=2)
     approve_delete(w, w.ids[0])
     p = w.planner.build_plan(organize_root=w.out, operation="move")
@@ -317,9 +317,20 @@ def test_marked_photo_is_left_out_without_trash_or_when_copying(tmp_path):
     w2 = build_world(tmp_path / "copy", n=2)
     approve_delete(w2, w2.ids[0])
     p2 = w2.planner.build_plan(organize_root=w2.out, operation="copy")
-    rep2 = w2.planner.execute_plan(p2, trash=True)
+    rep2 = w2.planner.execute_plan(p2, trash=False)
     assert rep2.marked_left_out == 1 and _src(w2, 0).exists()
     assert not any(w2.out.rglob(_src(w2, 0).name))
+
+
+def test_marked_photo_is_copied_into_the_trash_when_copying(tmp_path):
+    w = build_world(tmp_path, n=2)
+    approve_delete(w, w.ids[0])
+    p = w.planner.build_plan(organize_root=w.out, operation="copy")
+    rep = w.planner.execute_plan(p, trash=True)
+    assert rep.marked_left_out == 0 and _src(w, 0).exists()  # the original stays put
+    trash = w.out / ".trash" / rep.transaction_id
+    assert list(trash.rglob(_src(w, 0).name))
+    assert not [f for f in w.out.rglob(_src(w, 0).name) if trash not in f.parents]
 
 
 def test_marked_burst_alternate_is_trashed_unmarked_stays(tmp_path):
@@ -358,7 +369,7 @@ def test_trashed_photo_removed_from_index_and_undo_restores_it(tmp_path):
         assert PhotoRepository(s).count_category("graphic") == 0
 
     p2 = w.planner.build_plan(organize_root=w.out, operation="move", persist=False)
-    assert p2.total == 2
+    assert p2.total == 0  # applied and trashed photos are not planned again
     assert w.ids[0] not in {a.image_id for a in p2.actions}
 
     # Undo restores the trashed photo to disk and back into the active index

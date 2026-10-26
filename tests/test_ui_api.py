@@ -846,10 +846,10 @@ def test_move_to_output_dir_and_trash_index_removal_with_undo(env):
 
     # Rebuilding or diffing against the same output_dir after moving files succeeds and shows 0 collisions
     rb = c.post("/api/plan/rebuild", json=plan_body(env, operation="move"))
-    assert rb.status_code == 200 and rb.json()["total"] == 3
+    assert rb.status_code == 200 and rb.json()["total"] == 0  # finished photos are not planned again
     df = c.post("/api/plan/diff", json=plan_body(env, operation="move"))
     assert df.status_code == 200
-    assert df.json()["total"] == 3 and df.json()["collisions"] == 0
+    assert df.json()["total"] == 0 and df.json()["collisions"] == 0
 
     # Undo restores both moved and trashed photos back to source folder and active index
     u = c.post("/api/undo", json={"transaction_id": tid})

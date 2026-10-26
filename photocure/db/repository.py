@@ -530,7 +530,12 @@ class PhotoRepository:
             sselect(ImageRecord.stage, func.count()).where(active).group_by(ImageRecord.stage)
         ).all()
         stages = {"new": 0, "library": 0, "trash": 0}
-        stages.update({k: int(n) for k, n in stage_rows if k in stages})
+        stages.update({k: int(n) for k, n in stage_rows if k in ("new", "library")})
+        # Trashed rows are marked missing so features skip them; the trash is counted by stage.
+        stages["trash"] = int(self.s.exec(
+            sselect(func.count()).select_from(ImageRecord)
+            .where(ImageRecord.stage == "trash", ImageRecord.route_status != "purged")
+        ).one() or 0)
         return {
             "stages": stages,
             "total_images": int(total or 0),

@@ -23,7 +23,7 @@ from pathlib import Path
 from collections.abc import Callable, Iterable, Sequence
 
 from ..config import CuratorConfig
-from ..db.models import ActionLedger, ImageRecord
+from ..db.models import STAGE_LIBRARY, STAGE_TRASH, ActionLedger, ImageRecord
 from ..db.repository import PhotoRepository
 from ..db.session import get_session
 from ..rules.organizer import PlannedAction
@@ -198,7 +198,7 @@ class ActionEngine:
                         rec0 = repo.get_by_id(action.image_id)
                         marked = bool(rec0 is not None and rec0.delete_approved)
                     if marked:
-                        if trash and action.operation == "move":
+                        if trash:
                             action.target = self._trash_target(action, root, txn)
                         else:  # marked for delete: never placed in the output, the original stays put
                             rep.skipped += 1
@@ -249,15 +249,17 @@ class ActionEngine:
                         repo.ledger_commit(entry)
                         if img is not None:
                             img.target_path = str(target)
-                            if marked and trash and action.operation == "move":
+                            img.origin_path = img.origin_path or str(action.source)
+                            if marked and trash:
                                 img.route_status = "trashed"
-                                img.scan_status = "missing"
+                                img.scan_status = "missing"  # every feature ignores it; Trash lists by stage
+                                img.stage = STAGE_TRASH
                             else:
                                 img.route_status = "executed"
-                            if action.operation == "move":
-                                self._retire_stale_row(session, str(target), img.id)
-                                img.path = str(target)
-                                img.relative_path = _rel(target, root)
+                                img.stage = STAGE_LIBRARY
+                            self._retire_stale_row(session, str(target), img.id)
+                            img.path = str(target)
+                            img.relative_path = _rel(target, root)
                         session.commit()
                     except Exception as e:
                         # The file already moved: record that so rollback can reverse it.
@@ -345,10 +347,11 @@ class ActionEngine:
         if img is None:
             return
         img.target_path = str(action.target)
+        img.origin_path = img.origin_path or str(action.source)
         img.route_status = "executed"
-        if action.operation == "move":
-            img.path = str(action.target)
-            img.relative_path = _rel(action.target, root)
+        img.stage = STAGE_LIBRARY
+        img.path = str(action.target)
+        img.relative_path = _rel(action.target, root)
 
     def _prepare_target(self, action: PlannedAction, repo) -> Path | None:
         """Create the destination dir and resolve a name collision per ``collision_policy``.

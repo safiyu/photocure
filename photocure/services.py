@@ -33,7 +33,8 @@ from .config import (
     normalize_device,
     resolve_workers,
 )
-from .db.models import ActionLedger, BurstGroup, PlanActionRow, PlanRecord
+from .db.models import (STAGE_LIBRARY, STAGE_NEW, STAGE_TRASH, ActionLedger, BurstGroup,
+                        PlanActionRow, PlanRecord)
 from .db.repository import PhotoRepository
 from .db.session import get_session
 from .engine.action_engine import ActionEngine, ExecutionReport
@@ -290,11 +291,13 @@ class Planner:
             return self._cluster(repo, repo.all_images())
 
     def _retire_legacy_trashed(self, records) -> int:
-        """Ensure any row whose path already lives inside .trash is marked missing/trashed."""
+        """Ensure any row whose path already lives inside .trash is in the trash stage."""
         retired = 0
         trash_name = self.cfg.trash_dir_name
         for r in records:
-            if getattr(r, "scan_status", "scanned") != "missing" and trash_name in Path(r.path).parts:
+            if (getattr(r, "scan_status", "scanned") != "missing" and r.stage != STAGE_TRASH
+                    and trash_name in Path(r.path).parts):
+                r.stage = STAGE_TRASH
                 r.scan_status = "missing"
                 r.route_status = "trashed"
                 retired += 1
@@ -431,6 +434,8 @@ class Planner:
             by_category: dict[str, int] = {}
             for r in records:
                 if r.infer_status not in ("inferred", "failed") or r.scan_status == "missing":
+                    continue
+                if r.stage != STAGE_NEW:  # finished and trashed photos are not planned again
                     continue
                 if r.is_duplicate and not include_duplicates:
                     continue
@@ -720,7 +725,8 @@ class Planner:
                     changed = True
                 in_trash = trash_name in Path(loc).parts
                 if st == "committed" and in_trash:
-                    if img.scan_status != "missing" or img.route_status != "trashed":
+                    if img.stage != STAGE_TRASH or img.route_status != "trashed":
+                        img.stage = STAGE_TRASH
                         img.scan_status = "missing"
                         img.route_status = "trashed"
                         changed = True
@@ -728,6 +734,7 @@ class Planner:
                     if img.scan_status == "missing" or img.route_status == "trashed":
                         img.scan_status = "scanned"
                         img.route_status = "unrouted" if st == "rolled_back" else "executed"
+                        img.stage = STAGE_NEW if st == "rolled_back" else STAGE_LIBRARY
                         if st == "rolled_back":
                             img.target_path = None
                         changed = True

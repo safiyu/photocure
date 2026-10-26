@@ -23,8 +23,9 @@ def test_reapply_move_does_not_rename_organized_photos(tmp_path):
     w.planner.execute_plan(p1)
     before = _files(w.out)
     p2 = w.planner.build_plan(organize_root=w.out, operation="move")
+    assert p2.total == 0  # finished photos are not planned again
     rep = w.planner.execute_plan(p2)
-    assert rep.executed == 0 and rep.in_place == 3 and rep.failures == 0
+    assert rep.executed == 0 and rep.failures == 0
     assert _files(w.out) == before
     assert not any("(1)" in n for n in _files(w.out))
     for i in w.ids:
@@ -34,9 +35,10 @@ def test_reapply_move_does_not_rename_organized_photos(tmp_path):
 def test_reapply_copy_does_not_duplicate_library(tmp_path):
     w = build_world(tmp_path, n=3)
     w.planner.execute_plan(w.planner.build_plan(organize_root=w.out, operation="copy"))
-    rep = w.planner.execute_plan(w.planner.build_plan(organize_root=w.out,
-                                                      operation="copy"))
-    assert rep.executed == 0 and rep.in_place == 3
+    p2 = w.planner.build_plan(organize_root=w.out, operation="copy")
+    assert p2.total == 0  # finished photos are not planned again
+    rep = w.planner.execute_plan(p2)
+    assert rep.executed == 0 and rep.failures == 0
     assert len(_files(w.out)) == 3
 
 

@@ -239,8 +239,10 @@ runs; Reanalyse clusters trash faces into `trash` people only, and the New and
 Library People lists filter them out. On Restore, each face is compared against
 `library` people with the threshold `recluster_people` uses; a match joins that
 person, otherwise a new `library` person is created. The `trash` cluster is
-deleted once it has no faces left. Trash rows keep `scan_status = "scanned"`
-with `path` at the trash location so thumbnails and faces render.
+deleted once it has no faces left. Trash rows stay `scan_status = "missing"` with
+`path` at the trash location, so every feature that skips missing photos
+(search, duplicates, highlights, events) keeps skipping them; the Trash stage
+lists them by `stage = "trash"` instead, ignoring `scan_status`.
 - **Delete permanently** (multi-select) and **Empty trash**. Both confirm first.
   They unlink the files, remove emptied `<txn>/` folders, and set
   `route_status = "purged"`, `scan_status = "missing"`. This is the only way

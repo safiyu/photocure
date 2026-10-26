@@ -25,7 +25,7 @@
 
 1. Move apply where the library root is on another volume: cross-device fallback copies then unlinks; the row must still end `stage = "library"` with `path` under the root. Pinned in Task 4.
 2. Restore when `<root>/<category>/<filename>` already exists: the configured collision policy applies and the existing file is untouched. Pinned in Task 9.
-3. Trash reanalyse when a trashed file was removed from disk by hand: the row is marked `scan_status = "missing"` and the run continues. Pinned in Task 7.
+3. Trash reanalyse when a trashed file was removed from disk by hand: the row is marked `route_status = "purged"` (it leaves the Trash list) and the run continues. Pinned in Task 7.
 4. Manual category change in Library when the file is missing on disk: 409 and no database change. Pinned in Task 8.
 5. Any Trash operation while another job holds `_BUSY`: 409, nothing touched. Pinned in Task 9.
 
@@ -41,7 +41,7 @@
 
 **Interfaces:**
 - Produces: `ImageRecord.stage: str` (default `"new"`, indexed), `ImageRecord.origin_path: str | None`, `PersonCluster.stage: str` (default `"library"`, indexed), module constants `STAGE_NEW = "new"`, `STAGE_LIBRARY = "library"`, `STAGE_TRASH = "trash"`, `STAGES = (STAGE_NEW, STAGE_LIBRARY, STAGE_TRASH)` in `photocure/db/models.py`.
-- Produces: `PhotoRepository.stats()` gains `"stages": {"new": int, "library": int, "trash": int}` counting rows with `scan_status != "missing"`.
+- Produces: `PhotoRepository.stats()` gains `"stages": {"new": int, "library": int, "trash": int}` counting new and library rows with `scan_status != "missing"`; trash counts rows with `stage == "trash"` and `route_status != "purged"`.
 - Produces: `migrate()` backfills `images.stage` from `route_status` (`executed -> library`, `trashed -> trash`, else `new`) and `images.origin_path` from `path` for `library` rows that have no `origin_path`, only when the column was just added.
 
 - [ ] **Step 1: Write the failing tests**
@@ -200,7 +200,7 @@ git commit -m "feat(plan): destination comes from the library root, move or copy
 
 **Interfaces:**
 - Consumes: `STAGE_*` constants, `trash_dir`.
-- Produces: after a committed action the engine sets, for both move and copy: `img.origin_path = img.origin_path or str(action.source)`, `img.path = str(target)`, `img.relative_path = _rel(target, root)`, `img.target_path = str(target)`; `img.stage = "trash"` when `marked and trash`, else `"library"`; `img.route_status` unchanged in meaning (`"executed"`, or `"trashed"` for trash). `img.scan_status` stays `"scanned"` for trashed rows (today it is set to `"missing"`), so thumbnails and faces still render in the Trash stage; the same in `_reconcile_pending`.
+- Produces: after a committed action the engine sets, for both move and copy: `img.origin_path = img.origin_path or str(action.source)`, `img.path = str(target)`, `img.relative_path = _rel(target, root)`, `img.target_path = str(target)`; `img.stage = "trash"` when `marked and trash`, else `"library"`; `img.route_status` unchanged in meaning (`"executed"`, or `"trashed"` for trash). `img.scan_status` stays `"missing"` for trashed rows (as today) so every feature keeps skipping them; Trash views list by `stage == "trash"` and ignore `scan_status`; the same in `_reconcile_pending`.
 - Produces: `marked and trash` applies to `copy` as well: the junk file is copied to `_trash_target(...)`; `marked_left_out` only counts when `trash` is off.
 - Produces: `RollbackEngine` sets `img.stage = "new"`, `img.route_status = "unrouted"`, `img.path = entry.source_path`, `img.origin_path = None` for every reversed entry (move and copy alike), and the same mapping in `_reconcile_pending` for recovered commits (`stage` library or trash).
 
@@ -210,7 +210,7 @@ git commit -m "feat(plan): destination comes from the library root, move or copy
 # tests/test_stage_transitions.py  (fixtures: scan 4 images, mark one delete_approved, root = tmp_path/"Library")
 def test_move_apply_sets_library_stage_and_origin(...): ...  # stage library, origin_path == old path, path under root
 def test_copy_apply_repoints_row_to_library_copy(...): ...  # source still exists, rec.path under root, stage library
-def test_copy_with_trash_copies_junk_into_trash(...): ...  # marked row: file at root/.trash/<txn>/..., stage trash, scan_status scanned, source still exists, marked_left_out == 0
+def test_copy_with_trash_copies_junk_into_trash(...): ...  # marked row: file at root/.trash/<txn>/..., stage trash, scan_status missing, source still exists, marked_left_out == 0
 def test_move_without_trash_leaves_marked_in_new(...): ...  # trash=False: stage new, marked_left_out == 1
 def test_undo_returns_rows_to_new(...): ...  # after rollback: stage new, path == source, origin_path None; copy target removed
 def test_cross_device_move_still_lands_in_library(monkeypatch, ...): ...  # force copy fallback like test_c2_engine does; stage library, path under root
@@ -335,10 +335,10 @@ git commit -m "feat(api): filter every listing by stage"
 - Test: `tests/test_infer_stage.py`; update `tests/test_fix_incremental_analyze.py` (delete `test_reanalyze_reprocesses_everything_and_keeps_rows`, `test_reanalyze_skips_missing_or_trashed_images`, `test_ui_has_reanalyse_buttons_and_skips_when_nothing_new`), `tests/test_cli.py` for `--reanalyze`
 
 **Interfaces:**
-- Produces: `InferencePipeline.run(..., stage: str = "new", reanalyze: bool = False)`; row selection is `ImageRecord.stage == stage` and `scan_status != "missing"`; when `reanalyze` is true every row of that stage with `infer_status == "inferred"` is reset to `pending` and `faces_schema_version = 0` first. `reanalyze_stub` is removed.
+- Produces: `InferencePipeline.run(..., stage: str = "new", reanalyze: bool = False)`; row selection is `ImageRecord.stage == stage` and, for `new`, `scan_status != "missing"` (trash rows are always `missing`, so for `trash` it is `route_status != "purged"`); when `reanalyze` is true every row of that stage with `infer_status == "inferred"` is reset to `pending` and `faces_schema_version = 0` first. `reanalyze_stub` is removed.
 - Produces: `class InferReq(RunOverrides): batch_size: int = 32; stage: Literal["new", "trash"] = "new"`; `/api/infer` with `stage="trash"` implies `reanalyze=True`; `stage="library"` is 422.
 - Produces: `/api/rescore` is removed (404); CLI `infer` has `--stage new|trash` (default new) and no `--reanalyze`.
-- Produces: `do_infer` marks rows whose file is gone (`not Path(rec.path).exists()`) as `scan_status = "missing"` before running and reports `missing` in its result.
+- Produces: `do_infer` marks rows whose file is gone (`not Path(rec.path).exists()`) as `route_status = "purged"` before running (trash stage) and reports `missing` in its result.
 - UI: `#btn-recheck`, `#btn-reanalyse-all`, `#btn-rescore`, the `data-reanalyze` empty-state button and their handlers are gone; the "Nothing new to analyze" toast no longer mentions Reanalyse.
 
 - [ ] **Step 1: Write the failing tests**
@@ -349,7 +349,7 @@ def test_infer_default_touches_only_new_rows(env): ...  # library row stays infe
 def test_infer_trash_stage_reanalyses_trashed_rows(env): ...  # trashed rows processed, new rows untouched
 def test_infer_library_stage_rejected(env): ...  # 422
 def test_rescore_endpoint_gone(env): ...  # 404 or 405
-def test_trash_reanalyse_marks_vanished_file_missing(env): ...  # unlink trash file, run -> scan_status missing, no exception
+def test_trash_reanalyse_marks_vanished_file_missing(env): ...  # unlink trash file, run -> route_status purged, no exception
 def test_ui_has_no_reanalyse_buttons(): ...  # index.html / app.js do not contain btn-recheck, btn-reanalyse-all, btn-rescore, data-reanalyze
 ```
 
@@ -385,7 +385,7 @@ git commit -m "feat: reanalyse only in trash, analyze only new"
 **Interfaces:**
 - Produces, in `photocure/library_actions.py`:
   - `def move_to_category(dbp: Path, cfg: CuratorConfig, image_id: int, category: str) -> dict` builds one `PlannedAction(operation="move")` with `target = library_target(...)` and runs `ActionEngine.execute([...], organize_root=root)`; returns `{"ok": bool, "transaction_id": str, "path": str}`; raises `FileNotFoundError` when `rec.path` does not exist; no-op `{"ok": True, "moved": False}` when target equals current path. Only valid for `stage == "library"`.
-  - `def trash_image(dbp: Path, cfg: CuratorConfig, image_id: int) -> dict` sets `delete_approved = True`, runs the engine with `trash=True` and `organize_root=root` (so the file lands in `<root>/.trash/<txn>/`), then calls `detach_faces`; returns `{"ok": True, "transaction_id": str}`. Afterwards the row has `stage = "trash"`, `scan_status = "scanned"`, `path` at the trash location.
+  - `def trash_image(dbp: Path, cfg: CuratorConfig, image_id: int) -> dict` sets `delete_approved = True`, runs the engine with `trash=True` and `organize_root=root` (so the file lands in `<root>/.trash/<txn>/`), then calls `detach_faces`; returns `{"ok": True, "transaction_id": str}`. Afterwards the row has `stage = "trash"`, `scan_status = "missing"`, `path` at the trash location.
 - Produces, in `photocure/people_actions.py`: `def detach_faces(s, image_id: int) -> int` (the face loop currently inside `delete_image`: `ignored = True`, `person_id = None`, decrement counts, delete empty unnamed clusters).
 - `/api/images/{id}/reassign` calls `move_to_category` when `rec.stage == "library"`; `FileNotFoundError` becomes `HTTPException(409, "file is missing on disk")` and the bucket change is rolled back.
 - `DELETE /api/images/{id}` calls `trash_image`; a `stage == "new"` row keeps today's behaviour of only marking `delete_approved` (it leaves at apply).
@@ -399,7 +399,7 @@ git commit -m "feat: reanalyse only in trash, analyze only new"
 def test_move_to_category_moves_file_and_writes_ledger(...): ...  # new path under root/<folder>, ledger row committed, undo restores
 def test_move_to_category_creates_missing_folder(...): ...
 def test_move_to_category_missing_file_is_409_and_bucket_unchanged(env): ...  # unlink file, POST reassign -> 409, manual_bucket unchanged
-def test_trash_image_moves_into_txn_folder_and_detaches_faces(...): ...  # path matches root/.trash/TX_*/..., stage trash, scan_status scanned, faces ignored, person face_count down
+def test_trash_image_moves_into_txn_folder_and_detaches_faces(...): ...  # path matches root/.trash/TX_*/..., stage trash, scan_status missing, faces ignored, person face_count down
 def test_delete_new_photo_only_marks_it(env): ...  # stage new row: delete_approved True, file untouched
 def test_library_sync_never_pulls_out_of_library(env): ...  # unlink a library file, sync -> scan_status missing, stage still library, id in missing_ids
 ```

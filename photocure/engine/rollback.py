@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..config import CuratorConfig
+from ..db.models import STAGE_LIBRARY, STAGE_NEW, STAGE_TRASH
 from ..db.repository import PhotoRepository
 from ..db.session import get_session
 from .hash import file_sha256, file_size
@@ -80,12 +81,13 @@ class RollbackEngine:
                         img = repo.get_by_id(entry.image_id) if entry.image_id else None
                         if img is not None:
                             img.route_status = "unrouted"
+                            img.stage = STAGE_NEW
                             img.target_path = None
+                            img.origin_path = None
                             img.scan_status = "scanned"
-                            if entry.operation_type == "move":
-                                img.path = entry.source_path
-                                if entry.prev_relative_path:
-                                    img.relative_path = entry.prev_relative_path
+                            img.path = entry.source_path
+                            if entry.prev_relative_path:
+                                img.relative_path = entry.prev_relative_path
                         rep.reversed += 1
                     elif note == "already_reverted":
                         repo.mark_rolled_back(entry)
@@ -121,14 +123,17 @@ class RollbackEngine:
             if complete:
                 repo.ledger_commit(entry)
                 img = repo.get_by_id(entry.image_id) if entry.image_id else None
-                if img is not None and op == "move":
+                if img is not None and op in ("move", "copy"):
+                    img.origin_path = img.origin_path or str(source)
                     img.path = str(target)
                     img.target_path = str(target)
                     if img.delete_approved and self.cfg.trash_dir_name in target.parts:
                         img.route_status = "trashed"
                         img.scan_status = "missing"
+                        img.stage = STAGE_TRASH
                     else:
                         img.route_status = "executed"
+                        img.stage = STAGE_LIBRARY
                 rep.notes.append(f"pending recovered as committed: {target}")
             elif op == "move" and not os.path.lexists(source):
                 # Source gone: the target may be the only copy, never delete it.
