@@ -116,7 +116,9 @@ def main() -> None:
     otc, token = "otc-for-the-browser-test-0123456789", "token-for-the-browser-test-0123456789abcdef"
     os.environ.update({"PCUR_PORT": str(a.port), "PCUR_HOST": "127.0.0.1", "PCUR_OTC": otc, "PCUR_AUTH_TOKEN": token,
                        "PCUR_CACHE_DIR": str(root / "cache"), "PCUR_SIDECAR_DEBOUNCE_SECONDS": "0.1",
-                       "PCUR_BACKEND": "stub"})
+                       "PCUR_BACKEND": "stub",
+                       # a root from the environment keeps the first-run popup from covering the UI
+                       "PCUR_LIBRARY_ROOT": str(root / "Library")})
     import uvicorn
 
     from photocure.ui.app import create_app

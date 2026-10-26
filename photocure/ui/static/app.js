@@ -5201,6 +5201,54 @@
     sel.value = ok ? want : "auto";
   }
 
+  // The first time the app starts with no library folder: choose it and the device before anything else.
+  function maybeFirstRun() {
+    const st = state.settings;
+    if (!st || st.library_root || st.library_root_source === "environment") return;
+    const modal = $("#firstrun");
+    const root = $("#firstrun-root"), msg = $("#firstrun-msg");
+    const next = $("#firstrun-next"), back = $("#firstrun-back"), finish = $("#firstrun-finish");
+    state.draft = { device: "auto", device_index: 0 };
+    const show = (step) => {
+      $("#firstrun-step-root").hidden = step !== 1;
+      $("#firstrun-step-device").hidden = step !== 2;
+      $("#firstrun-steps").textContent = `Step ${step} of 2`;
+      next.hidden = step !== 1;
+      back.hidden = step !== 2;
+      finish.hidden = step !== 2;
+      msg.textContent = "";
+      if (step === 2) renderAccelList("#firstrun-accel", "fr-device", "#firstrun-gpu-field", "#firstrun-gpu");
+    };
+    $("#firstrun-browse").onclick = () => openPicker({
+      title: "Choose the library folder", mode: "output", initial: root.value.trim(), okLabel: "Use this folder",
+      onPick: (p) => { root.value = p; next.disabled = false; msg.textContent = ""; },
+    });
+    next.onclick = () => show(2);
+    back.onclick = () => show(1);
+    openOverlay(modal);
+    const releaseTrap = trapFocus(modal, () => {});  // Escape does nothing here
+    show(1);
+    finish.onclick = async () => {
+      finish.disabled = true;
+      try {
+        state.settings = await post("/api/settings", {
+          library_root: root.value.trim(), device: state.draft.device, device_index: num(state.draft.device_index) });
+      } catch (e) {
+        show(1);
+        msg.textContent = e.message;
+        finish.disabled = false;
+        return;
+      }
+      releaseTrap();
+      closeOverlay(modal);
+      renderChip();
+      fillDeviceSelect();
+      renderSettings();
+      loadStats();
+      toast("Library folder saved", "ok");
+    };
+  }
+
   async function refreshSettings(render) {
     try { state.settings = await api("/api/settings"); } catch (e) { return; }
     renderChip();
@@ -5208,9 +5256,9 @@
     if (render) renderSettings();
   }
 
-  function setupGpuIndex() {
+  function setupGpuIndex(fieldSel = "#gpu-index-field", selectSel = "#gpu-index") {
     const st = state.settings;
-    const field = $("#gpu-index-field");
+    const field = $(fieldSel);
     if (!st) { field.hidden = true; return; }
     const id = state.draft.device === "auto" ? st.selected : state.draft.device;
     const acc = (st.accelerators || []).find((a) => a.id === id);
@@ -5219,8 +5267,34 @@
     else if (acc && num(acc.count) > 1) names = Array.from({ length: num(acc.count) }, (_, i) => "GPU " + i);
     field.hidden = !names;
     if (!names) return;
-    $("#gpu-index").innerHTML = names.map((n, i) => `<option value="${i}">${i}: ${esc(n)}</option>`).join("");
-    $("#gpu-index").value = String(Math.min(num(state.draft.device_index), names.length - 1));
+    $(selectSel).innerHTML = names.map((n, i) => `<option value="${i}">${i}: ${esc(n)}</option>`).join("");
+    $(selectSel).value = String(Math.min(num(state.draft.device_index), names.length - 1));
+  }
+
+  // The accelerator radios and GPU picker, shared by the Settings page and the first-run popup.
+  function renderAccelList(listSel, radioName, fieldSel, gpuSel) {
+    const st = state.settings;
+    $(listSel).innerHTML = accelChoices().map((a) => {
+      const off = !a.available;
+      const hint = String(a.install_hint || "");
+      const cmd = /pip3? install/.test(hint) ? hintCommand(hint) : "";
+      const sub = a.sub || [a.name, a.memory_gb ? a.memory_gb + " GB" : ""].filter(Boolean).join(", ");
+      return `<label class="accel${off ? " off" : ""}" data-acc="${esc(a.id)}">
+        <input type="radio" name="${esc(radioName)}" value="${esc(a.id)}"${off ? " disabled" : ""}${state.draft.device === a.id ? " checked" : ""}>
+        <span class="radio"></span>
+        <span class="title">${esc(a.id === "auto" || a.id === "integrated" ? a.label : a.label || a.id)}</span>
+        <span class="tags">${a.id === st.selected ? '<span class="tag-pill active">In use</span>' : ""}${KIND_TEXT[a.kind] && a.id !== "auto" ? `<span class="tag-pill kind">${esc(KIND_TEXT[a.kind])}</span>` : ""}</span>
+        ${sub ? `<span class="sub">${esc(sub)}</span>` : ""}
+        ${off ? `<span class="why-off">Not available: ${esc(a.reason || "not detected")}.</span>` : ""}
+        ${off && cmd ? `<div class="codebox"><code>${esc(cmd)}</code><button class="btn sm" type="button" data-copytext="${esc(cmd)}">Copy</button></div>`
+          : off && hint && !cmd ? `<span class="sub">${esc(hint)}</span>` : ""}
+      </label>`;
+    }).join("");
+    $$(`${listSel} input[type=radio]`).forEach((r) => {
+      r.onchange = () => { state.draft.device = r.value; setupGpuIndex(fieldSel, gpuSel); };
+    });
+    setupGpuIndex(fieldSel, gpuSel);
+    $(gpuSel).onchange = (e) => { state.draft.device_index = num(e.target.value); };
   }
 
   function renderSettings() {
@@ -5250,27 +5324,7 @@
       (st.fallback_reason
         ? `<div class="notice">${icon("alert", "sm")}<span>${esc(reqLabel)} could not be used: ${esc(st.fallback_reason)}. ${esc(activeLabel)} is being used instead.</span></div>` : "");
 
-    $("#accel-list").innerHTML = accelChoices().map((a) => {
-      const off = !a.available;
-      const hint = String(a.install_hint || "");
-      const cmd = /pip3? install/.test(hint) ? hintCommand(hint) : "";
-      const sub = a.sub || [a.name, a.memory_gb ? a.memory_gb + " GB" : ""].filter(Boolean).join(", ");
-      return `<label class="accel${off ? " off" : ""}" data-acc="${esc(a.id)}">
-        <input type="radio" name="device" value="${esc(a.id)}"${off ? " disabled" : ""}${state.draft.device === a.id ? " checked" : ""}>
-        <span class="radio"></span>
-        <span class="title">${esc(a.id === "auto" || a.id === "integrated" ? a.label : a.label || a.id)}</span>
-        <span class="tags">${a.id === st.selected ? '<span class="tag-pill active">In use</span>' : ""}${KIND_TEXT[a.kind] && a.id !== "auto" ? `<span class="tag-pill kind">${esc(KIND_TEXT[a.kind])}</span>` : ""}</span>
-        ${sub ? `<span class="sub">${esc(sub)}</span>` : ""}
-        ${off ? `<span class="why-off">Not available: ${esc(a.reason || "not detected")}.</span>` : ""}
-        ${off && cmd ? `<div class="codebox"><code>${esc(cmd)}</code><button class="btn sm" type="button" data-copytext="${esc(cmd)}">Copy</button></div>`
-          : off && hint && !cmd ? `<span class="sub">${esc(hint)}</span>` : ""}
-      </label>`;
-    }).join("");
-    $$("#accel-list input[type=radio]").forEach((r) => {
-      r.onchange = () => { state.draft.device = r.value; setupGpuIndex(); };
-    });
-    setupGpuIndex();
-    $("#gpu-index").onchange = (e) => { state.draft.device_index = num(e.target.value); };
+    renderAccelList("#accel-list", "device", "#gpu-index-field", "#gpu-index");
     state.draft.device_index = num(saved.device_index);
 
     const eff = st.effective || {};
@@ -6268,6 +6322,7 @@
     await Promise.all([loadStats(), loadTransactions(), refreshSettings(false)]);
     const start = (location.hash || "").slice(1);
     showTab(TITLES[start] ? start : "library");
+    maybeFirstRun();
     pollProgress();
   }
 

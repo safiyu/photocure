@@ -817,6 +817,43 @@
     </div>
   </div>
 
+  <!-- first run: library folder, then device -->
+  <div id="firstrun" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="firstrun-title">
+      <header>
+        <h2 id="firstrun-title">Welcome to Photocure Studio</h2>
+      </header>
+      <div class="modal-body">
+        <p class="help" id="firstrun-steps">Step 1 of 2</p>
+        <section id="firstrun-step-root">
+          <p class="lede">Choose the library folder. Every finished photo is stored here, sorted by category. You choose it once.</p>
+          <div class="field wide">
+            <label for="firstrun-root">Library folder</label>
+            <div class="with-btn">
+              <input id="firstrun-root" type="text" readonly placeholder="Not chosen yet" autocomplete="off" spellcheck="false">
+              <button class="btn" id="firstrun-browse" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+            </div>
+          </div>
+        </section>
+        <section id="firstrun-step-device" hidden>
+          <p class="lede">Choose what runs the analysis. Automatic picks the fastest device that works on this computer.</p>
+          <div id="firstrun-accel" class="accel-list" role="radiogroup" aria-label="Processing device"></div>
+          <div class="field gpu-index" id="firstrun-gpu-field" hidden>
+            <label for="firstrun-gpu">Which GPU</label>
+            <select id="firstrun-gpu"></select>
+          </div>
+        </section>
+        <p class="help err" id="firstrun-msg" role="status"></p>
+      </div>
+      <footer>
+        <span class="grow"></span>
+        <button class="btn" id="firstrun-back" type="button" hidden>Back</button>
+        <button class="btn primary" id="firstrun-next" type="button" disabled>Next</button>
+        <button class="btn primary" id="firstrun-finish" type="button" hidden>Finish</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- folder picker -->
   <div id="picker" class="modal" hidden>
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="picker-title">
