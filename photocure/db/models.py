@@ -266,6 +266,12 @@ class ActionLedger(SQLModel, table=True):
     created_dir: str = Field(default="")
     # images.relative_path before a move, restored on rollback.
     prev_relative_path: str = Field(default="")
+    # The photo's state before this action, restored on rollback ("" means an older row without it).
+    prev_stage: str = Field(default="")
+    prev_scan_status: str = Field(default="")
+    prev_route_status: str = Field(default="")
+    prev_origin_path: str | None = Field(default=None)
+    prev_delete_approved: bool = Field(default=False)
     sha256: str = Field(default="")
     file_size: int = 0
     # What really happened on disk (a requested hardlink may have become a copy).

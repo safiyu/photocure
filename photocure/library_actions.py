@@ -4,6 +4,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from sqlmodel import select
+
 from .config import CuratorConfig
 from .db import models as M
 from .db.models import STAGE_LIBRARY, STAGE_TRASH
@@ -83,6 +85,10 @@ def trash_image(dbp: Path, cfg: CuratorConfig, image_id: int) -> dict:
             raise OSError(rep.errors[0])
         txn = rep.transaction_id
         _move_sidecar(src, Path(rep.resolved_targets.get(image_id, target)))
+        with get_session(dbp) as s:  # the mark was only set to route this move; undoing it must unmark
+            for e in s.exec(select(M.ActionLedger).where(M.ActionLedger.transaction_id == txn)).all():
+                e.prev_delete_approved = False
+            s.commit()
 
     with get_session(dbp) as s:
         rec = s.get(M.ImageRecord, image_id)

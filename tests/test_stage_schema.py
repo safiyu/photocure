@@ -61,7 +61,7 @@ def test_migrate_backfills_stage_from_route_status(tmp_path):
     assert got["c.jpg"] == ("new", None)
     assert got["d.jpg"] == ("new", None)
     assert con.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
-    assert SCHEMA_VERSION == 11
+    assert SCHEMA_VERSION == 12
 
 
 def test_migrate_leaves_existing_stages_alone_on_rerun(tmp_path):

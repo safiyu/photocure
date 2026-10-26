@@ -80,14 +80,7 @@ class RollbackEngine:
                         repo.mark_rolled_back(entry)
                         img = repo.get_by_id(entry.image_id) if entry.image_id else None
                         if img is not None:
-                            img.route_status = "unrouted"
-                            img.stage = STAGE_NEW
-                            img.target_path = None
-                            img.origin_path = None
-                            img.scan_status = "scanned"
-                            img.path = entry.source_path
-                            if entry.prev_relative_path:
-                                img.relative_path = entry.prev_relative_path
+                            self._restore_row(img, entry)
                         rep.reversed += 1
                     elif note == "already_reverted":
                         repo.mark_rolled_back(entry)
@@ -104,6 +97,24 @@ class RollbackEngine:
                     rep.errors.append(f"{entry.target_path}: {e}")
         rep.duration_s = time.monotonic() - t0
         return rep
+
+    @staticmethod
+    def _restore_row(img, entry) -> None:
+        """Put the photo's row back the way it was before the action, not always in New."""
+        stage = entry.prev_stage or STAGE_NEW  # older ledger rows carry no previous state
+        img.stage = stage
+        img.path = entry.source_path
+        if entry.prev_relative_path:
+            img.relative_path = entry.prev_relative_path
+        if stage == STAGE_NEW:
+            img.route_status, img.scan_status = "unrouted", "scanned"
+            img.target_path, img.origin_path = None, None
+        else:
+            img.route_status = entry.prev_route_status or ("trashed" if stage == STAGE_TRASH else "executed")
+            img.scan_status = entry.prev_scan_status or ("missing" if stage == STAGE_TRASH else "scanned")
+            img.target_path = entry.source_path
+            img.origin_path = entry.prev_origin_path
+            img.delete_approved = bool(entry.prev_delete_approved)
 
     # ------------------------------------------------------------- recovery
     def _reconcile_pending(self, transaction_id: str, repo, rep: RollbackReport) -> None:
@@ -133,6 +144,7 @@ class RollbackEngine:
                         img.stage = STAGE_TRASH
                     else:
                         img.route_status = "executed"
+                        img.scan_status = "scanned"
                         img.stage = STAGE_LIBRARY
                 rep.notes.append(f"pending recovered as committed: {target}")
             elif op == "move" and not os.path.lexists(source):

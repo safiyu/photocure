@@ -234,6 +234,11 @@ class ActionEngine:
                         str(target), action.operation, sha, size)
                     entry.created_dir = str(created) if created else ""
                     entry.prev_relative_path = (img.relative_path if img else "") or ""
+                    if img is not None:
+                        entry.prev_stage, entry.prev_scan_status = img.stage, img.scan_status
+                        entry.prev_route_status = img.route_status
+                        entry.prev_origin_path = img.origin_path
+                        entry.prev_delete_approved = bool(img.delete_approved)
                     session.commit()
 
                     # 3. Filesystem mutation.
@@ -256,6 +261,7 @@ class ActionEngine:
                                 img.stage = STAGE_TRASH
                             else:
                                 img.route_status = "executed"
+                                img.scan_status = "scanned"
                                 img.stage = STAGE_LIBRARY
                             self._retire_stale_row(session, str(target), img.id)
                             img.path = str(target)
@@ -349,6 +355,7 @@ class ActionEngine:
         img.target_path = str(action.target)
         img.origin_path = img.origin_path or str(action.source)
         img.route_status = "executed"
+        img.scan_status = "scanned"
         img.stage = STAGE_LIBRARY
         img.path = str(action.target)
         img.relative_path = _rel(action.target, root)
