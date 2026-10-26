@@ -2195,6 +2195,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                                 f"indexed in {res.duration_s:.1f}s")
         return {"ok": True, "path": str(target), "scanned": res.scanned, "new": res.new,
                 "duplicates": res.duplicates, "skipped_known": res.skipped_known,
+                "skipped_library": res.skipped_library,
                 "errors": res.errors, "duration_s": round(res.duration_s, 2)}
 
     def do_infer(c: CuratorConfig, body: InferReq, finish: bool = True) -> dict:

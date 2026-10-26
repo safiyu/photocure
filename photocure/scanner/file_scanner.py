@@ -56,6 +56,7 @@ class ScanResult:
     new: int = 0
     modified: int = 0
     skipped_known: int = 0
+    skipped_library: int = 0
     duplicates: int = 0
     near_duplicates: int = 0
     geocoded: int = 0
@@ -111,6 +112,10 @@ class _WorkerResult:
     phash: str | None = None
     exif: ExifInfo | None = None
     error: str = ""
+
+
+# Returned by build_record for a file already in the library or trash: not an error, not new.
+_SKIPPED = object()
 
 
 @dataclass
@@ -489,6 +494,10 @@ class FileScanner:
             else:
                 rec = ImageRecord(path=str(wr.path), filename=wr.path.name)
             fill(rec, wr)
+            if existing_id is None and rec.quick_hash in known_qh \
+                    and self._find_in_library(rec, wr.path, repo) is not None:
+                result.skipped_library += 1
+                return _SKIPPED
             self._resolve_dedup(rec, wr.path, repo, seen_qh, pending_dupes,
                                 known_qh, result)
             if existing_id is None:
@@ -544,7 +553,9 @@ class FileScanner:
                     path, eid = futures[fut]
                     wr = fut.result()
                     rec = build_record(wr, eid)
-                    if rec is not None:
+                    if rec is _SKIPPED:
+                        pass
+                    elif rec is not None:
                         if eid is None:
                             result.new += 1
                         else:
@@ -630,6 +641,28 @@ class FileScanner:
 
         # 3. First sighting of this fingerprint: no full-file read (lazy Tier-2).
         seen_qh.setdefault(rec.quick_hash, []).append(rec)
+
+    @staticmethod
+    def _find_in_library(rec: ImageRecord, path: Path, repo) -> ImageRecord | None:
+        """A library or trash photo with this exact content (trash rows are marked missing)."""
+        stmt = sselect(ImageRecord).where(
+            ImageRecord.quick_hash == rec.quick_hash,
+            ImageRecord.stage.in_(("library", "trash")),
+            ImageRecord.route_status != "purged")
+        cands = repo.s.exec(stmt).all()
+        if not cands:
+            return None
+        sha = rec.sha256 or _safe_sha256(path)
+        if not sha:
+            return None
+        rec.sha256 = sha
+        for cand in cands:
+            if not cand.sha256:
+                cand.sha256 = _safe_sha256(Path(cand.path))
+                repo.s.flush()
+            if cand.sha256 == sha:
+                return cand
+        return None
 
     @staticmethod
     def _find_db_original(sha: str, repo, rec: ImageRecord) -> ImageRecord | None:
