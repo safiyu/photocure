@@ -9,7 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 from photocure import cli as cli_mod
-from photocure.lifecycle import is_photocure_server, pid_file_path
+from photocure.lifecycle import is_photocure_server, pid_file_path, process_cmdline
 
 runner = CliRunner()
 
@@ -36,7 +36,12 @@ def runtime(tmp_path, monkeypatch):
 
 
 def _spawn(*marker):
-    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", *marker])
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", *marker])
+    # Right after the spawn, ps can still show the parent's command line; wait for the marker.
+    end = time.time() + 10
+    while time.time() < end and marker[-1] not in (process_cmdline(proc.pid) or ""):
+        time.sleep(0.05)
+    return proc
 
 
 def _alive(p):
