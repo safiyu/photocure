@@ -86,13 +86,6 @@ def _pid_file(port: int) -> Path:
     from ..lifecycle import pid_file_path
     return pid_file_path(port)
 
-_BLOCKED_DIRS = (
-    "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/boot", "/dev",
-    "/proc", "/sys", "/System", "/Library", "/Applications", "/private/etc",
-    "/var/lib", "/var/log", "/var/db",
-)
-
-
 class ReassignReq(BaseModel):
     bucket: str | None = None  # None clears a manual override
     category: str | None = None  # alias for bucket
@@ -293,57 +286,21 @@ def _nearest_existing(p: Path) -> Path:
 
 
 def _library_root(dbp: Path) -> Path | None:
-    """Common directory of all indexed images, or None when unknown/too shallow."""
-    moved = select(M.ActionLedger.target_path).where(
-        M.ActionLedger.status == "committed",
-        M.ActionLedger.operation_type == "move")
-    with get_session(dbp) as s:
-        lo, hi = s.exec(select(func.min(M.ImageRecord.path),
-                               func.max(M.ImageRecord.path)).where(
-            M.ImageRecord.scan_status != "missing",
-            M.ImageRecord.path.not_in(moved))).one()
-    if not lo or not hi:
-        return None
-    try:
-        root = os.path.commonpath([lo, hi])
-    except ValueError:
-        return None
-    if root in (lo, hi):
-        root = os.path.dirname(root)
-    rp = Path(root)
-    return rp if len(rp.parts) >= 3 else None
+    from ..library import source_library_root
+    return source_library_root(dbp)
 
 
-def validate_output_dir(raw: str, dbp: Path, in_place: bool) -> Path:
-    """Reject relative, system, shallow, home and in-library output roots."""
-    if not raw or not raw.strip():
-        raise HTTPException(400, "output_dir is required")
-    p = Path(raw.strip()).expanduser()
-    if not p.is_absolute():
-        raise HTTPException(400, "output_dir must be an absolute path")
-    p = p.resolve()
-    if len(p.parts) < 3 or p == Path.home().resolve():
-        raise HTTPException(400, f"output_dir is too broad: {p}")
-    for b in _BLOCKED_DIRS:
-        bp = Path(b)
-        if p == bp or bp in p.parents:
-            raise HTTPException(400, f"output_dir is inside a system directory: {p}")
+def validate_output_dir(raw: str, dbp: Path, in_place: bool = False) -> Path:
+    """Folder checks for clean export: the shared rules, plus never inside the library root."""
+    from ..library import LibraryRootError, library_root, validate_library_root
     try:
-        hidden = p.relative_to(Path.home().resolve()).parts[:1]
-    except ValueError:
-        hidden = ()
-    if hidden and hidden[0].startswith("."):
-        raise HTTPException(400, f"output_dir is inside a hidden home folder: {p}")
-    if _confined() and not _within(p, _browse_roots()):
-        raise HTTPException(403, "output_dir is outside the allowed locations")
-    from ..auth import token_file_path
-    tdir = token_file_path(CuratorConfig.load(dbp).cache_dir).parent.resolve()
-    if p == tdir or (tdir.name == "photocure" and tdir in p.parents):
-        raise HTTPException(400, "output_dir must not be the photocure data directory")
-    if not in_place:
-        root = _library_root(dbp)
-        if root is not None and (p == root or root in p.parents):
-            raise HTTPException(400, f"output_dir must not be inside the library ({root})")
+        p = validate_library_root(raw, dbp, browse_roots=_browse_roots() if _confined() else None,
+                                  inside_source_ok=in_place)
+    except LibraryRootError as e:
+        raise HTTPException(e.status, str(e).replace("library folder", "output_dir")) from None
+    lib = library_root(dbp)
+    if lib is not None and (p == lib.resolve() or lib.resolve() in p.parents):
+        raise HTTPException(400, f"output_dir must not be inside the library folder ({lib})")
     return p
 
 
@@ -888,9 +845,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.get("/api/config")
     def get_config():
         tax = app.state.cfg.taxonomy
+        from ..library import library_root, library_root_source
+        from ..services import load_settings
+        root = library_root(dbp, app.state.cfg)
         return {
-            "default_output_dir": os.environ.get("PCUR_DEFAULT_OUTPUT")
-            or str((dbp.resolve().parent / "Organized")),
+            "library_root": str(root) if root else None,
+            "library_root_source": library_root_source(dbp, app.state.cfg),
+            "default_operation": load_settings(dbp).get("default_operation", "move"),
             "categories": [{"value": c.value, "junk": c.is_junk, "utility": c.is_utility}
                            for c in CategoryType],
             "backend": backend_info(),
@@ -954,7 +915,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
         effective = dict(resolve_workers(eff_cfg, info.get("device")))
         effective["device"] = selected
         effective["device_index"] = eff_cfg.device.device_index
+        from ..library import library_root, library_root_source
+        root = library_root(dbp, app.state.cfg)
         return {"settings": saved, "effective": effective, "accelerators": accelerators,
+                "library_root": str(root) if root else None,
+                "library_root_source": library_root_source(dbp, app.state.cfg),
+                "default_operation": eff_cfg.default_operation,
                 "selected": selected,
                 "requested": info.get("requested") or eff_cfg.device.device,
                 "fallback_reason": info.get("fallback_reason", "")}

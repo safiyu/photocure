@@ -79,8 +79,11 @@ def describe_backends(cfg: CuratorConfig) -> dict:
 
 # Settings store. Precedence: CLI flag > this settings file > environment > defaults.
 SETTINGS_KEYS = ("device", "device_index", "decode_workers", "torch_threads", "scan_workers",
-                 "collision_policy", "library_root")
+                 "collision_policy", "library_root", "default_operation")
 COLLISION_POLICIES = ("sequence", "date_suffix", "skip")
+OPERATIONS = ("move", "copy")
+# Kept only until Trash gets its own empty-trash action; the timer itself is no longer a setting.
+_LEGACY_RETENTION_DAYS = 30
 
 
 def settings_path(db_path: Path | str) -> Path:
@@ -106,6 +109,11 @@ def _validate_settings(data: dict, allow_none: bool = False) -> dict:
             if v not in COLLISION_POLICIES:
                 raise ValueError(f"Unknown collision policy '{value}'. "
                                  f"Choose one of: {', '.join(COLLISION_POLICIES)}.")
+            out[key] = v
+        elif key == "default_operation":
+            v = str(value).strip().lower()
+            if v not in OPERATIONS:
+                raise ValueError(f"Unknown operation '{value}'. Choose one of: {', '.join(OPERATIONS)}.")
             out[key] = v
         elif key == "library_root":
             out[key] = str(Path(value).expanduser().resolve()) if value else None
@@ -142,10 +150,17 @@ def load_settings(db_path: Path | str) -> dict:
     return good
 
 
-def save_settings(db_path: Path | str, values: dict, merge: bool = True) -> dict:
-    """Validate and store settings. A value of None clears that key. Returns what is stored."""
+def save_settings(db_path: Path | str, values: dict, merge: bool = True, force: bool = False) -> dict:
+    """Validate and store settings. A value of None clears that key. Returns what is stored.
+
+    Once a library folder is stored it only changes with ``force`` (the library migration).
+    """
     checked = _validate_settings(values, allow_none=True)
-    current = load_settings(db_path) if merge else {}
+    stored = load_settings(db_path)
+    if ("library_root" in checked and stored.get("library_root")
+            and checked["library_root"] != stored["library_root"] and not force):
+        raise ValueError("library folder is already set; use Move library to change it")
+    current = stored if merge else {}
     for key, value in checked.items():
         if value is None:
             current.pop(key, None)
@@ -174,6 +189,8 @@ def apply_settings(cfg: CuratorConfig, settings: dict) -> CuratorConfig:
         new.collision_policy = checked["collision_policy"]
     if "library_root" in checked:
         new.library_root = Path(checked["library_root"]) if checked["library_root"] else None
+    if "default_operation" in checked:
+        new.default_operation = checked["default_operation"]
     return new
 
 
@@ -190,6 +207,7 @@ def effective_settings(db_path: Path | str, cfg: CuratorConfig | None = None,
         "scan_workers": 0 if stored.get("scan_workers") == 0 else base.scan_workers,
         "collision_policy": base.collision_policy,
         "library_root": str(base.library_root) if base.library_root else None,
+        "default_operation": base.default_operation,
     }
     return {
         "values": values,
@@ -755,8 +773,7 @@ class Planner:
                     now: float | None = None) -> dict:
         """Permanently delete trash staging dirs older than the retention window."""
         root = Path(organize_root or self.cfg.organize_root)
-        days = self.cfg.trash_retention_days if older_than_days is None \
-            else older_than_days
+        days = _LEGACY_RETENTION_DAYS if older_than_days is None else older_than_days
         cutoff = (now if now is not None else time.time()) - float(days) * 86400.0
         trash = root / self.cfg.trash_dir_name
         res = {"removed_transactions": [], "files": 0, "bytes": 0}

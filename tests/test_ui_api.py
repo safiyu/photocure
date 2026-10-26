@@ -100,7 +100,9 @@ def test_import_has_no_side_effects_and_lazy_app(tmp_path, monkeypatch):
 # ------------------------------------------------------------------ config
 def test_config_endpoint(env):
     d = env.client.get("/api/config").json()
-    assert Path(d["default_output_dir"]).is_absolute()
+    assert "default_output_dir" not in d
+    assert d["library_root"] is None and d["library_root_source"] == "none"
+    assert d["default_operation"] == "move"
     vals = {c["value"]: c["junk"] for c in d["categories"]}
     assert vals["uncertain"] is False
     assert vals["screenshot"] is False and vals["graphic"] is True

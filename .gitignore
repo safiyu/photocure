@@ -31,3 +31,6 @@ Organized_Drive/
 .DS_Store
 Thumbs.db
 __MACOSX/
+
+# Brainstorm and plan-execution scratch
+.superpowers/

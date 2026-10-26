@@ -253,9 +253,10 @@ class CuratorConfig(BaseSettings):
     face: FaceSettings = Field(default_factory=FaceSettings)
     taxonomy: TaxonomySettings = Field(default_factory=TaxonomySettings)
 
-    # Trash staging: junk moves into <root>/<trash_dir_name>/<txn>/ and is purged later.
+    # Trash staging: junk moves into <root>/<trash_dir_name>/<txn>/ and stays until the user empties it.
     trash_dir_name: str = ".trash"
-    trash_retention_days: int = 30
+    # What the plan screen preselects: "move" or "copy".
+    default_operation: str = "move"
 
     # Output organization root (Option 1).
     organize_root: Path = Path("Organized")

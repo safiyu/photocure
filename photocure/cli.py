@@ -742,12 +742,12 @@ def trash_purge(
     db: Path = typer.Option(default_factory=default_db_path),
     output_dir: Path = typer.Option(Path("Organized"), "--output-dir", "-o"),
     older_than_days: float | None = typer.Option(
-        None, "--older-than-days", help="Default PCUR_TRASH_RETENTION_DAYS (30)."),
+        None, "--older-than-days", help="Default 30."),
     yes: bool = typer.Option(False, "--yes", "-y"),
 ):
     """Permanently delete trash staging older than the retention window."""
     cfg = _config(db)
-    days = cfg.trash_retention_days if older_than_days is None else older_than_days
+    days = 30 if older_than_days is None else older_than_days
     if not yes and not typer.confirm(
             f"Permanently delete trash under {output_dir} older than {days} days?"):
         console.print("[yellow]Aborted.[/yellow]")
