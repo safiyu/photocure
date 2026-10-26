@@ -144,7 +144,8 @@ class ScanReq(RunOverrides):
 
 class InferReq(RunOverrides):
     batch_size: int = 32
-    reanalyze: bool = False
+    # "new" analyses unfinished photos; "trash" redoes the trashed ones. Library photos never run.
+    stage: Literal["new", "trash"] = "new"
 
 
 class ClusterReq(BaseModel):
@@ -2196,19 +2197,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         try:
             pipeline = InferencePipeline(c, backend=detect_for(c))
-            if body.reanalyze:
-                with get_session(dbp) as s:
-                    I = M.ImageRecord
-                    upd = {"faces_schema_version": 0}
-                    if pipeline.bs.face_backend == "stub" or not c.face.enabled:
-                        upd["infer_status"] = "pending"  # the stale-face path is off, so redo from scratch
-                    s.exec(sa_update(I).where(
-                        I.scan_status != "missing",
-                        I.route_status != "executed",
-                        I.infer_status == "inferred"
-                    ).values(**upd))
             res = pipeline.run(db_path=dbp, on_progress=on_prog, show_progress=False,
-                               cancel_check=progress_mgr.is_stopped)
+                               cancel_check=progress_mgr.is_stopped,
+                               stage=body.stage, reanalyze=body.stage == "trash")
         except InterruptedError:
             progress_mgr.stop("Inference stopped by user")
             return {"ok": False, "stopped": True, "message": "Inference stopped by user"}
@@ -2220,6 +2211,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             progress_mgr.finish(f"Inference complete: {res.processed} processed, "
                                 f"{res.faces_total} faces in {res.duration_s:.1f}s")
         return {"ok": True, "processed": res.processed, "faces_total": res.faces_total,
+                "missing": res.missing,
                 "new_ids_count": len(app.state.last_analyzed_ids),
                 "quality_computed": res.quality_computed,
                 "semantic_computed": res.semantic_computed, "failures": res.failures,
@@ -2794,28 +2786,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         job = spawn("undo", work)
         return {"ok": True, "job_id": job["id"], "transaction_id": tid}
-
-    @app.post("/api/rescore", dependencies=auth)
-    def rescore():
-        """Re-classify every analyzed photo from its stored embedding, with no image decoding."""
-        if backend_info().get("semantic_is_stub", True):
-            return JSONResponse({"updated": 0, "note": "Re-checking needs the AI model, which is "
-                                                       "not installed. Run: photocure setup"})
-        if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
-
-        def work(job: dict) -> dict:
-            from ..inference.semantic_engine import rescore_from_embeddings
-            progress_mgr.start("Re-checking", "Re-checking photos with the latest categories", 0,
-                               "Reading stored embeddings...")
-            with get_session(dbp) as s:
-                updated = int(rescore_from_embeddings(s, run_cfg()))
-            progress_mgr.finish(f"Re-checked {updated} photos")
-            jlog(job, f"re-checked {updated} photos")
-            return {"ok": True, "updated": updated}
-
-        job = spawn("rescore", work, cancellable=False)
-        return JSONResponse({"ok": True, "job_id": job["id"]}, status_code=202)
 
     @app.post("/api/learn", dependencies=auth, status_code=202)
     def learn():

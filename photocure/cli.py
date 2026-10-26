@@ -176,7 +176,7 @@ def _stub_warning(info: dict) -> Panel:
         "[bold]No AI model is installed, so photos cannot be recognised.[/bold]\n"
         "Most photos will end up as Uncertain until you install it:\n"
         f"  [cyan]{escape(ml_install_cmd())}[/cyan]\n"
-        "Then run [cyan]photocure infer --reanalyze[/cyan] to redo photos that were "
+        "Then run [cyan]photocure infer[/cyan] to redo unfinished photos that were "
         "analyzed without it.",
         title="Placeholder classifier in use", border_style="yellow")
 
@@ -418,10 +418,9 @@ def infer(
     paths: str | None = typer.Option(None, "--paths", help="Comma-separated paths (debug)."),
     retry_failed: bool = typer.Option(False, "--retry-failed",
                                       help="Reset failed rows to pending first."),
-    reanalyze: bool | None = typer.Option(
-        None, "--reanalyze/--no-reanalyze",
-        help="Redo photos that were analyzed without an AI model. "
-             "Default: on whenever the AI model is installed."),
+    stage: str = typer.Option(
+        "new", "--stage",
+        help="new analyzes unfinished photos; trash redoes the trashed ones."),
     faces: bool = typer.Option(True, "--faces/--no-faces",
                                help="Find faces and blinks. --no-faces skips face analysis entirely."),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
@@ -464,7 +463,9 @@ def infer(
     stub = bool(info.get("semantic_is_stub"))
     if stub:
         console.print(_stub_warning(info))
-    do_reanalyze = (not stub) if reanalyze is None else reanalyze
+    if stage not in ("new", "trash"):
+        console.print(f"[red]Unknown stage '{stage}'. Choose new or trash.[/red]")
+        raise typer.Exit(2)
     only = None
     if paths:
         only = [p.strip() for p in paths.split(",") if p.strip()]
@@ -474,15 +475,8 @@ def infer(
             pend = repo.images_pending_inference(limit)
             only = [r.path for r in pend]
     pipeline = InferencePipeline(cfg, backend=bs)
-    if do_reanalyze and "reanalyze_stub" not in inspect.signature(pipeline.run).parameters:
-        mark = _lazy_optional(".inference.pipeline", "mark_stub_rows_for_reanalysis")
-        if mark is not None:
-            with get_session(cfg.db_path) as s:
-                n = mark(s)
-            if n:
-                console.print(f"[dim]Queued {n} photos analyzed without a model.[/dim]")
     result = _call_flex(pipeline.run, db_path=cfg.db_path, only_paths=only,
-                        show_progress=not quiet, reanalyze_stub=do_reanalyze)
+                        show_progress=not quiet, stage=stage, reanalyze=stage == "trash")
     t = Table(title="Inference result")
     t.add_column("Metric", style="cyan")
     t.add_column("Value", justify="right")
@@ -1017,8 +1011,8 @@ def doctor(db: Path = typer.Option(default_factory=default_db_path)):
         fixes.append("The model weights download on first use (about 350 MB), "
                      "so connect to the internet once.")
     if stub_rows and not info.get("semantic_is_stub"):
-        fixes.append("Redo photos that were analyzed without a model: "
-                     "photocure infer --reanalyze")
+        fixes.append("Redo unfinished photos that were analyzed without a model: "
+                     "photocure infer")
     if ver["torch"] and info.get("device") == "cpu":
         fixes.append("No GPU was found, so analysis runs on the CPU. "
                      "That works but is slower.")

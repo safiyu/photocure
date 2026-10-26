@@ -781,7 +781,7 @@
         const k = state.utilityKind;
         return k ? eff(it) === k : state.utility.has(eff(it));
       },
-      empty: { icon: "inbox", title: "Nothing here yet", text: "Receipts, notes, screenshots, labels, signs and packaging show up here after you analyze your photos. Already analyzed? Press Re-check my photos." },
+      empty: { icon: "inbox", title: "Nothing here yet", text: "Receipts, notes, screenshots, labels, signs and packaging show up here after you analyze your photos." },
     });
     makeGrid("uncertain", {
       el: "#uncertaingrid", more: "#uncertaingrid-more", count: "#uncertaincount",
@@ -1952,7 +1952,7 @@
     delegatesBound = true;
     document.addEventListener("click", async (ev) => {
       const t = ev.target.closest && ev.target.closest(
-        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-similar],[data-faces],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
+        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-similar],[data-faces],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-analyze-now],.thumb");
       if (!t) return;
       try {
         if (t.dataset.pick) await togglePick(num(t.dataset.pick), ev.shiftKey);
@@ -1979,7 +1979,7 @@
           ev.preventDefault();
           await copyText(t.dataset.copytext, t);
         } else if (t.hasAttribute("data-copy")) await copyHint(t);
-        else if (t.hasAttribute("data-reanalyze")) $("#btn-infer").click();
+        else if (t.hasAttribute("data-analyze-now")) $("#btn-infer").click();
         else if (t.hasAttribute("data-sortnow")) await sortNow(false);
         else if (t.dataset.cat !== undefined) setCategoryFilter(t.dataset.cat);
         else if (t.classList.contains("thumb")) {
@@ -5095,8 +5095,8 @@
     } else if (b && num(b.stub_rows) > 0) {
       html = `<div class="banner info" role="status">${icon("alert")}<div class="b-body">
         <h3>${fmtN(b.stub_rows)} photo${num(b.stub_rows) === 1 ? " was" : "s were"} analysed by the placeholder</h3>
-        <p>Analyze again to improve them with the real model.</p>
-        <div class="b-row"><button class="btn primary sm" type="button" data-reanalyze>Analyze again</button></div></div></div>`;
+        <p>Analyze now to improve the ones you have not finished with the real model.</p>
+        <div class="b-row"><button class="btn primary sm" type="button" data-analyze-now>Analyze now</button></div></div></div>`;
     }
     $$(".banner-host").forEach((h) => { h.innerHTML = html; });
   }
@@ -6006,16 +6006,6 @@
       $$("#tab-utility [data-ukind]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
       grids.utility.reset();
     }));
-    $("#btn-rescore").onclick = async () => {
-      try {
-        const r = await post("/api/rescore", {});
-        if (r.note) { toast(r.note, "err"); return; }
-        const res = await followJob(r.job_id, "Re-check");
-        toast(`Re-checked ${fmtN(res.updated)} photos`, "ok");
-        await sortNow(true);
-        grids.utility.reset();
-      } catch (e) { toast(e.message, "err"); }
-    };
     $("#minaes").addEventListener("change", () => {
       if (isEventView()) renderEventHighlights(); else grids.highlights.reset();
     });
@@ -6150,7 +6140,7 @@
       if (!r) return;
       if (!r.grouped) {
         libLog("Nothing new to analyze", "ok");
-        toast("Nothing new to analyze. Use Reanalyse to re-check photos you already analyzed.", "ok");
+        toast("Nothing new to analyze.", "ok");
         await afterTask();
         return;
       }
@@ -6161,41 +6151,6 @@
       const sorted = await afterTask(true);
       libLog(sorted ? "Photos sorted into categories" : "Could not sort photos into categories", sorted ? "ok" : "warn");
       if (sorted) await approveProposedDeletes(true);
-    };
-    $("#btn-recheck").onclick = async () => {
-      const r = await runTask("Re-checking rules", async () => {
-        const job = await post("/api/rescore", {});
-        if (job.note) return { note: job.note };
-        const res = await followJob(job.job_id, "Re-check");
-        await sortNow(true);
-        return res;
-      });
-      if (!r) return;
-      if (r.note) { toast(r.note, "err"); return; }
-      toast(`Re-checked ${fmtN(r.updated)} photos`, "ok");
-      libLog(`Re-checked ${fmtN(r.updated)} photos and re-sorted them`, "ok");
-      grids.utility.reset();
-    };
-    $("#btn-reanalyse-all").onclick = async () => {
-      const total = state.overview ? state.overview.total : 0;
-      const ok = await showConfirmDialog({
-        title: "Reanalyse everything?",
-        message: `This runs the AI on all ${fmtN(total)} photos again and can take a long time. Photos you already sorted by hand are kept.`,
-        confirmText: "Reanalyse", variant: "warning" });
-      if (!ok) return;
-      const device = $("#infer-device").value;
-      const r = await runTask(`Reanalysing photos (${device})`, async () => {
-        const inferred = await post("/api/infer", { device, reanalyze: true });
-        if (inferred && inferred.stopped) return inferred;
-        const grouped = await post("/api/cluster", {});
-        if (grouped && grouped.stopped) return grouped;
-        return { inferred, grouped };
-      });
-      if (!r) return;
-      libLog(`Reanalysis finished: ${fmtN(r.inferred.processed)} photos, ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
-      toast(`Reanalysed ${fmtN(r.inferred.processed)} photos`, "ok");
-      markGrouped();
-      await afterTask(true);
     };
     $("#btn-ingest-all").onclick = async () => {
       const path = needPath();
