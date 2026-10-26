@@ -17,6 +17,7 @@ Photocure looks at every photo, works out what it shows, finds the best shot in 
 - [What you need](#what-you-need)
 - [Install and first start](#install-and-first-start)
 - [Using Photocure day to day](#using-photocure-day-to-day)
+- [New, Library and Trash](#new-library-and-trash)
 - [A tour of the app](#a-tour-of-the-app)
 - [Keyboard shortcuts](#keyboard-shortcuts)
 - [Your photos stay safe](#your-photos-stay-safe)
@@ -104,7 +105,7 @@ It looks at your computer, installs the AI parts that fit it (using your graphic
 
 ### Option 3: Docker
 
-Good for a NAS or a server. Replace the two paths with your own folders: the photos to read, and where organized photos should go.
+Good for a NAS or a server. Replace the two paths with your own folders: the photos to read, and the library folder where finished photos are kept. The image sets `PCUR_LIBRARY_ROOT=/output/Organized` for you, so Docker never asks for a folder on first start.
 
 ```bash
 PHOTOS_DIR=/path/to/photos OUTPUT_DIR=/path/to/organized docker compose up
@@ -140,12 +141,22 @@ If the page asks you to sign in, paste the one-time code that Photocure printed 
 **A typical first session:**
 
 1. **Import:** pick your photo folder and press **Scan**. Photocure lists your photos without changing them.
-2. **Analyze:** press **Analyze Now**. It reads each photo, groups burst shots and sorts everything into categories. This is the slow step, and you can keep browsing while it runs. Analyze only reads photos that were never analyzed. After changing categories use **Re-check rules** (fast), or **Reanalyse everything** to run the AI again on every photo.
+2. **Analyze:** press **Analyze Now**. It reads each photo, groups burst shots and sorts everything into categories. This is the slow step, and you can keep browsing while it runs. Analyze only reads new photos, and photos you already finished are never analyzed again.
 3. **Look around:** open Library, Bursts, Duplicates, Utility and Highlights to see what it found.
 4. **Tidy up:** fix anything it was unsure about in Finalize, and decide which duplicates to keep.
-5. **Organize:** in Apply and undo, choose where the organized photos go, preview, and apply.
+5. **Organize:** in Apply and undo, choose Move or Copy, preview, and apply. Photos go into your library folder, which you chose the first time you opened the app.
 
 Adding more photos later? The big pink **Scan** button is always the next step when everything is up to date, then **Analyze Now** for the new ones. A line under the library count always tells you what to do next.
+
+## New, Library and Trash
+
+The switch at the top right shows where your photos are, with a count for each place.
+
+- **New** is everything you scanned and have not applied yet. This is where you analyze, tidy up and build a plan.
+- **Library** is your finished photos, all in one library folder, sorted by category. Photos here are never analyzed again. You can still rename people, change a category (the file moves to the right folder) or delete a photo.
+- **Trash** is photos you removed. They are kept until you empty the trash; nothing leaves it on a timer. Select photos to **Restore** them into the library, or **Return to origin** to put them back where they came from so they count as new again. **Reanalyse trash** runs the AI on the trashed photos only, and **Delete permanently** and **Empty trash** remove the files for good.
+
+The library folder is chosen once, on first run. After that it is read-only in Settings. To use another folder, press **Move library to another folder**: Photocure copies everything, checks each copy, then switches over and leaves the old folder for you to delete.
 
 ## A tour of the app
 
@@ -157,9 +168,9 @@ Choose a folder and press **Scan**, then **Analyze Now**. **Run All** does both 
 
 ### Library
 
-Every photo, oldest first. Narrow it down by category, camera, rating, country, favourites, or a date range (quick buttons for this year, last 90 days and last 30 days). The size slider changes thumbnail size. Click a photo to open it large, rate it, mark it as a favourite, change its category or lock it so a re-analysis never changes it. Click the tick on photos to select several and move them together.
+Every photo, oldest first. Narrow it down by category, camera, rating, country, favourites, or a date range (quick buttons for this year, last 90 days and last 30 days). The size slider changes thumbnail size. Click a photo to open it large, rate it, mark it as a favourite, change its category or lock it so nothing changes it by mistake. Click the tick on photos to select several and move them together.
 
-**Mark for delete.** Every photo, in every section, has a small trash icon (and the photo viewer and the selection bar have a **Mark for delete** button). A marked photo is dimmed and tagged, and it is left out of the result when you apply. With the trash option on (the default) it is moved to a trash folder you can restore or purge later; otherwise, or when you copy instead of move, your original stays where it is. Nothing is deleted just by marking, and unmarked photos are never removed. To mark everything Photocure flags as junk in one go, tick **Approve all proposed deletions** before you analyze.
+**Mark for delete.** Every photo, in every section, has a small trash icon (and the photo viewer and the selection bar have a **Mark for delete** button). A marked photo is dimmed and tagged, and it is left out of the result when you apply. With the trash option on (the default) it goes to the trash folder, where you can restore it or delete it for good: a move puts the file there, and a copy puts a copy there while your original stays where it is. With the trash option off, a marked photo stays where it is. Nothing is deleted just by marking, and unmarked photos are never removed. To mark everything Photocure flags as junk in one go, tick **Approve all proposed deletions** before you analyze.
 
 **Clean export.** With photos selected, press **Clean export** to make copies that are safe to share. Location, camera serial and other hidden details are removed, files get neutral names, and you can add a simple web gallery. Photocure can also check the selection for license plates, payment cards, screens, house numbers and ID documents, then blur those areas or leave those photos out. This check is a helper, not a guarantee: it can miss small details, so look over what you share. Your originals are never changed.
 
@@ -193,7 +204,7 @@ Photocure groups photos taken at about the same time and place into events like 
 
 ### Utility
 
-Things you photographed to look up later: receipts, whiteboards and notes, screenshots, labels and serial numbers, parking spot signs, medicine packaging. They live here, apart from your photos and from Junk. Use the buttons at the top to see just one kind. If you analyzed photos before this feature existed, press **Re-check my photos** once to fill this tab. It does not read your photos again.
+Things you photographed to look up later: receipts, whiteboards and notes, screenshots, labels and serial numbers, parking spot signs, medicine packaging. They live here, apart from your photos and from Junk. Use the buttons at the top to see just one kind.
 
 ### Finalize
 
@@ -209,17 +220,20 @@ Duplicates, graphics and memes, accidental shots (very dark or blurry) and unrea
 
 ### Apply and undo
 
-Where Photocure finally organizes your files into folders.
+Where Photocure finally files your photos into the library folder.
 
-1. Choose what to do with the files: **Move**, **Copy**, or make **links** so the originals stay where they are.
-2. Choose the folder layout and a **destination folder outside your photo library**.
-3. Press **Rebuild plan**, then **Preview changes** to see exactly what will happen.
-4. Press **Review and apply** when you are happy.
+1. Choose what to do with the files: **Move** them, or **Copy** them so the originals stay where they are (a good fit for read-only folders).
+2. Press **Rebuild plan**, then **Preview changes** to see exactly what will happen.
+3. Press **Review and apply** when you are happy.
 
-Changed your mind? **Undo this change** puts every file back. **Verify files** checks that organized files still match the record, and **Repair paths** fixes things if you moved folders yourself. Tick **Stage junk in a trash folder** to set junk aside where you can restore or purge it later.
+The destination is always your library folder; you do not pick one here. With **Copy**, photos you marked for delete are copied into the trash folder too, and your originals stay where they were.
+
+Changed your mind? **Undo this change** puts every file back. **Verify files** checks that organized files still match the record, and **Repair paths** fixes things if you moved folders yourself. Tick **Move photos marked for delete to a trash folder** to set them aside in Trash, where you can restore or delete them later.
 
 ### Settings
 
+- **Library folder:** where finished photos live. You choose it on first run and it cannot change here afterwards; use **Move library to another folder** to relocate it. Under Docker or any setup that sets `PCUR_LIBRARY_ROOT`, the folder comes from that variable and you are never asked.
+- **New plans start with:** Move or Copy.
 - **Processing device:** Automatic picks the fastest option on your computer. You can choose a specific graphics card or the processor.
 - **Workers:** how many photos are handled at once. The defaults are fine.
 - **File name collisions:** what to do when a file with the same name already exists. Photocure never overwrites a file.
@@ -238,7 +252,7 @@ Press **?** in the app to see this list any time.
 | **0** | Clear the rating |
 | **x** | Reject, or un-reject (nothing is deleted) |
 | **f** | Favourite, or remove from favourites |
-| **l** | Lock or unlock a photo so re-analysis never changes it |
+| **l** | Lock or unlock a photo so nothing changes it by mistake |
 | **j** and **k** | Next and previous photo in Finalize and Junk |
 | **1** to **9** | In Finalize and Junk: choose a category |
 | **u** | Undo the last category change |
@@ -246,7 +260,8 @@ Press **?** in the app to see this list any time.
 
 ## Your photos stay safe
 
-- **Nothing is moved until you press Apply**, after a preview. Scanning, analyzing, rating and reviewing never touch your files.
+- **Nothing is moved until you press Apply**, after a preview.
+- **Removed photos wait in Trash** until you empty it yourself. Scanning, analyzing, rating and reviewing never touch your files.
 - **Every change can be undone**, and the undo restores files exactly as they were.
 - **Nothing is ever overwritten**, and rejecting a photo never deletes it.
 - **Ratings and rejects are saved next to each photo** in a small `.xmp` sidecar file that other programs understand. If another program changed that file, Photocure asks before replacing it. To keep ratings inside Photocure only, set `PCUR_WRITE_SIDECARS=false` before you start it.
@@ -254,16 +269,15 @@ Press **?** in the app to see this list any time.
 
 ## Optional extras
 
-**Place names.** To see city, region and country for photos with GPS, install the add-on once, then fill in places for photos you imported earlier:
+**Place names.** To see city, region and country for photos with GPS, fill in places for photos you imported earlier:
 
 ```bash
-pip install "photocure[geo]"
 photocure geocode
 ```
 
 The lookup is done offline.
 
-**Your own categories.** The built-in categories (People, Events, Food, Scenery and so on) can be extended or reworded with a small file. Point Photocure at it, then press **Re-check my photos** so the new rules apply to photos you already analyzed (it does not read your photos again):
+**Your own categories.** The built-in categories (People, Events, Food, Scenery and so on) can be extended or reworded with a small file. Point Photocure at it. The new rules apply to photos you analyze from then on; finished photos keep their category until you change it:
 
 ```bash
 export PCUR_TAXONOMY_FILE=/full/path/to/my_categories.yaml
@@ -286,10 +300,10 @@ A JSON file works the same way. Describe what is in the photo with a few differe
 
 ```bash
 pip install "photocure[mcp]"
-claude mcp add photocure -- photocure mcp --db /full/path/to/photo_curator.db
+claude mcp add photocure -- photocure mcp --db /full/path/to/photocure.db
 ```
 
-Other agents take the same command in their MCP settings: `photocure mcp --db /full/path/to/photo_curator.db`. Use the full path to the database. The agent gets eight tools. Six only read: library overview, search by description, browse by date or category, photo details, view a photo, and list bursts. Two write new files: `create_composite` and `clean_export`.
+Other agents take the same command in their MCP settings: `photocure mcp --db /full/path/to/photocure.db`. Use the full path to the database. The agent gets ten tools. Eight only read: library overview, search by description, browse by date or category, photo details, view a photo, and list bursts. Two write new files: `create_composite` and `clean_export`.
 
 ## Command line
 
@@ -307,6 +321,8 @@ You do not need these to use Photocure, but they are handy.
 | `photocure mcp --db FILE` | Run the agent (MCP) server over your library |
 | `photocure doctor` | Check that the AI model, graphics card and face detection are ready |
 | `photocure devices` | List the graphics cards and processors Photocure can use |
+| `photocure plan` / `photocure apply` | Build and apply a plan into the library folder (`--library-root DIR` to override, `--operation move\|copy`) |
+| `photocure trash-purge` | Permanently delete everything in the trash |
 | `photocure version` | Show the version |
 
 Useful options for `photocure start`: `--port 9000` to use a different port, `--no-open` to not open the browser.
@@ -317,7 +333,7 @@ Useful options for `photocure start`: `--port 9000` to use a different port, `--
 The model is installed, but a setting named `PCUR_BACKEND` is forcing the placeholder. In the terminal that starts Photocure, run `unset PCUR_BACKEND` (on Windows, remove the `PCUR_BACKEND` environment variable), then start Photocure again and re-run **Analyze Now**.
 
 **It says it needs the AI model.**
-Run `photocure setup` once. Search, Event stories and Re-check need the real model.
+Run `photocure setup` once. Search, Event stories and Analyze need the real model.
 
 **The page asks for a code.**
 Copy the one-time code from the terminal where you started Photocure. Starting it with `photocure start` opens the browser already signed in.

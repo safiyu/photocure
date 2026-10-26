@@ -249,17 +249,6 @@ def test_organizer_alternate_goes_to_burst_folder(cfg):
     assert target == Path("/org/Bursts/Burst_20240512_0001/alternates/f.jpg")
 
 
-def test_organizer_in_place_mode_uses_hardlink(cfg):
-    from photocure.rules.decision_matrix import Decision
-    org = FolderOrganizer(cfg, organize_root=Path("/org"),
-                          mode=OrganizeMode.IN_PLACE)
-    rec = _rec(path="/lib/g.jpg", filename="g.jpg")
-    dec = Decision(CategoryType.SCREENSHOT, "clip")
-    plan = org.build_destination_plan([rec], [dec], operation="move")
-    assert len(plan) == 1
-    assert plan[0].operation == "hardlink"
-
-
 def test_safe_name_strips_unsafe_chars():
     assert _safe_name("a b/c:*.jpg") == "a b_c_.jpg"
     assert _safe_name("...") == "unnamed"

@@ -33,7 +33,8 @@ from .config import (
     normalize_device,
     resolve_workers,
 )
-from .db.models import ActionLedger, BurstGroup, PlanActionRow, PlanRecord
+from .db.models import (STAGE_LIBRARY, STAGE_NEW, STAGE_TRASH, ActionLedger, BurstGroup,
+                        PlanActionRow, PlanRecord)
 from .db.repository import PhotoRepository
 from .db.session import get_session
 from .engine.action_engine import ActionEngine, ExecutionReport
@@ -79,8 +80,9 @@ def describe_backends(cfg: CuratorConfig) -> dict:
 
 # Settings store. Precedence: CLI flag > this settings file > environment > defaults.
 SETTINGS_KEYS = ("device", "device_index", "decode_workers", "torch_threads", "scan_workers",
-                 "collision_policy", "library_root")
+                 "collision_policy", "library_root", "default_operation")
 COLLISION_POLICIES = ("sequence", "date_suffix", "skip")
+OPERATIONS = ("move", "copy")
 
 
 def settings_path(db_path: Path | str) -> Path:
@@ -106,6 +108,11 @@ def _validate_settings(data: dict, allow_none: bool = False) -> dict:
             if v not in COLLISION_POLICIES:
                 raise ValueError(f"Unknown collision policy '{value}'. "
                                  f"Choose one of: {', '.join(COLLISION_POLICIES)}.")
+            out[key] = v
+        elif key == "default_operation":
+            v = str(value).strip().lower()
+            if v not in OPERATIONS:
+                raise ValueError(f"Unknown operation '{value}'. Choose one of: {', '.join(OPERATIONS)}.")
             out[key] = v
         elif key == "library_root":
             out[key] = str(Path(value).expanduser().resolve()) if value else None
@@ -142,10 +149,17 @@ def load_settings(db_path: Path | str) -> dict:
     return good
 
 
-def save_settings(db_path: Path | str, values: dict, merge: bool = True) -> dict:
-    """Validate and store settings. A value of None clears that key. Returns what is stored."""
+def save_settings(db_path: Path | str, values: dict, merge: bool = True, force: bool = False) -> dict:
+    """Validate and store settings. A value of None clears that key. Returns what is stored.
+
+    Once a library folder is stored it only changes with ``force`` (the library migration).
+    """
     checked = _validate_settings(values, allow_none=True)
-    current = load_settings(db_path) if merge else {}
+    stored = load_settings(db_path)
+    if ("library_root" in checked and stored.get("library_root")
+            and checked["library_root"] != stored["library_root"] and not force):
+        raise ValueError("library folder is already set; use Move library to change it")
+    current = stored if merge else {}
     for key, value in checked.items():
         if value is None:
             current.pop(key, None)
@@ -174,6 +188,8 @@ def apply_settings(cfg: CuratorConfig, settings: dict) -> CuratorConfig:
         new.collision_policy = checked["collision_policy"]
     if "library_root" in checked:
         new.library_root = Path(checked["library_root"]) if checked["library_root"] else None
+    if "default_operation" in checked:
+        new.default_operation = checked["default_operation"]
     return new
 
 
@@ -190,6 +206,7 @@ def effective_settings(db_path: Path | str, cfg: CuratorConfig | None = None,
         "scan_workers": 0 if stored.get("scan_workers") == 0 else base.scan_workers,
         "collision_policy": base.collision_policy,
         "library_root": str(base.library_root) if base.library_root else None,
+        "default_operation": base.default_operation,
     }
     return {
         "values": values,
@@ -224,13 +241,6 @@ class Plan:
 def _alt_key() -> str:
     member = getattr(CategoryType, "BURST_ALTERNATE", None)
     return member.value if member is not None else "burst_alternate"
-
-
-def _effective_op(mode: str, op: str) -> str:
-    """In-place plans never move originals: move becomes hardlink."""
-    if mode == OrganizeMode.IN_PLACE.value and op == "move":
-        return "hardlink"
-    return op
 
 
 def compute_inputs_hash(records) -> str:
@@ -279,11 +289,13 @@ class Planner:
             return self._cluster(repo, repo.all_images())
 
     def _retire_legacy_trashed(self, records) -> int:
-        """Ensure any row whose path already lives inside .trash is marked missing/trashed."""
+        """Ensure any row whose path already lives inside .trash is in the trash stage."""
         retired = 0
         trash_name = self.cfg.trash_dir_name
         for r in records:
-            if getattr(r, "scan_status", "scanned") != "missing" and trash_name in Path(r.path).parts:
+            if (getattr(r, "scan_status", "scanned") != "missing" and r.stage != STAGE_TRASH
+                    and trash_name in Path(r.path).parts):
+                r.stage = STAGE_TRASH
                 r.scan_status = "missing"
                 r.route_status = "trashed"
                 retired += 1
@@ -389,7 +401,10 @@ class Planner:
         ``recluster=None`` reclusters only when no bursts exist yet, or when a
         threshold override is given.
         """
-        root = Path(organize_root or self.cfg.organize_root)
+        if operation not in OPERATIONS:
+            raise ValueError(f"unsupported operation: {operation}")
+        from .library import require_library_root
+        root = Path(organize_root) if organize_root else require_library_root(self.db_path, self.cfg)
         pid = plan_id or f"PLAN_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         if window_seconds is not None:
             self.cfg.burst.window_seconds = int(window_seconds)
@@ -418,13 +433,15 @@ class Planner:
             for r in records:
                 if r.infer_status not in ("inferred", "failed") or r.scan_status == "missing":
                     continue
+                if r.stage != STAGE_NEW:  # finished and trashed photos are not planned again
+                    continue
                 if r.is_duplicate and not include_duplicates:
                     continue
                 dec = self._decide(matrix, r)
                 target = organizer.full_target(r, dec)
                 actions.append(PlannedAction(
                     image_id=r.id, source=Path(r.path), target=target,
-                    operation=_effective_op(mode.value, operation),
+                    operation=operation,
                     category=dec.category, reason=dec.reason,
                     is_alternate=dec.is_alternate,
                     burst_name=organizer.burst_name_for(r) if dec.is_alternate else None,
@@ -575,18 +592,17 @@ class Planner:
                      cancel_check: Callable[[], bool] | None = None) -> ExecutionReport:
         """Apply a persisted (or in-memory) plan exactly as built.
 
-        ``operation`` is an explicit override only; in-place plans still never
-        move originals.
+        ``operation`` is an explicit override only ("move" or "copy").
         """
         plan = (self.load_plan(plan_or_plan_id)
                 if isinstance(plan_or_plan_id, str) else plan_or_plan_id)
         if not force:
             self.check_plan(plan)
         if operation:
+            if operation not in OPERATIONS:
+                raise ValueError(f"unsupported operation: {operation}")
             for a in plan.actions:
                 a.operation = operation
-        for a in plan.actions:
-            a.operation = _effective_op(plan.mode, a.operation)
         engine = ActionEngine(self.cfg, db_path=self.db_path)
         rep = engine.execute(plan.actions, organize_root=Path(plan.organize_root),
                              only_category=only_category, trash=trash,
@@ -707,7 +723,8 @@ class Planner:
                     changed = True
                 in_trash = trash_name in Path(loc).parts
                 if st == "committed" and in_trash:
-                    if img.scan_status != "missing" or img.route_status != "trashed":
+                    if img.stage != STAGE_TRASH or img.route_status != "trashed":
+                        img.stage = STAGE_TRASH
                         img.scan_status = "missing"
                         img.route_status = "trashed"
                         changed = True
@@ -715,6 +732,7 @@ class Planner:
                     if img.scan_status == "missing" or img.route_status == "trashed":
                         img.scan_status = "scanned"
                         img.route_status = "unrouted" if st == "rolled_back" else "executed"
+                        img.stage = STAGE_NEW if st == "rolled_back" else STAGE_LIBRARY
                         if st == "rolled_back":
                             img.target_path = None
                         changed = True
@@ -742,7 +760,9 @@ class Planner:
             summary = dict(fn(session, self.cfg))
         out = {**summary, "uncertain_before": before, "plan_id": None}
         if rebuild:
-            out["plan_id"] = self.build_plan(persist=True).plan_id
+            from .library import library_root
+            root = library_root(self.db_path, self.cfg) or self.cfg.organize_root
+            out["plan_id"] = self.build_plan(organize_root=root, persist=True).plan_id
         with get_session(self.db_path) as session:
             after = PhotoRepository(session).count_category("uncertain")
         out["uncertain_after"] = after
@@ -750,49 +770,10 @@ class Planner:
         return out
 
     # ---------------------------------------------------------------- trash
-    def purge_trash(self, organize_root: Path | None = None,
-                    older_than_days: float | None = None,
-                    now: float | None = None) -> dict:
-        """Permanently delete trash staging dirs older than the retention window."""
-        root = Path(organize_root or self.cfg.organize_root)
-        days = self.cfg.trash_retention_days if older_than_days is None \
-            else older_than_days
-        cutoff = (now if now is not None else time.time()) - float(days) * 86400.0
-        trash = root / self.cfg.trash_dir_name
-        res = {"removed_transactions": [], "files": 0, "bytes": 0}
-        if not trash.is_dir():
-            return res
-        for d in sorted(p for p in trash.iterdir() if p.is_dir()):
-            newest = max([d.stat().st_mtime] + [
-                f.stat().st_mtime for f in d.rglob("*") if f.exists()])
-            if newest > cutoff:
-                continue
-            for f in d.rglob("*"):
-                if f.is_file():
-                    res["files"] += 1
-                    res["bytes"] += f.stat().st_size
-            shutil.rmtree(d)
-            res["removed_transactions"].append(d.name)
-            self._mark_purged(d)
-        if trash.is_dir() and not any(trash.iterdir()):
-            trash.rmdir()
-        return res
-
-    def _mark_purged(self, trash_txn_dir: Path) -> None:
-        base = trash_txn_dir.resolve()
-        with get_session(self.db_path) as session:
-            candidates = session.exec(select(ActionLedger).where(
-                ActionLedger.status == "committed",
-                ActionLedger.transaction_id == trash_txn_dir.name)).all()
-            rows = [e for e in candidates
-                    if Path(e.target_path).resolve().is_relative_to(base)]
-            repo = PhotoRepository(session)
-            for e in rows:
-                e.status = "purged"
-                img = repo.get_by_id(e.image_id) if e.image_id else None
-                if img is not None:
-                    img.scan_status = "missing"
-                    img.route_status = "purged"
+    def empty_trash(self, root: Path | None = None) -> dict:
+        """Delete everything in the trash; nothing leaves it on a timer."""
+        from .trash_actions import empty_trash
+        return empty_trash(self.db_path, self.cfg, root=root)
 
     # --------------------------------------------------------------- report
     def render_html_report(self, plan: Plan, output: Path | str,

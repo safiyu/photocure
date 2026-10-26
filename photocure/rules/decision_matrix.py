@@ -12,7 +12,7 @@ Implements spec section 4.B (and the milestone-4 routing rules). Precedence:
        flat dark UI screenshots and documents are not accidents; a confident
        face also protects a photo from the blurry and overexposed verdicts, so
        a soft photo of a person is flagged for review, not junked)
-    6. Human face (conf > 0.65)           -> People/YYYY/MM/DD/
+    6. Human face (conf > 0.65)           -> People/
     7. Low-confidence / close-call CLIP   -> Uncertain_Review/
        (confidence is judged per group of look-alike classes, see taxonomy)
     8. Top CLIP category                  -> Screenshots / Documents / Food /
@@ -238,7 +238,7 @@ class DecisionMatrix:
                     confidence=float(q.quality_score),
                 )
 
-        # 4. Face routing (highest-confidence face).
+        # 6. Face routing (highest-confidence face).
         # A confident screenshot can contain avatars or thumbnails; the face must not win.
         if has_face and not confident_flat:
             return Decision(
@@ -249,7 +249,7 @@ class DecisionMatrix:
                 needs_date=True,
             )
 
-        # 6. Semantic routing with group-aware confidence gating.
+        # 7. Semantic routing with group-aware confidence gating.
         if assessment is not None:
             top1 = sem.top1_score
             margin = assessment["margin"]
@@ -287,7 +287,7 @@ class DecisionMatrix:
                              "group_score": assessment["group_score"]},
             )
 
-        # 7. No semantic data at all.
+        # 8. No semantic data at all.
         return Decision(
             CategoryType.UNCERTAIN,
             reason="no semantic data",

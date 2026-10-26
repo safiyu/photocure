@@ -39,7 +39,8 @@ def composite_burst(db_path: Path | str, burst_id: int, mode: str = "fixed") -> 
         if s.get(M.BurstGroup, burst_id) is None:
             raise ActionError("burst not found", 404)
         members = s.exec(select(M.ImageRecord).where(
-            M.ImageRecord.burst_id == burst_id, M.ImageRecord.infer_status == "inferred"
+            M.ImageRecord.burst_id == burst_id, M.ImageRecord.infer_status == "inferred",
+            M.ImageRecord.scan_status != "missing"  # never blend in or write next to a trashed frame
         ).options(selectinload(M.ImageRecord.quality), selectinload(M.ImageRecord.faces))).all()
         grp = group_matrix_payload(members)
         if grp["status"] != "composite":

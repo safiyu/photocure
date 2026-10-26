@@ -32,7 +32,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 from sqlalchemy import and_, or_
-from sqlmodel import col, select as sselect
+from sqlmodel import col, select as sselect, update as sa_update
 
 from ..clustering.face_identity import (
     ClusterCentroid,
@@ -88,6 +88,7 @@ class InferResult:
     duration_s: float = 0.0
     skipped_already_inferred: int = 0
     reanalyzed_stub: int = 0
+    missing: int = 0
     faces_redone: int = 0
     aesthetic_synced: int = 0
     preference_scored: int = 0
@@ -125,6 +126,7 @@ def mark_stub_rows_for_reanalysis(session) -> int:
         sselect(ImageRecord)
         .join(SemanticScore, SemanticScore.image_id == ImageRecord.id)
         .where(ImageRecord.scan_status != "missing",
+               ImageRecord.stage == "new",
                ImageRecord.infer_status == "inferred",
                col(backend_col).in_(("", "stub")))
     ).all()
@@ -195,13 +197,35 @@ class InferencePipeline:
         self.bs.retry_downgraded()
         self.quality = QualityEngine(self.cfg.quality)
 
+    _cluster_stage = "library"
+
     def _faces_stale(self, rec: ImageRecord) -> bool:
         return (self.bs.face_backend != "stub" and self.cfg.face.enabled
                 and rec.faces_schema_version < self.cfg.face.schema_version)
 
+    @staticmethod
+    def _retire_vanished_trash(session) -> int:
+        """A trashed file someone deleted by hand is gone for good: drop it from the trash."""
+        gone = 0
+        for rec in session.exec(sselect(ImageRecord).where(
+                ImageRecord.stage == "trash", ImageRecord.route_status != "purged")).all():
+            if not Path(rec.path).exists():
+                rec.route_status = "purged"
+                gone += 1
+        if gone:
+            session.commit()
+        return gone
+
     # ------------------------------------------------------------ selection
+    @staticmethod
+    def _stage_scope(stage: str):
+        """Rows a run may touch: unfinished photos, or the trash (whose rows are marked missing)."""
+        if stage == "trash":
+            return and_(ImageRecord.stage == "trash", ImageRecord.route_status != "purged")
+        return and_(ImageRecord.stage == "new", ImageRecord.scan_status != "missing")
+
     def _select_records(self, repo: PhotoRepository, only_paths: list[str] | None,
-                        retry_failed: bool, limit: int) -> list[ImageRecord]:
+                        retry_failed: bool, limit: int, stage: str = "new") -> list[ImageRecord]:
         s = repo.s
         if only_paths is not None:
             paths = list(dict.fromkeys(only_paths))
@@ -211,8 +235,7 @@ class InferencePipeline:
                 recs.extend(s.exec(
                     sselect(ImageRecord)
                     .where(col(ImageRecord.path).in_(part))
-                    .where(ImageRecord.route_status != "executed")
-                    .where(ImageRecord.scan_status != "missing")
+                    .where(self._stage_scope(stage))
                 ).all())
             recs.sort(key=lambda r: r.id or 0)
             return recs[:limit] if limit else recs
@@ -223,8 +246,7 @@ class InferencePipeline:
             wanted = or_(wanted, and_(ImageRecord.infer_status == "inferred",
                                       ImageRecord.faces_schema_version < self.cfg.face.schema_version))
         stmt = sselect(ImageRecord).where(
-            ImageRecord.scan_status != "missing",
-            ImageRecord.route_status != "executed",
+            self._stage_scope(stage),
             wanted
         ).order_by(col(ImageRecord.id))
         if limit:
@@ -240,7 +262,15 @@ class InferencePipeline:
             limit: int = 0,
             reanalyze_stub: bool = True,
             cancel_check: Callable[[], bool] | None = None,
+            stage: str = "new",
+            reanalyze: bool = False,
             ) -> InferResult:
+        """Analyse photos of one stage. Finished photos are never analysed; ``stage="trash"``
+        with ``reanalyze`` redoes every trashed photo whose file is still there."""
+        if stage not in ("new", "trash"):
+            raise ValueError(f"cannot analyse photos in the {stage} stage")
+        # People found in the trash stay in their own clusters, apart from the library's.
+        self._cluster_stage = "trash" if stage == "trash" else "library"
         db = db_path or self.cfg.db_path
         result = InferResult()
         t0 = time.monotonic()
@@ -249,7 +279,15 @@ class InferencePipeline:
             # Keep ORM rows usable across the per-chunk commits below.
             session.expire_on_commit = False
             repo = PhotoRepository(session)
-            if reanalyze_stub and self.bs.semantic_backend != "stub":
+            if stage == "trash":
+                result.missing = self._retire_vanished_trash(session)
+            if reanalyze:
+                session.exec(sa_update(ImageRecord).where(
+                    self._stage_scope(stage),
+                    ImageRecord.infer_status == "inferred",
+                ).values(infer_status="pending", faces_schema_version=0))
+                session.commit()
+            if stage == "new" and reanalyze_stub and self.bs.semantic_backend != "stub":
                 # A real model is available now: redo what the stub analysed.
                 result.reanalyzed_stub = mark_stub_rows_for_reanalysis(session)
                 if result.reanalyzed_stub:
@@ -260,7 +298,7 @@ class InferencePipeline:
             result.aesthetic_synced = sync_aesthetic(session)
             if result.aesthetic_synced:
                 session.commit()
-            pending = self._select_records(repo, only_paths, retry_failed, limit)
+            pending = self._select_records(repo, only_paths, retry_failed, limit, stage)
 
             todo: list[ImageRecord] = []
             for rec in pending:
@@ -377,7 +415,8 @@ class InferencePipeline:
         # images, without re-reading every centroid from the DB on each face.
         centroids: dict[int, ClusterCentroid] = {
             c.id: ClusterCentroid(c.id, dequantize_embedding(c.centroid_json) or [], c.face_count)
-            for c in repo.all_person_clusters() if c.centroid_json and c.face_count > 0
+            for c in repo.all_person_clusters()
+            if c.centroid_json and c.face_count > 0 and c.stage == self._cluster_stage
         }
         try:
             for chunk in chunks:
@@ -664,10 +703,11 @@ class InferencePipeline:
         lost its occurrence here and the cluster shrinks by one. Faces with no embedding (too
         small or blurry) are left unassigned.
         """
+        old_faces = repo.faces_for_image(image_id)
         old = [OldFace(f.person_id, dequantize_embedding(f.embedding_json))
-               for f in repo.faces_for_image(image_id)
-               if f.person_id is not None and f.embedding_json]
-        old_person_ids = {o.person_id for o in old}
+               for f in old_faces if f.person_id is not None and f.embedding_json]
+        # A face the user assigned by hand may have no embedding; it still counts towards its person.
+        old_person_ids = {f.person_id for f in old_faces if f.person_id is not None}
         new = [NewFace(i, f.embedding) for i, f in enumerate(faces) if f.embedding is not None]
         remap = remap_person_ids(old, new, self.cfg.face.cluster_remap_threshold)
 
@@ -676,10 +716,14 @@ class InferencePipeline:
         result: list[int | None] = [None] * len(faces)
         claimed_in_image: set[int] = set()
         resolved_person_ids: set[int] = set()
-        for i, f in enumerate(faces):
+        # Faces that continue an earlier identity are resolved first, so a face that merely clusters
+        # nearby cannot take that person and push the true continuation onto someone else.
+        for i in sorted(range(len(faces)), key=lambda k: 0 if k in remap else 1):
+            f = faces[i]
             if f.embedding is None:
                 continue
-            if i in remap and self._live_cluster(repo, centroids, remap[i]) is not None:
+            if (i in remap and remap[i] not in claimed_in_image
+                    and self._live_cluster(repo, centroids, remap[i]) is not None):
                 pid = remap[i]
             else:
                 while True:
@@ -689,7 +733,7 @@ class InferencePipeline:
                     if pid is None or self._live_cluster(repo, centroids, pid) is not None:
                         break
                 if pid is None:
-                    created = repo.create_person_cluster(f.embedding)
+                    created = repo.create_person_cluster(f.embedding, stage=self._cluster_stage)
                     pid = created.id
                     undo.created.append(pid)
                     centroids[pid] = ClusterCentroid(pid, list(f.embedding), 1)
@@ -758,10 +802,12 @@ def run_inference(config: CuratorConfig | None = None,
                   retry_failed: bool = False,
                   limit: int = 0,
                   reanalyze_stub: bool = True,
-                  cancel_check: Callable[[], bool] | None = None) -> InferResult:
+                  cancel_check: Callable[[], bool] | None = None,
+                  stage: str = "new", reanalyze: bool = False) -> InferResult:
     cfg = config or CuratorConfig.load(db_path)
     return InferencePipeline(cfg).run(db_path=db_path, only_paths=only_paths,
                                       show_progress=show_progress,
                                       retry_failed=retry_failed, limit=limit,
                                       reanalyze_stub=reanalyze_stub,
-                                      cancel_check=cancel_check)
+                                      cancel_check=cancel_check,
+                                      stage=stage, reanalyze=reanalyze)

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from collections.abc import Iterator, Sequence
 
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import joinedload
 from sqlmodel import Session, col, delete as sdelete, select as sselect, update as supdate
 
@@ -55,6 +55,21 @@ def dequantize_embedding(blob: str) -> list[float] | None:
         return [float(v) for v in raw]
     arr = np.fromiter(raw, dtype=np.int16, count=len(raw)).view(np.float16)
     return [float(v) for v in arr]
+
+
+def stage_clause(stage: str | None):
+    """SQL filter for one stage. "all" (or None) is new and library photos together.
+
+    Trashed rows are marked missing so features skip them, so only the trash stage
+    ignores scan_status; purged rows are gone from every stage.
+    """
+    I = ImageRecord
+    if stage == "trash":
+        return and_(I.stage == "trash", I.route_status != "purged")
+    active = I.scan_status != "missing"
+    if stage in ("new", "library"):
+        return and_(active, I.stage == stage)
+    return active
 
 
 class PhotoRepository:
@@ -240,8 +255,8 @@ class PhotoRepository:
     def all_person_clusters(self) -> list[PersonCluster]:
         return list(self.s.exec(sselect(PersonCluster)).all())
 
-    def create_person_cluster(self, embedding: Sequence[float]) -> PersonCluster:
-        p = PersonCluster(name=None, face_count=1, centroid_json=quantize_embedding(embedding))
+    def create_person_cluster(self, embedding: Sequence[float], stage: str = "library") -> PersonCluster:
+        p = PersonCluster(name=None, face_count=1, stage=stage, centroid_json=quantize_embedding(embedding))
         self.s.add(p)
         self.s.flush()
         return p
@@ -274,12 +289,13 @@ class PhotoRepository:
         self.s.flush()
         return p
 
-    def find_person_by_name(self, name: str) -> PersonCluster | None:
+    def find_person_by_name(self, name: str, stage: str | None = None) -> PersonCluster | None:
+        """A person by name; with ``stage`` only among the people of that stage (library or trash)."""
         target = name.strip().lower()
-        return self.s.exec(
-            sselect(PersonCluster).where(
-                func.lower(func.trim(PersonCluster.name)) == target)
-        ).first()
+        stmt = sselect(PersonCluster).where(func.lower(func.trim(PersonCluster.name)) == target)
+        if stage is not None:
+            stmt = stmt.where(PersonCluster.stage == stage)
+        return self.s.exec(stmt).first()
 
     # -------------------------------------------------------------- semantic
     def upsert_semantic(self, sem: SemanticScore) -> SemanticScore:
@@ -520,13 +536,30 @@ class PhotoRepository:
             sselect(func.count()).select_from(ImageRecord)
             .where(active, ImageRecord.route_status == "planned")
         ).one()
-        self.prune_bursts()
-        bursts = self.s.exec(sselect(func.count()).select_from(BurstGroup)).one()
+        # Read-only: a burst counts when two or more of its frames are still in the library.
+        live_bursts = (
+            sselect(ImageRecord.burst_id)
+            .where(ImageRecord.burst_id.is_not(None), active,
+                   col(ImageRecord.route_status).not_in(["trashed", "purged"]))
+            .group_by(ImageRecord.burst_id).having(func.count() >= 2).subquery()
+        )
+        bursts = self.s.exec(sselect(func.count()).select_from(live_bursts)).one()
         people = self.s.exec(
             sselect(func.count()).select_from(PersonCluster)
-            .where(PersonCluster.face_count > 0)
+            .where(PersonCluster.face_count > 0, PersonCluster.stage != "trash")
         ).one()
+        stage_rows = self.s.exec(
+            sselect(ImageRecord.stage, func.count()).where(active).group_by(ImageRecord.stage)
+        ).all()
+        stages = {"new": 0, "library": 0, "trash": 0}
+        stages.update({k: int(n) for k, n in stage_rows if k in ("new", "library")})
+        # Trashed rows are marked missing so features skip them; the trash is counted by stage.
+        stages["trash"] = int(self.s.exec(
+            sselect(func.count()).select_from(ImageRecord)
+            .where(ImageRecord.stage == "trash", ImageRecord.route_status != "purged")
+        ).one() or 0)
         return {
+            "stages": stages,
             "total_images": int(total or 0),
             "pending_inference": int(pending or 0),
             "duplicates": int(dupes or 0),

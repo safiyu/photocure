@@ -253,9 +253,10 @@ class CuratorConfig(BaseSettings):
     face: FaceSettings = Field(default_factory=FaceSettings)
     taxonomy: TaxonomySettings = Field(default_factory=TaxonomySettings)
 
-    # Trash staging: junk moves into <root>/<trash_dir_name>/<txn>/ and is purged later.
+    # Trash staging: junk moves into <root>/<trash_dir_name>/<txn>/ and stays until the user empties it.
     trash_dir_name: str = ".trash"
-    trash_retention_days: int = 30
+    # What the plan screen preselects: "move" or "copy".
+    default_operation: str = "move"
 
     # Output organization root (Option 1).
     organize_root: Path = Path("Organized")
@@ -275,7 +276,7 @@ class CuratorConfig(BaseSettings):
     sidecar_debounce_seconds: float = 1.5  # (tune) wait this long after the last change, then write
     # Watch mode: a new file is scanned once it has been quiet for this many seconds.
     watch_debounce_seconds: float = 2.0
-    # Offline reverse geocoding of GPS positions (needs photocure[geo]).
+    # Offline reverse geocoding of GPS positions (installed with Photocure).
     geocode: bool = True
     geocode_batch: int = 500
 

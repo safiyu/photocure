@@ -80,7 +80,7 @@ def test_doctor_flags_missing_weights_and_old_stub_rows(monkeypatch, tmp_path):
     out = flat(r.stdout)
     assert r.exit_code == 0
     assert "download on first use" in out
-    assert "infer --reanalyze" in out
+    assert "photocure infer" in out
     assert "analyzed without a model" in out
 
 
@@ -132,8 +132,8 @@ def capture_run(monkeypatch):
     seen: dict = {}
 
     def fake_run(self, db_path=None, only_paths=None, show_progress=True,
-                 reanalyze_stub=None):
-        seen["reanalyze_stub"] = reanalyze_stub
+                 reanalyze_stub=True, stage="new", reanalyze=False):
+        seen.update(reanalyze_stub=reanalyze_stub, stage=stage, reanalyze=reanalyze)
         return types.SimpleNamespace(processed=0, faces_total=0, quality_computed=0,
                                      semantic_computed=0, failures=0, duration_s=0.0)
 
@@ -176,45 +176,23 @@ def test_infer_accepts_every_device(scanned, device):
     assert r.exit_code == 0, r.stdout
 
 
-def test_infer_reanalyze_defaults_off_with_placeholder(monkeypatch, scanned):
+def test_infer_defaults_to_new_photos_without_reanalysis(monkeypatch, scanned):
     seen = capture_run(monkeypatch)
     assert runner.invoke(app, ["infer", "--db", str(scanned)]).exit_code == 0
-    assert seen["reanalyze_stub"] is False
+    assert seen["stage"] == "new" and seen["reanalyze"] is False
 
 
-def test_infer_reanalyze_defaults_on_when_model_installed(monkeypatch, scanned):
+def test_infer_stage_trash_reanalyses_the_trash(monkeypatch, scanned):
     seen = capture_run(monkeypatch)
-    monkeypatch.setattr(cli_mod, "describe_backends", lambda cfg: dict(REAL))
-    assert runner.invoke(app, ["infer", "--db", str(scanned)]).exit_code == 0
-    assert seen["reanalyze_stub"] is True
+    assert runner.invoke(app, ["infer", "--db", str(scanned), "--stage", "trash"]).exit_code == 0
+    assert seen["stage"] == "trash" and seen["reanalyze"] is True
 
 
-def test_infer_reanalyze_flags_override(monkeypatch, scanned):
-    seen = capture_run(monkeypatch)
-    runner.invoke(app, ["infer", "--db", str(scanned), "--reanalyze"])
-    assert seen["reanalyze_stub"] is True
-    monkeypatch.setattr(cli_mod, "describe_backends", lambda cfg: dict(REAL))
-    runner.invoke(app, ["infer", "--db", str(scanned), "--no-reanalyze"])
-    assert seen["reanalyze_stub"] is False
+def test_infer_rejects_the_library_stage_and_the_old_flag(scanned):
+    assert runner.invoke(app, ["infer", "--db", str(scanned), "--stage", "library"]).exit_code == 2
+    assert runner.invoke(app, ["infer", "--db", str(scanned), "--reanalyze"]).exit_code != 0
 
 
-def test_infer_queues_stub_rows_when_pipeline_lacks_the_parameter(monkeypatch, scanned):
-    from photocure.inference import pipeline as pl
-    called = {}
-
-    def old_run(self, db_path=None, only_paths=None, show_progress=True):
-        return types.SimpleNamespace(processed=0, faces_total=0, quality_computed=0,
-                                     semantic_computed=0, failures=0, duration_s=0.0)
-
-    monkeypatch.setattr(pl.InferencePipeline, "run", old_run)
-    monkeypatch.setattr(pl, "mark_stub_rows_for_reanalysis",
-                        lambda session: called.setdefault("n", 3), raising=False)
-    r = runner.invoke(app, ["infer", "--db", str(scanned), "--reanalyze"])
-    assert r.exit_code == 0 and called["n"] == 3
-    assert "Queued 3 photos" in flat(r.stdout)
-
-
-# ------------------------------------------------------------ extras and config
 def test_device_default_is_auto_and_taxonomy_keys_exist():
     assert DeviceSettings.model_fields["device"].default == "auto"
     t = TaxonomySettings()

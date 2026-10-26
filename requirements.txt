@@ -14,6 +14,8 @@ uvicorn[standard]>=0.27
 pydantic-settings>=2.0
 python-multipart>=0.0.9
 pyyaml>=6
+lxml>=5.0
+reverse_geocoder>=1.5.1
 
 # AI model: the same packages as the "ml" extra (Apple Silicon, NVIDIA or CPU).
 # Optional "faces" extra (blink detection): mediapipe>=0.10.14. It installs OpenCV's GUI build;
@@ -25,4 +27,3 @@ open-clip-torch>=2.20
 # Dev / tests
 pytest>=7.0
 httpx>=0.26
-lxml>=5.0

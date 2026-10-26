@@ -43,7 +43,7 @@ def fake_pipeline(monkeypatch, seen):
             seen.append(cfg)
 
         def run(self, **kw):
-            return types.SimpleNamespace(processed=0, faces_total=0, quality_computed=0,
+            return types.SimpleNamespace(processed=0, faces_total=0, quality_computed=0, missing=0,
                                          semantic_computed=0, failures=0, duration_s=0.0)
     import photocure.inference.pipeline as pl
     monkeypatch.setattr(pl, "InferencePipeline", Fake)
@@ -55,7 +55,7 @@ def fake_scanner(monkeypatch, seen):
             seen.append(cfg)
 
         def scan_directory(self, *a, **kw):
-            return types.SimpleNamespace(scanned=0, new=0, duplicates=0, skipped_known=0,
+            return types.SimpleNamespace(scanned=0, new=0, duplicates=0, skipped_known=0, skipped_library=0,
                                          errors=0, duration_s=0.0)
     import photocure.scanner.file_scanner as fs
     monkeypatch.setattr(fs, "FileScanner", Fake)

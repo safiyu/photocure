@@ -6,11 +6,16 @@ from pathlib import Path
 from sqlmodel import col, func, select
 
 from .db import models as M
-from .db.repository import PhotoRepository, dequantize_embedding, quantize_embedding
+from .db.repository import PhotoRepository, dequantize_embedding, quantize_embedding, stage_clause
 from .db.session import get_session
 
 
-def _best_face_id_for(person_id: int, s, scope: str = "all") -> int | None:
+def _cluster_stage(stage: str) -> str:
+    """People made inside Trash are kept apart; New and Library share one set of people."""
+    return "trash" if stage == "trash" else "library"
+
+
+def _best_face_id_for(person_id: int, s, stage: str = "all") -> int | None:
     """Return the face ID with the highest sharpness for a given person cluster, or any face ID."""
     # Try sharpest face first
     q = (
@@ -18,13 +23,9 @@ def _best_face_id_for(person_id: int, s, scope: str = "all") -> int | None:
         .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
         .where(M.FaceDetection.person_id == person_id)
         .where(M.FaceDetection.ignored == False)
-        .where(M.ImageRecord.scan_status != "missing")
+        .where(stage_clause(stage))
         .where(M.FaceDetection.x1.isnot(None))  # must have normalised bbox for crop endpoint
     )
-    if scope == "pipeline":
-        q = q.where(M.ImageRecord.route_status != "executed")
-    elif scope == "library":
-        q = q.where(M.ImageRecord.route_status == "executed")
     best = s.exec(
         q.order_by(M.FaceDetection.face_sharpness.desc())
         .limit(1)
@@ -143,7 +144,7 @@ def _arrange_by_similarity(clusters: list[M.PersonCluster], s=None) -> list[tupl
     return result
 
 
-def list_people(db_path: Path | str, sort: str = "similarity", scope: str = "all") -> list[dict]:
+def list_people(db_path: Path | str, sort: str = "similarity", stage: str = "all") -> list[dict]:
     with get_session(db_path) as s:
         # Prune any empty unnamed ghost clusters
         empty_unnamed = s.exec(
@@ -158,30 +159,29 @@ def list_people(db_path: Path | str, sort: str = "similarity", scope: str = "all
 
         repo = PhotoRepository(s)
         # Compute scoped face counts
-        if scope in ("pipeline", "library"):
+        if stage in ("new", "library", "trash"):
             counts_q = (
                 select(M.FaceDetection.person_id, func.count(M.FaceDetection.id))
                 .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
                 .where(M.FaceDetection.person_id.is_not(None))
                 .where(M.FaceDetection.ignored == False)
-                .where(M.ImageRecord.scan_status != "missing")
+                .where(stage_clause(stage))
+                .group_by(M.FaceDetection.person_id)
             )
-            if scope == "pipeline":
-                counts_q = counts_q.where(M.ImageRecord.route_status != "executed")
-            elif scope == "library":
-                counts_q = counts_q.where(M.ImageRecord.route_status == "executed")
-            counts_q = counts_q.group_by(M.FaceDetection.person_id)
             scoped_counts = dict(s.exec(counts_q).all())
 
             clusters = []
             for c in repo.all_person_clusters():
+                if c.stage != _cluster_stage(stage):
+                    continue
                 cnt = scoped_counts.get(c.id, 0)
                 if cnt > 0:
                     c.face_count = cnt
                     clusters.append(c)
         else:
-            # scope == "all": use cluster's face_count, but sync with active faces if FaceDetections exist
+            # stage == "all": use cluster's face_count, but sync with active faces if FaceDetections exist
             has_any_face = s.exec(select(M.FaceDetection.id).limit(1)).first() is not None
+            library_clusters = [c for c in repo.all_person_clusters() if c.stage != "trash"]
             if has_any_face:
                 counts_q = (
                     select(M.FaceDetection.person_id, func.count(M.FaceDetection.id))
@@ -193,7 +193,7 @@ def list_people(db_path: Path | str, sort: str = "similarity", scope: str = "all
                 )
                 scoped_counts = dict(s.exec(counts_q).all())
                 clusters = []
-                for c in repo.all_person_clusters():
+                for c in library_clusters:
                     if s.exec(select(M.FaceDetection.id).where(M.FaceDetection.person_id == c.id).limit(1)).first() is not None:
                         cnt = scoped_counts.get(c.id, 0)
                     else:
@@ -202,18 +202,18 @@ def list_people(db_path: Path | str, sort: str = "similarity", scope: str = "all
                         c.face_count = cnt
                         clusters.append(c)
             else:
-                clusters = [c for c in repo.all_person_clusters() if c.face_count > 0]
+                clusters = [c for c in library_clusters if c.face_count > 0]
 
         if sort == "name":
             # Named first alphabetically, then unnamed by count desc
             clusters.sort(key=lambda p: (0 if p.name else 1, (p.name or "").lower(), -p.face_count))
-            items = [_as_dict(p, _best_face_id_for(p.id, s, scope=scope)) for p in clusters]
+            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage)) for p in clusters]
         elif sort == "count":
             clusters.sort(key=lambda p: (p.face_count, p.id or 0), reverse=True)
-            items = [_as_dict(p, _best_face_id_for(p.id, s, scope=scope)) for p in clusters]
+            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage)) for p in clusters]
         else:  # default: "similarity"
             arranged = _arrange_by_similarity(clusters, s)
-            items = [_as_dict(p, _best_face_id_for(p.id, s, scope=scope), match) for p, match in arranged]
+            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage), match) for p, match in arranged]
 
         return [it for it in items if it["face_count"] > 0]
 
@@ -227,7 +227,7 @@ def rename_person(db_path: Path | str, person_id: int, name: str) -> dict:
         p = s.get(M.PersonCluster, person_id)
         if p is None:
             raise ActionError(f"no person with id {person_id}", 404)
-        existing = repo.find_person_by_name(name)
+        existing = repo.find_person_by_name(name, stage=p.stage)  # never merge across library and trash
         if existing is not None and existing.id != person_id:
             faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.person_id == person_id)).all()
             for f in faces:
@@ -260,10 +260,12 @@ def reassign_face(db_path: Path | str, face_id: int, *, person_id: int | None = 
             if target is None:
                 raise ActionError(f"no person with id {person_id}", 404)
         else:
-            target = repo.find_person_by_name(new_name)
+            image = s.get(M.ImageRecord, face.image_id)
+            person_stage = _cluster_stage(image.stage if image is not None else "new")
+            target = repo.find_person_by_name(new_name, stage=person_stage)
             if target is None:
                 embedding = dequantize_embedding(face.embedding_json) or []
-                target = repo.create_person_cluster(embedding)
+                target = repo.create_person_cluster(embedding, stage=person_stage)
                 target = repo.rename_person(target.id, new_name)
                 created_fresh = True
 
@@ -308,18 +310,18 @@ def merge_people(db_path: Path | str, source_id: int, target_id: int) -> dict:
         return _as_dict(target, sample_face_id)
 
 
-def delete_person(db_path: Path | str, person_id: int, scope: str = "all") -> dict:
-    """Delete a person cluster and mark its faces ignored (scoped to mode)."""
+def delete_person(db_path: Path | str, person_id: int, stage: str = "all") -> dict:
+    """Delete a person cluster and mark its faces ignored (limited to one stage when given)."""
     with get_session(db_path) as s:
         p = s.get(M.PersonCluster, person_id)
         if p is None:
             raise ActionError(f"no person with id {person_id}", 404)
-        if scope == "pipeline":
+        if stage in ("new", "library", "trash"):
             q = (
                 select(M.FaceDetection)
                 .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
                 .where(M.FaceDetection.person_id == person_id)
-                .where(M.ImageRecord.route_status != "executed")
+                .where(M.ImageRecord.stage == stage)
             )
             pipeline_faces = s.exec(q).all()
             for f in pipeline_faces:
@@ -333,7 +335,7 @@ def delete_person(db_path: Path | str, person_id: int, scope: str = "all") -> di
             if p.face_count <= 0 and not p.name:
                 s.delete(p)
             s.commit()
-            return {"id": person_id, "deleted": True, "scoped": "pipeline"}
+            return {"id": person_id, "deleted": True, "scoped": stage}
 
         faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.person_id == person_id)).all()
         for f in faces:
@@ -344,17 +346,17 @@ def delete_person(db_path: Path | str, person_id: int, scope: str = "all") -> di
         return {"id": person_id, "deleted": True}
 
 
-def bulk_delete_people(db_path: Path | str, person_ids: list[int], scope: str = "all") -> dict:
+def bulk_delete_people(db_path: Path | str, person_ids: list[int], stage: str = "all") -> dict:
     """Delete multiple person clusters and mark their faces ignored in a single transaction."""
     if not person_ids:
         return {"deleted_count": 0}
     with get_session(db_path) as s:
-        if scope == "pipeline":
+        if stage in ("new", "library", "trash"):
             q = (
                 select(M.FaceDetection)
                 .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
                 .where(col(M.FaceDetection.person_id).in_(person_ids))
-                .where(M.ImageRecord.route_status != "executed")
+                .where(M.ImageRecord.stage == stage)
             )
             pipeline_faces = s.exec(q).all()
             for f in pipeline_faces:
@@ -374,7 +376,7 @@ def bulk_delete_people(db_path: Path | str, person_ids: list[int], scope: str = 
                 if c.face_count <= 0 and not c.name:
                     s.delete(c)
             s.commit()
-            return {"deleted_count": count, "scoped": "pipeline"}
+            return {"deleted_count": count, "scoped": stage}
 
         faces = s.exec(
             select(M.FaceDetection)
@@ -395,7 +397,7 @@ def bulk_delete_people(db_path: Path | str, person_ids: list[int], scope: str = 
         return {"deleted_count": count}
 
 
-def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
+def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = "new") -> dict:
     """Recluster faces on New Pipeline photos while anchoring on existing named/library PersonCluster centroids.
 
     - Preserves existing named clusters and Library photos.
@@ -413,22 +415,22 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
             .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
             .where(M.FaceDetection.embedding_json.isnot(None))
             .where(M.FaceDetection.ignored == False)
-            .where(M.ImageRecord.route_status != "executed")
-            .where(M.ImageRecord.scan_status != "missing")
+            .where(stage_clause(stage))
         ).all()
 
         if not faces:
             return {"clusters_created": 0, "faces_clustered": 0}
 
         # Keep existing custom names mapped to old person_id
-        old_clusters = s.exec(select(M.PersonCluster)).all()
+        cluster_stage = _cluster_stage(stage)
+        old_clusters = s.exec(select(M.PersonCluster).where(M.PersonCluster.stage == cluster_stage)).all()
         custom_names = {c.id: c.name for c in old_clusters if c.name}
 
         # Seed anchored clusters from existing clusters with centroids
         clusters: list[dict] = []
         anchored_cluster_ids = set()
         for c in old_clusters:
-            if not c.centroid_json:
+            if not c.centroid_json or stage == "trash":  # trash people are rebuilt from scratch
                 continue
             # Only anchor on clusters that have faces in finalized Library photos
             lib_face_cnt = s.exec(
@@ -436,7 +438,7 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
                 .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
                 .where(M.FaceDetection.person_id == c.id)
                 .where(M.FaceDetection.ignored == False)
-                .where(M.ImageRecord.route_status == "executed")
+                .where(M.ImageRecord.stage == "library")
             ).one()
             if not lib_face_cnt or lib_face_cnt <= 0:
                 continue
@@ -457,7 +459,7 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
                 select(M.FaceDetection.image_id)
                 .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
                 .where(M.FaceDetection.person_id == c.id)
-                .where(M.ImageRecord.route_status == "executed")
+                .where(M.ImageRecord.stage == "library")
             ).all())
 
             clusters.append({
@@ -473,6 +475,12 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
         # Clear old pipeline clusters that have no Library faces
         for c in old_clusters:
             if c.id not in anchored_cluster_ids:
+                if stage != "trash" and c.name and s.exec(
+                        select(func.count(M.FaceDetection.id))
+                        .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
+                        .where(M.FaceDetection.person_id == c.id)
+                        .where(M.ImageRecord.stage == "library")).one():
+                    continue  # a person the user named keeps their finished photos, centroid or not
                 s.delete(c)
         s.flush()
 
@@ -556,6 +564,7 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
                     centroid_json=quantize_embedding(centroid_list),
                     face_count=len(c_data["face_ids"]),
                     name=cluster_name,
+                    stage=cluster_stage,
                 )
                 s.add(new_c)
                 s.flush()
@@ -580,3 +589,75 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64) -> dict:
 
 
 
+
+
+def detach_faces(s, image_id: int) -> int:
+    """Take a photo's faces out of their people (it left the library); empty unnamed people go.
+
+    The faces keep their ignored flag: only a person the user deleted marks faces ignored."""
+    n = 0
+    for f in s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == image_id)).all():
+        if f.person_id is not None:
+            c = s.get(M.PersonCluster, f.person_id)
+            if c is not None:
+                c.face_count = max(0, c.face_count - 1)
+                if c.face_count <= 0 and not c.name:
+                    s.delete(c)
+        f.person_id = None  # detached, not rejected: Reanalyse and Restore may cluster it again
+        n += 1
+    s.flush()
+    return n
+
+
+def attach_faces_to_library(s, image_id: int, threshold: float = 0.64) -> dict:
+    """Match a restored photo's faces to the people already in the library.
+
+    A face joins the closest library person at or above ``threshold``, otherwise it starts a new
+    person. Two faces of one photo never share a person. Faces leave their trash person, and a
+    trash person left with no faces is deleted. Faces ignored while trashed come back.
+    """
+    from .clustering.face_identity import ClusterCentroid, assign_cluster, update_centroid
+
+    faces = [f for f in s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == image_id)).all()
+             if f.embedding_json]
+    faces.sort(key=lambda f: f.face_sharpness or 0.0, reverse=True)
+    centroids = {c.id: ClusterCentroid(c.id, dequantize_embedding(c.centroid_json) or [], c.face_count)
+                 for c in s.exec(select(M.PersonCluster).where(M.PersonCluster.stage == "library")).all()
+                 if c.centroid_json and c.face_count > 0}
+    claimed: set[int] = set()
+    matched = created = 0
+    for f in faces:
+        emb = dequantize_embedding(f.embedding_json)
+        if not emb:
+            continue
+        old_pid = f.person_id
+        pid = assign_cluster(emb, [c for c in centroids.values() if c.person_id not in claimed], threshold)
+        if pid is not None:
+            c = centroids[pid]
+            person = s.get(M.PersonCluster, pid)
+            new_centroid = update_centroid(c.centroid, c.face_count, emb)
+            person.centroid_json = quantize_embedding(new_centroid)
+            person.face_count = c.face_count + 1
+            centroids[pid] = ClusterCentroid(pid, new_centroid, person.face_count)
+            matched += 1
+        else:
+            person = M.PersonCluster(name=None, face_count=1, stage="library",
+                                     centroid_json=quantize_embedding(emb))
+            s.add(person)
+            s.flush()
+            pid = person.id
+            centroids[pid] = ClusterCentroid(pid, list(emb), 1)
+            created += 1
+        claimed.add(pid)
+        if old_pid is not None and old_pid != pid:
+            old = s.get(M.PersonCluster, old_pid)
+            if old is not None:
+                old.face_count = max(0, old.face_count - 1)
+                if old.stage == "trash" and old.face_count <= 0:
+                    s.flush()
+                    f.person_id = pid
+                    s.delete(old)
+        f.person_id = pid
+        f.ignored = False
+    s.flush()
+    return {"matched": matched, "created": created}

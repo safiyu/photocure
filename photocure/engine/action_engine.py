@@ -13,7 +13,6 @@ The engine is fully reversible via :class:`RollbackEngine`.
 """
 from __future__ import annotations
 
-import errno
 import logging
 import os
 import shutil
@@ -24,7 +23,7 @@ from pathlib import Path
 from collections.abc import Callable, Iterable, Sequence
 
 from ..config import CuratorConfig
-from ..db.models import ActionLedger, ImageRecord
+from ..db.models import STAGE_LIBRARY, STAGE_TRASH, ActionLedger, ImageRecord
 from ..db.repository import PhotoRepository
 from ..db.session import get_session
 from ..rules.organizer import PlannedAction
@@ -51,7 +50,6 @@ class ExecutionReport:
     dry_run: bool = False
     duration_s: float = 0.0
     errors: list = field(default_factory=list)
-    copy_fallbacks: int = 0  # hardlinks that fell back to a copy
     skipped_collisions: int = 0  # collision_policy=skip leftovers (not errors)
     filtered: int = 0  # skipped by the only_category filter
     in_place: int = 0  # target already is this photo (re-apply no-op)
@@ -97,7 +95,7 @@ def _first_missing_dir(d: Path) -> Path | None:
 def _bytes_needed(op: str, size: int, cross: bool) -> int:
     if op == "copy":
         return size
-    if op in ("move", "hardlink") and cross:
+    if op == "move" and cross:
         return size
     return 0
 
@@ -136,7 +134,7 @@ class ActionEngine:
             rep.bytes_total += size
             probe = _nearest_existing(a.target.parent)
             cross = not self._same_device(a.source, probe)
-            if cross and a.operation in ("move", "hardlink"):
+            if cross and a.operation == "move":
                 rep.cross_device += 1
             need = _bytes_needed(a.operation, size, cross)
             rep.bytes_needed += need
@@ -193,12 +191,14 @@ class ActionEngine:
                 sha = action.sha256 or ""
                 size = action.file_size or 0
                 try:
+                    if action.operation not in ("move", "copy"):
+                        raise ValueError(f"unsupported operation: {action.operation}")
                     marked = False
                     if action.image_id:
                         rec0 = repo.get_by_id(action.image_id)
                         marked = bool(rec0 is not None and rec0.delete_approved)
                     if marked:
-                        if trash and action.operation == "move":
+                        if trash:
                             action.target = self._trash_target(action, root, txn)
                         else:  # marked for delete: never placed in the output, the original stays put
                             rep.skipped += 1
@@ -206,7 +206,7 @@ class ActionEngine:
                             continue
                     elif trash and action.operation == "move" and _is_junk(action):
                         rep.unapproved_junk += 1  # not approved: stays in the junk review folder
-                    if self._is_in_place(action, repo):
+                    if action.reuse_existing and self._is_in_place(action, repo):
                         self._mark_in_place(action, repo, root)
                         session.commit()
                         rep.skipped += 1
@@ -234,6 +234,11 @@ class ActionEngine:
                         str(target), action.operation, sha, size)
                     entry.created_dir = str(created) if created else ""
                     entry.prev_relative_path = (img.relative_path if img else "") or ""
+                    if img is not None:
+                        entry.prev_stage, entry.prev_scan_status = img.stage, img.scan_status
+                        entry.prev_route_status = img.route_status
+                        entry.prev_origin_path = img.origin_path
+                        entry.prev_delete_approved = bool(img.delete_approved)
                     session.commit()
 
                     # 3. Filesystem mutation.
@@ -249,15 +254,18 @@ class ActionEngine:
                         repo.ledger_commit(entry)
                         if img is not None:
                             img.target_path = str(target)
-                            if marked and trash and action.operation == "move":
+                            img.origin_path = img.origin_path or str(action.source)
+                            if marked and trash:
                                 img.route_status = "trashed"
-                                img.scan_status = "missing"
+                                img.scan_status = "missing"  # every feature ignores it; Trash lists by stage
+                                img.stage = STAGE_TRASH
                             else:
                                 img.route_status = "executed"
-                            if action.operation == "move":
-                                self._retire_stale_row(session, str(target), img.id)
-                                img.path = str(target)
-                                img.relative_path = _rel(target, root)
+                                img.scan_status = "scanned"
+                                img.stage = STAGE_LIBRARY
+                            self._retire_stale_row(session, str(target), img.id)
+                            img.path = str(target)
+                            img.relative_path = _rel(target, root)
                         session.commit()
                     except Exception as e:
                         # The file already moved: record that so rollback can reverse it.
@@ -345,10 +353,12 @@ class ActionEngine:
         if img is None:
             return
         img.target_path = str(action.target)
+        img.origin_path = img.origin_path or str(action.source)
         img.route_status = "executed"
-        if action.operation == "move":
-            img.path = str(action.target)
-            img.relative_path = _rel(action.target, root)
+        img.scan_status = "scanned"
+        img.stage = STAGE_LIBRARY
+        img.path = str(action.target)
+        img.relative_path = _rel(action.target, root)
 
     def _prepare_target(self, action: PlannedAction, repo) -> Path | None:
         """Create the destination dir and resolve a name collision per ``collision_policy``.
@@ -390,12 +400,8 @@ class ActionEngine:
             self._move(src, target, sha)
         elif op == "copy":
             self._copy(src, target)
-        elif op == "hardlink":
-            return self._link_or_copy(src, target, self._rep)
-        elif op == "symlink":
-            self._symlink(src, target)
         else:
-            raise ValueError(f"unknown operation: {op}")
+            raise ValueError(f"unsupported operation: {op}")
         return op
 
     @staticmethod
@@ -420,7 +426,18 @@ class ActionEngine:
         if target.exists() and os.path.samefile(src, target):
             return  # already in place
         if ActionEngine._same_device(src, target.parent):
-            os.replace(src, target)
+            # Link then unlink instead of os.replace: a link fails if the name was taken since the
+            # check, where replace would silently overwrite whatever just appeared there.
+            try:
+                os.link(src, target, follow_symlinks=False)
+            except FileExistsError:
+                raise
+            except (OSError, NotImplementedError):  # no hard links on this filesystem
+                if os.path.lexists(target):
+                    raise FileExistsError(str(target)) from None
+                os.replace(src, target)
+                return
+            os.unlink(src)
             return
         # Cross-device: copy, verify against the ledger hash, then remove the source.
         if src.is_symlink():
@@ -442,30 +459,6 @@ class ActionEngine:
     def _copy(src: Path, target: Path) -> None:
         ActionEngine._check_space(src, target)
         _copy_or_cleanup(src, target)
-
-    @staticmethod
-    def _link_or_copy(src: Path, target: Path, rep: ExecutionReport) -> str:
-        """Hardlink, or copy when the filesystem refuses. Returns "hardlink" or "copy"."""
-        try:
-            os.link(src, target)
-            return "hardlink"
-        except FileExistsError:
-            raise
-        except OSError as e:
-            if e.errno not in {errno.EXDEV, errno.EPERM, errno.EMLINK, errno.ENOTSUP, errno.EOPNOTSUPP}:
-                raise  # e.g. ENOSPC: do not mask a real failure with a copy attempt
-            ActionEngine._check_space(src, target)
-            _copy_or_cleanup(src, target)
-            rep.copy_fallbacks += 1
-            why = {errno.EXDEV: "cross-filesystem (EXDEV)",
-                   errno.EPERM: "refused (EPERM, protected_hardlinks or ACL?)"}.get(
-                       e.errno, f"unsupported (errno {e.errno})")
-            log.warning("hardlink %s; copied %s -> %s", why, src, target)
-            return "copy"
-
-    @staticmethod
-    def _symlink(src: Path, target: Path) -> None:
-        target.symlink_to(src.resolve())
 
 
 def _norm_categories(only: Iterable[str] | str | None) -> set[str] | None:

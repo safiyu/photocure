@@ -12,9 +12,9 @@
 
   const PAGE = 200;
   const state = {
-    tab: "library", cats: [], junk: new Set(), utility: new Set(), utilityKind: "", byId: {}, busy: false, taskRunning: false,
+    tab: "library", stage: "new", libraryMissing: 0, cats: [], junk: new Set(), utility: new Set(), utilityKind: "", byId: {}, busy: false, taskRunning: false,
     inferred: false,
-    triageSel: -1, triageGrid: null, undo: [], picks: new Set(), peoplePicks: new Set(), lastPick: null,
+    triageGrid: null, undo: [], picks: new Set(), peoplePicks: new Set(), lastPick: null,
     overview: null, eventId: null,
     backend: null, thresholds: null, manualCount: 0,
     settings: null, draft: { device: "auto", device_index: 0 }, busyBtn: null,
@@ -36,6 +36,24 @@
     settings: ["Settings", "Choose what runs the analysis and how many workers it uses."],
     actions: ["Apply and undo", "Review the plan, then organize your files. Every change can be undone."],
   };
+
+  const TRASH_SUB = "Photos you removed. Restore them, send them back where they came from, or delete them for good.";
+
+  // Title and subtitle for a tab, adjusted for the stage: Trash renames the grid, Library flags missing files.
+  function stageTitles(name) {
+    const [title, sub] = TITLES[name] || [name, ""];
+    if (state.stage === "trash" && name === "categories") return ["Trash", TRASH_SUB];
+    if (state.stage === "library" && num(state.libraryMissing) > 0) {
+      const n = num(state.libraryMissing);
+      return [title, `${sub} ${fmtN(n)} photo${n === 1 ? " is" : "s are"} missing on disk.`];
+    }
+    return [title, sub];
+  }
+  function applyStageTitles() {
+    const [title, sub] = stageTitles(state.tab);
+    $("#page-title").textContent = title;
+    $("#page-sub").textContent = sub;
+  }
 
   // ------------------------------------------------------------------ utils
   function toast(msg, cls, action) {
@@ -178,6 +196,7 @@
     let isTrapping = false;
     const onDocFocusIn = (e) => {
       if (isTrapping) return;
+      if (e.target.closest && e.target.closest("#auth-modal, #confirm-modal")) return;  // these must stay usable
       if (activeTraps[activeTraps.length - 1] !== trapRecord) return;
       if (!container.contains(e.target)) {
         const items = getFocusable();
@@ -564,8 +583,12 @@
           el("button", { class: "x", "data-clear": id, title: "Back to the AI choice",
             "aria-label": "Back to the AI choice", tabindex: -1, html: icon("x", "sm") })] : null));
 
-    const actions = el("div", { class: "actions" },
-      el("button", {
+    const delBtn = state.stage === "trash"
+      ? el("button", {
+        type: "button", class: "btn btn-del", "data-purge": id, title: "Delete permanently",
+        "aria-label": "Delete permanently", tabindex: -1,
+      }, el("span", { class: "btn-ic", html: icon("trash", "sm") }), el("span", { class: "btn-lbl", text: "Delete forever" }))
+      : el("button", {
         type: "button",
         class: "btn btn-del" + (it.delete_approved ? " is-del" : ""),
         "data-approve-delete": id,
@@ -573,7 +596,9 @@
         title: it.delete_approved ? "Marked for delete (click to unmark)" : "Mark for delete",
         "aria-label": it.delete_approved ? "Clear delete mark" : "Mark for delete",
         tabindex: -1,
-      }, el("span", { class: "btn-ic", html: icon("trash", "sm") }), el("span", { class: "btn-lbl", text: it.delete_approved ? "Marked" : "Delete" })),
+      }, el("span", { class: "btn-ic", html: icon("trash", "sm") }), el("span", { class: "btn-lbl", text: it.delete_approved ? "Marked" : "Delete" }));
+    const actions = el("div", { class: "actions" },
+      delBtn,
       el("button", {
         type: "button",
         class: "btn btn-lock" + (it.locked ? " is-locked" : ""),
@@ -658,9 +683,9 @@
       renderSkeleton: () => el("div", { class: "skel" }),
       async fetchPage(offset, limit) {
         const qs = cfg.params();
-        const sc = state.scope || "pipeline";
-        const scopeParam = (qs && qs.includes("scope=")) ? "" : `&scope=${encodeURIComponent(sc)}`;
-        const data = await api(`/api/images?${qs}${qs ? "&" : ""}limit=${limit}&offset=${offset}${scopeParam}`);
+        const sc = state.stage || "new";
+        const stageParam = (qs && qs.includes("stage=")) ? "" : `&stage=${encodeURIComponent(sc)}`;
+        const data = await api(`/api/images?${qs}${qs ? "&" : ""}limit=${limit}&offset=${offset}${stageParam}`);
         data.items.forEach((it) => { state.byId[it.id] = it; });
         return data;
       },
@@ -717,8 +742,16 @@
   }
   function itemUpdated(it) {
     state.byId[it.id] = it;
+    const wasCurrent = lb.open && lbIdAt(lb.i) === it.id;
     allGrids().forEach((g) => g.rerender(it));
-    if (lb.open && lbIdAt(lb.i) === it.id) lbRender();
+    if (!lb.open) return;
+    if (lbIdAt(lb.i) === it.id) { lbRender(); return; }
+    if (!wasCurrent) return;
+    // The photo left the grid under the viewer: show what now sits at this place, or close it.
+    const n = lbCount();
+    if (n === 0) { closeLightbox(); return; }
+    lb.i = Math.min(lb.i, n - 1);
+    lbRender();
   }
 
   function setupGrids() {
@@ -754,7 +787,9 @@
         if (rt !== "" && !rt.startsWith("min:") && rt !== "0" && num(it.rating) !== num(rt)) return false;
         return true;
       },
-      empty: () => (state.overview && state.overview.total === 0
+      empty: () => (state.stage === "trash"
+        ? { icon: "trash", title: "The trash is empty", text: "Photos you delete show up here. You can restore them or delete them for good." }
+        : state.overview && state.overview.total === 0
         ? { icon: "import", title: "Your library is empty", text: "Import a folder of photos to get started.",
             action: { label: "Go to Import", attr: 'data-goto="library"' } }
         : { icon: "search", title: "No photos match", text: "Try a different search or clear the filters.",
@@ -781,7 +816,7 @@
         const k = state.utilityKind;
         return k ? eff(it) === k : state.utility.has(eff(it));
       },
-      empty: { icon: "inbox", title: "Nothing here yet", text: "Receipts, notes, screenshots, labels, signs and packaging show up here after you analyze your photos. Already analyzed? Press Re-check my photos." },
+      empty: { icon: "inbox", title: "Nothing here yet", text: "Receipts, notes, screenshots, labels, signs and packaging show up here after you analyze your photos." },
     });
     makeGrid("uncertain", {
       el: "#uncertaingrid", more: "#uncertaingrid-more", count: "#uncertaincount",
@@ -1015,7 +1050,7 @@
   }
 
   async function loadFacets() {
-    try { applyFacets(await api("/api/facets")); } catch (e) { /* the filters just stay as they were */ }
+    try { applyFacets(await api(`/api/facets?stage=${encodeURIComponent(state.stage)}`)); } catch (e) { /* the filters just stay as they were */ }
   }
 
   function bindFilters() {
@@ -1083,6 +1118,7 @@
     const bi = pn ? null : burstPickInfo();
     $("#bulkbar").classList.toggle("burst-ctx", !!bi);
     $("#bulkbar").classList.toggle("people-ctx", pn > 0);
+    $("#bulkbar").classList.toggle("trash-ctx", state.stage === "trash" && !pn && !bi);
     if (n === 0) closeOverlay($("#bulkbar")); else openOverlay($("#bulkbar"));
     if (pn) {
       $("#bulk-count").textContent = `${fmtN(pn)} ${pn === 1 ? "person" : "people"}`;
@@ -1174,7 +1210,7 @@
     if (!ok) return;
     try {
       for (const p of sel) {
-        await api(`/api/people/${p.id}`, { method: "DELETE" });
+        await api(`/api/people/${p.id}?stage=${encodeURIComponent(state.stage)}`, { method: "DELETE" });
         state.peoplePicks.delete(p.id);
         await rippleDeleteCard(p.card, p.id);
       }
@@ -1265,6 +1301,88 @@
 
   const bulkJunk = () => bulkReassign("accidental");
 
+  // ------------------------------------------------------------ trash
+  const SKIP_WORDS = {
+    file_missing: "the file is gone",
+    origin_missing: "the original folder is missing",
+    origin_occupied: "a file already sits at the origin",
+    outside_trash: "it is not inside the trash folder",
+  };
+
+  function skippedText(res) {
+    const parts = Object.entries(res.skipped_reasons || {}).filter(([, n]) => n > 0)
+      .map(([k, n]) => `${SKIP_WORDS[k] || k} (${fmtN(n)})`);
+    const skipN = Math.max(0, num(res.skipped) - num(res.failed));  // a failed move is counted as skipped too
+    const skipped = skipN > 0 ? ` ${fmtN(skipN)} skipped: ${parts.join(", ") || "see the activity log"}.` : "";
+    const failed = num(res.failed) > 0 ? ` ${fmtN(res.failed)} failed: ${(res.errors || [])[0] || "see the activity log"}.` : "";
+    return skipped + failed;
+  }
+
+  async function runTrashJob(label, path, body, summary) {
+    const res = await runTask(label, async () => followJob((await post(path, body)).job_id, label));
+    if (!res) return null;
+    const flag = num(res.skipped) > 0 || num(res.failed) > 0 ? "warn" : "ok";
+    toast(summary(res) + skippedText(res), flag);
+    libLog(summary(res) + skippedText(res), flag);
+    if (lb.open) closeLightbox();  // the photo it shows may be gone
+    clearPicks();
+    resetVisibleGrids();
+    loadStats();
+    return res;
+  }
+
+  const photos = (n) => `${fmtN(n)} photo${n === 1 ? "" : "s"}`;
+
+  async function restoreSelected() {
+    const ids = Array.from(state.picks);
+    if (ids.length) await runTrashJob("Restoring", "/api/trash/restore", { ids }, (r) => `Restored ${photos(num(r.restored))}.`);
+  }
+
+  async function returnSelected() {
+    const ids = Array.from(state.picks);
+    if (ids.length) await runTrashJob("Returning", "/api/trash/return", { ids }, (r) => `Returned ${photos(num(r.returned))} to the folder they came from.`);
+  }
+
+  async function purgePhotos(ids) {
+    const one = ids.length === 1 ? state.byId[ids[0]] : null;
+    const ok = await showConfirmDialog({
+      title: `Delete ${photos(ids.length)} permanently?`,
+      message: `${one && one.filename ? one.filename + " is" : "The files are"} removed from your disk. This cannot be undone.`,
+      confirmText: "Delete permanently", variant: "danger" });
+    if (!ok) return;
+    await runTrashJob("Deleting", "/api/trash/delete", { ids }, (r) => `Deleted ${photos(num(r.deleted))} permanently.`);
+  }
+
+  async function emptyTrash() {
+    const n = num(((state.overview || {}).stage_counts || {}).trash);
+    const ok = await showConfirmDialog({
+      title: "Empty the trash?",
+      message: `Everything in the trash${n ? ` (${photos(n)})` : ""} is removed from your disk for good. This cannot be undone.`,
+      confirmText: "Empty trash", variant: "danger" });
+    if (!ok) return;
+    await runTrashJob("Emptying trash", "/api/trash/empty", {}, (r) => `Emptied the trash: ${photos(num(r.deleted))} deleted.`);
+  }
+
+  async function returnAllToOrigin() {
+    const n = num(((state.overview || {}).stage_counts || {}).trash);
+    const ok = await showConfirmDialog({
+      title: "Return everything to its origin?",
+      message: `${photos(n)} will move back to the folders they came from and count as new again.`,
+      confirmText: "Return all", variant: "warning" });
+    if (!ok) return;
+    await runTrashJob("Returning", "/api/trash/return", { ids: null }, (r) => `Returned ${photos(num(r.returned))} to the folders they came from.`);
+  }
+
+  async function reanalyseTrash() {
+    const device = $("#infer-device").value;
+    const r = await runTask(`Reanalysing the trash (${device})`, async () => post("/api/infer", { device, stage: "trash" }));
+    if (!r || r.stopped) return;
+    const gone = num(r.missing) ? ` ${photos(num(r.missing))} had been deleted by hand and left the trash.` : "";
+    toast(`Reanalysed ${photos(num(r.processed))}.${gone}`, "ok");
+    resetVisibleGrids();
+    loadStats();
+  }
+
   async function bulkMarkDelete() {
     const ids = Array.from(state.picks);
     try {
@@ -1281,10 +1399,11 @@
 
   async function bulkLock() {
     const ids = Array.from(state.picks);
+    let kept = 0;
     for (const id of ids) {
-      try { await setLock(id, true); } catch (e) { toast(e.message, "err"); break; }
+      try { await setLock(id, true); kept += 1; } catch (e) { toast(e.message, "err"); break; }
     }
-    toast(`Kept ${fmtN(ids.length)} photo${ids.length === 1 ? "" : "s"}. Re-analysis will not change them.`, "ok");
+    if (kept) toast(`Kept ${fmtN(kept)} photo${kept === 1 ? "" : "s"}. Nothing will change them by mistake.`, "ok");
     clearPicks();
   }
 
@@ -1298,6 +1417,7 @@
     if (!n) return;
     ce.scanned = false;
     ce.unavailable = false;
+    ce.ids = Array.from(state.picks);
     $("#ce-title").textContent = `Clean export of ${fmtN(n)} photo${n === 1 ? "" : "s"}`;
     $("#ce-flagged").replaceChildren();
     $("#ce-status").textContent = "";
@@ -1312,7 +1432,7 @@
     out.textContent = "Checking...";
     list.replaceChildren();
     try {
-      const { job_id } = await post("/api/export/clean/scan", { ids: Array.from(state.picks) });
+      const { job_id } = await post("/api/export/clean/scan", { ids: ce.ids });
       const r = await followJob(job_id, "Privacy scan");
       if (r.unavailable) {
         ce.unavailable = true;
@@ -1346,7 +1466,7 @@
     go.disabled = true;
     $("#ce-status").textContent = "Exporting...";
     try {
-      const { job_id } = await post("/api/export/clean", { ids: Array.from(state.picks), output_dir: dest,
+      const { job_id } = await post("/api/export/clean", { ids: ce.ids, output_dir: dest,
         policy, html: $("#ce-html").checked, rename: $("#ce-rename").checked });
       const r = await followJob(job_id, "Clean export");
       const bits = [`${fmtN(r.exported)} exported`];
@@ -1454,7 +1574,9 @@
     toast(now ? "Locked. Re-analysis will not change it." : "Unlocked", "ok");
   }
 
+  let similarSeq = 0;
   async function showSimilar(id) {
+    const seq = ++similarSeq;
     const panel = $("#similar-panel");
     const it = state.byId[id];
     $("#similar-title").textContent = "Photos similar to " + (it ? it.filename : "#" + num(id));
@@ -1462,12 +1584,14 @@
     sg.replaceChildren(...Array.from({ length: 8 }, () => el("div", { class: "skel" })));
     openOverlay($("#similar-panel"));
     try {
-      const data = await api(`/api/images/${num(id)}/similar?k=24`);
+      const data = await api(`/api/images/${num(id)}/similar?k=24&stage=${encodeURIComponent(state.stage)}`);
+      if (seq !== similarSeq) return;  // a newer click already owns the panel
       data.items.forEach((x) => { state.byId[x.id] = x; });
       sg.replaceChildren(...(data.items.length
         ? data.items.map(cardNode)
         : [emptyNode({ icon: "copy", title: "No similar photos", text: "Analyze the library first, then try again." })]));
     } catch (e) {
+      if (seq !== similarSeq) return;
       sg.replaceChildren(emptyNode({ icon: "alert", title: "Search failed", text: e.message }));
     }
   }
@@ -1527,7 +1651,7 @@
     const story = $("#hl-view").value === "story";
     host.replaceChildren(...Array.from({ length: 6 }, () => el("div", { class: "skel" })));
     try {
-      const data = await api(`/api/highlights/events?per_event=${story ? 8 : 3}` + (story ? "&balanced=true" : "") +
+      const data = await api(`/api/highlights/events?stage=${encodeURIComponent(state.stage)}&per_event=${story ? 8 : 3}` + (story ? "&balanced=true" : "") +
         (m !== "" ? "&min_score=" + encodeURIComponent(m) : ""));
       $("#highlightcount").textContent = `${fmtN(data.events.length)} event${data.events.length === 1 ? "" : "s"}`;
       if (!data.events.length) {
@@ -1726,8 +1850,8 @@
   }
 
   function dupMemberNode(g, m, chosenId) {
-    const it = m.item || { id: m.id, filename: m.filename };
-    state.byId[m.id] = it;
+    const it = m.item || state.byId[m.id] || { id: m.id, filename: m.filename };
+    if (m.item) state.byId[m.id] = it;
     const chosen = m.id === chosenId;
     const stars = m.rating === -1 ? "Rejected" : (m.rating > 0 ? "\u2605".repeat(m.rating) : "");
     const facts = [`${num(m.width)}\u00d7${num(m.height)}`, fmtBytes(m.file_size),
@@ -1777,7 +1901,9 @@
     $("#btn-dup-all").disabled = !(sm && sm.groups) || $("#dup-reviewed").checked;
   }
 
+  let dupSeq = 0;
   async function loadDuplicates(append) {
+    const seq = ++dupSeq;
     const host = $("#dup-list");
     if (!append) {
       dup.groups = [];
@@ -1789,6 +1915,7 @@
       if (kind) qs.set("kind", kind);
       if ($("#dup-reviewed").checked) qs.set("reviewed", "true");
       const data = await api("/api/duplicates?" + qs);
+      if (seq !== dupSeq) return;  // a newer filter change owns the list
       dup.total = data.total;
       dup.groups = dup.groups.concat(data.groups);
       setDupCount(data.summary);
@@ -1802,6 +1929,7 @@
       }
       $("#btn-dup-more").hidden = dup.groups.length >= dup.total;
     } catch (e) {
+      if (seq !== dupSeq) return;
       host.replaceChildren(emptyNode({ icon: "alert", title: "Could not load duplicates", text: e.message }));
     }
   }
@@ -1952,7 +2080,7 @@
     delegatesBound = true;
     document.addEventListener("click", async (ev) => {
       const t = ev.target.closest && ev.target.closest(
-        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-similar],[data-faces],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-reanalyze],.thumb");
+        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-purge],[data-similar],[data-faces],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-analyze-now],.thumb");
       if (!t) return;
       try {
         if (t.dataset.pick) await togglePick(num(t.dataset.pick), ev.shiftKey);
@@ -1964,6 +2092,7 @@
           toast("Back to the AI choice", "ok");
         } else if (t.dataset.lock) await toggleLock(num(t.dataset.lock));
         else if (t.dataset.approveDelete) await toggleApproveDelete(num(t.dataset.approveDelete));
+        else if (t.dataset.purge) await purgePhotos([num(t.dataset.purge)]);
         else if (t.dataset.similar) {
           closeLightbox();
           await showSimilar(num(t.dataset.similar));
@@ -1979,7 +2108,7 @@
           ev.preventDefault();
           await copyText(t.dataset.copytext, t);
         } else if (t.hasAttribute("data-copy")) await copyHint(t);
-        else if (t.hasAttribute("data-reanalyze")) $("#btn-infer").click();
+        else if (t.hasAttribute("data-analyze-now")) $("#btn-infer").click();
         else if (t.hasAttribute("data-sortnow")) await sortNow(false);
         else if (t.dataset.cat !== undefined) setCategoryFilter(t.dataset.cat);
         else if (t.classList.contains("thumb")) {
@@ -2213,7 +2342,8 @@
     const ap = $("#lb-approve");
     ap.disabled = !full;
     ap.setAttribute("aria-pressed", String(!!it.delete_approved));
-    ap.textContent = it.delete_approved ? "Marked for delete (undo)" : "Mark for delete";
+    ap.textContent = state.stage === "trash" ? "Delete permanently"
+      : it.delete_approved ? "Marked for delete (undo)" : "Mark for delete";
     $("#lb-prev").disabled = lb.i === 0;
     $("#lb-next").disabled = lb.i >= lbCount() - 1;
     $("#lb-count").textContent = `${fmtN(lb.i + 1)} of ${fmtN(lbCount())}`;
@@ -2293,7 +2423,7 @@
       } catch (err) { toast(err.message, "err"); }
     };
     $("#lb-lock").onclick = () => toggleLock(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
-    $("#lb-approve").onclick = () => toggleApproveDelete(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
+    $("#lb-approve").onclick = () => (state.stage === "trash" ? purgePhotos([lbIdAt(lb.i)]) : toggleApproveDelete(lbIdAt(lb.i))).catch((e) => toast(e.message, "err"));
     $$("#lb-rate .star").forEach((b) => {
       b.onclick = () => {
         const id = lbIdAt(lb.i);
@@ -2347,7 +2477,7 @@
     info.className = "grow";
     ok.disabled = false;
     if (pk.mode === "output") {
-      if (data.writable) { info.textContent = "Organized photos will be written into this folder."; info.classList.add("good"); }
+      if (data.writable) { info.textContent = pk.info || "Files will be written into this folder."; info.classList.add("good"); }
       else { info.textContent = "You cannot write to this folder."; info.classList.add("bad"); ok.disabled = true; }
     } else {
       info.textContent = data.photos
@@ -2360,6 +2490,7 @@
     pk.opener = document.activeElement;
     pk.onPick = opts.onPick;
     pk.mode = opts.mode || "photos";
+    pk.info = opts.info || "";
     $("#picker-title").textContent = opts.title || "Choose a folder";
     $("#picker-ok").textContent = opts.okLabel || "Use this folder";
     openOverlay($("#picker"));
@@ -2444,10 +2575,11 @@
         if (window.__syncScanPathDisplay) window.__syncScanPathDisplay();
       },
     });
-    $("#btn-browse-out").onclick = () => openPicker({
-      title: "Choose the destination folder", mode: "output", initial: $("#orgroot").value.trim(),
-      okLabel: "Use this folder",
-      onPick: (p) => { $("#orgroot").value = p; },
+    $("#btn-move-library").onclick = openMoveLibrary;
+    $("#btn-browse-library").onclick = () => openPicker({
+      title: "Choose the library folder", mode: "output", initial: $("#set-library-root").value.trim(),
+      okLabel: "Use this folder", info: "Your finished photos will be stored in this folder.",
+      onPick: (p) => { $("#set-library-root").value = p; },
     });
   }
 
@@ -2470,7 +2602,8 @@
   }
 
   const isTriage = (g) => g === grids.uncertain || g === grids.junk;
-  const MODALS = ["#picker", "#help", "#facepanel", "#person-photos-overlay", "#similar-panel"];
+  const MODALS = ["#picker", "#help", "#facepanel", "#person-photos-overlay", "#similar-panel",
+    "#firstrun", "#movelib", "#cleanexport"];
   const SELF_MANAGED = ["#confirm-modal", "#auth-modal", "#restart-overlay"];  // they handle their own keys
   const open = (sel) => { const e = $(sel); return !!(e && !e.hidden); };
   const anyModal = () => MODALS.some(open) || !!catPicker;
@@ -2516,7 +2649,10 @@
     const typing = tag === "input" || tag === "select" || tag === "textarea";
 
     if (ev.key === "Escape") {
+      if (open("#firstrun")) return;  // the first-run popup cannot be dismissed
       if (open("#picker")) closePicker();
+      else if (open("#movelib")) $("#movelib-cancel").click();
+      else if (open("#cleanexport")) closeOverlay($("#cleanexport"));
       else if (open("#help")) closeHelp();
       else if (open("#facepanel")) { if (!closeFaceRename()) closeBiometricProjection(); }
       else if (lb.open) closeLightbox();
@@ -2653,8 +2789,8 @@
 
   // ------------------------------------------------------------------ bursts
   async function renderBursts(keepId) {
-    const sc = state.scope || "pipeline";
-    const data = await api(`/api/bursts?scope=${encodeURIComponent(sc)}`);
+    const sc = state.stage || "new";
+    const data = await api(`/api/bursts?stage=${encodeURIComponent(sc)}`);
     const list = $("#burstlist");
     const scroll = list.scrollTop;
     if (!data.items.length) {
@@ -2758,7 +2894,7 @@
     if (tbBtn) tbBtn.disabled = true;
 
     try {
-      const res = await post("/api/people/bulk-delete", { person_ids: ids });
+      const res = await post(`/api/people/bulk-delete?stage=${encodeURIComponent(state.stage)}`, { person_ids: ids });
       const delCount = res.deleted_count || ids.length;
       toast(`Deleted ${fmtN(delCount)} ${delCount === 1 ? "person" : "people"} ✓`, "ok");
       pendingPeopleDeletions.clear();
@@ -3066,7 +3202,7 @@
     }
 
     if (count === 0) {
-      host.innerHTML = `<div class="people-empty"><svg class="ic" aria-hidden="true"><use href="#i-user"/></svg><p>No identified people yet.</p></div>`;
+      host.innerHTML = `<div class="people-empty"><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg><p>No identified people yet.</p></div>`;
     }
 
     if (_pc.fp) {
@@ -3074,11 +3210,14 @@
     }
   }
 
+  let peopleSeq = 0;
   async function renderPeople(force = false) {
+    const seq = ++peopleSeq;
     const host = $("#peoplegrid");
     const sort = state.peopleSort || "similarity";
-    const sc = state.scope || "pipeline";
-    const data = await api(`/api/people?sort=${encodeURIComponent(sort)}&scope=${encodeURIComponent(sc)}`);
+    const sc = state.stage || "new";
+    const data = await api(`/api/people?sort=${encodeURIComponent(sort)}&stage=${encodeURIComponent(sc)}`);
+    if (seq !== peopleSeq) return;  // another sort or stage was requested meanwhile
     (data.items || []).forEach((p) => { if (p.name) allKnownPeopleNames.add(p.name); });
     const allItems = (data.items || []).filter((p) => p.face_count > 0 && (p.sample_face_id != null || p.name));
     const items = allItems.filter((p) => !pendingPeopleDeletions.has(p.id));
@@ -3125,6 +3264,10 @@
     if (reclusterBtn && !reclusterBtn._wired) {
       reclusterBtn._wired = true;
       reclusterBtn.addEventListener("click", async () => {
+        if (state.stage === "library") {
+          toast("Re-cluster works on New or Trash photos. Switch there first.", "err");
+          return;
+        }
         const ok = await showConfirmDialog({
           title: "Re-cluster all faces?",
           message: "This will separate faces that were mistakenly grouped together by applying the strict facial identity threshold (0.64). Custom names will be preserved.",
@@ -3135,7 +3278,7 @@
         reclusterBtn.disabled = true;
         toast("Re-clustering faces with strict threshold…", "ok");
         try {
-          const res = await post("/api/people/recluster", {});
+          const res = await post(`/api/people/recluster?stage=${encodeURIComponent(state.stage)}`, {});
           toast(`Done! Formed ${fmtN(res.clusters_created)} person clusters across ${fmtN(res.faces_clustered)} faces.`, "ok");
           _pc.fp = null;
           await renderPeople(true);
@@ -3540,8 +3683,8 @@
     document.body.style.overflow = "hidden";
 
     try {
-      const sc = state.scope || "pipeline";
-      const data = await api(`/api/people/${personId}/photos?scope=${encodeURIComponent(sc)}`);
+      const sc = state.stage || "new";
+      const data = await api(`/api/people/${personId}/photos?stage=${encodeURIComponent(sc)}`);
       const { person, photos } = data;
 
       // Header
@@ -3666,7 +3809,7 @@
       });
       if (!ok) return;
       try {
-        await api(`/api/people/${activePpoPersonId}`, { method: "DELETE" });
+        await api(`/api/people/${activePpoPersonId}?stage=${encodeURIComponent(state.stage)}`, { method: "DELETE" });
         const targetPid = activePpoPersonId;
         closePersonPhotos();
         toast("Person deleted", "ok");
@@ -3751,11 +3894,6 @@
 
   function setFaceZoom(multiplier) {
     faceZoomMultiplier = multiplier;
-    if (activeOverlayImageId) renderBiometricOverlay();
-  }
-
-  function setSpeed(speed) {
-    document.documentElement.style.setProperty('--speed', speed || 0.5);
     if (activeOverlayImageId) renderBiometricOverlay();
   }
 
@@ -4559,19 +4697,11 @@
   window.closeBiometricProjection = closeBiometricProjection;
   window.setOverlayLayout = setOverlayLayout;
   window.setFaceZoom = setFaceZoom;
-  window.setSpeed = setSpeed;
   window.setHoveredFace = setHoveredFace;
   window.selectFaceInOverlay = selectFaceInOverlay;
   window.makeOverlayBestShot = makeOverlayBestShot;
   window.toggleOverlayMarkDelete = toggleOverlayMarkDelete;
   window.reassignFace = reassignFace;
-
-  // Compatibility alias
-  async function showFaces(imageId, host, filename) {
-    if (currentBurstId) {
-      await openBiometricProjection(currentBurstId, imageId);
-    }
-  }
 
   async function rejectBlinks(burstId, count) {
     const yes = await showConfirmDialog({
@@ -4618,7 +4748,9 @@
   const GM_WORDS = { open: "eyes open", possible: "eyes may be closing", closed: "eyes closed",
     unknown: "eyes not measured", missing: "not seen in this frame" };
 
+  let burstSeq = 0;
   async function showBurst(id) {
+    const seq = ++burstSeq;
     currentBurstId = id;
     closeBiometricProjection();
     clearPicks();
@@ -4627,7 +4759,8 @@
       r.classList.toggle("on", on);
       r.classList.toggle("is-active", on);
     });
-    const data = await api("/api/burst/" + num(id));
+    const data = await api(`/api/burst/${num(id)}?stage=${encodeURIComponent(state.stage)}`);
+    if (seq !== burstSeq) return;  // another burst was opened while this one loaded
     state.burst = data;
     const group = data.group;
     const gmById = {};
@@ -4652,13 +4785,13 @@
     $("#burstdetail").innerHTML = `
       <div class="burst-header anim-fade">
         <div class="detail-head">
-          <h1 class="burst-title" id="title">${esc(data.burst)}</h1>
-          <span class="count" id="count">${fmtN(data.members.length)} frames</span>
+          <h1 class="burst-title" id="burst-title">${esc(data.burst)}</h1>
+          <span class="count" id="burst-count">${fmtN(data.members.length)} frames</span>
         </div>
         ${banner}
         <div class="toolbar" id="blinkbar"></div>
       </div>
-      <section class="burstgrid grid anim-in" id="grid" aria-label="Frames">` +
+      <section class="burstgrid grid anim-in" id="burst-frames" aria-label="Frames">` +
       data.members.map((m) => {
         const sharp = m.sharpness_norm != null ? num(m.sharpness_norm) : 1.0;
         const face = m.face_confidence != null ? num(m.face_confidence) : (m.face_count ? 0.9 : 0.85);
@@ -4875,13 +5008,12 @@
   // ------------------------------------------------------------------ plan UI
   function planBody() {
     return {
-      operation: $("#op").value, mode: $("#orgmode").value,
-      output_dir: $("#orgroot").value.trim(),
+      operation: $("#op").value,
       only_category: $("#onlycat").value || null, trash: $("#trash").checked,
     };
   }
 
-  const OPVERB = { move: "Move", copy: "Copy", hardlink: "Hard link", symlink: "Link" };
+  const OPVERB = { move: "Move", copy: "Copy" };
 
   function renderDiff(d, confirmable) {
     const el = $("#diff-panel");
@@ -4931,9 +5063,6 @@
         if (res.unapproved_junk) logLine(`${fmtN(res.unapproved_junk)} junk photos were not approved for deletion and stay in the junk review folder`, "warn");
         toast(`Organized ${fmtN(res.executed)} photos. You can undo this from this page.`, "ok");
         if (res.backup_warning) toast(res.backup_warning, "err");
-        if (num(res.copy_fallbacks) > 0) {
-          addBanner("copy", "Cross-filesystem link detected; files were copied instead of hardlinked.", [["Dismiss", (ev) => ev.currentTarget.parentNode.remove()]]);
-        }
         if (num(res.skipped_collisions) > 0) {
           addBanner("skip", `${fmtN(res.skipped_collisions)} files were left in place because their names were already taken.`, [["Dismiss", (ev) => ev.currentTarget.parentNode.remove()]]);
         }
@@ -5104,8 +5233,8 @@
     } else if (b && num(b.stub_rows) > 0) {
       html = `<div class="banner info" role="status">${icon("alert")}<div class="b-body">
         <h3>${fmtN(b.stub_rows)} photo${num(b.stub_rows) === 1 ? " was" : "s were"} analysed by the placeholder</h3>
-        <p>Analyze again to improve them with the real model.</p>
-        <div class="b-row"><button class="btn primary sm" type="button" data-reanalyze>Analyze again</button></div></div></div>`;
+        <p>Analyze now to improve the ones you have not finished with the real model.</p>
+        <div class="b-row"><button class="btn primary sm" type="button" data-analyze-now>Analyze now</button></div></div></div>`;
     }
     $$(".banner-host").forEach((h) => { h.innerHTML = html; });
   }
@@ -5187,6 +5316,112 @@
     sel.value = ok ? want : "auto";
   }
 
+  // Move the library: pick an empty folder, see what will be copied, then run the copy-and-switch job.
+  function openMoveLibrary() {
+    const modal = $("#movelib"), path = $("#movelib-path"), pv = $("#movelib-preview"), start = $("#movelib-start");
+    path.value = "";
+    pv.textContent = "";
+    pv.className = "help";
+    start.disabled = true;
+    let release = null;
+    const opener = document.activeElement;
+    const close = () => {
+      if (release) release();
+      release = null;
+      closeOverlay(modal);
+      if (opener && opener.focus) opener.focus();
+    };
+    openOverlay(modal);
+    release = trapFocus(modal, close);
+    $("#movelib-close").onclick = $("#movelib-cancel").onclick = close;
+    $("#movelib-browse").onclick = () => openPicker({
+      title: "Choose the new library folder", mode: "output", initial: path.value.trim(), okLabel: "Use this folder",
+      info: "The whole library will be copied into this folder.",
+      onPick: async (p) => {
+        path.value = p;
+        start.disabled = true;
+        try {
+          const r = await api(`/api/library/migrate/preview?path=${encodeURIComponent(p)}`);
+          pv.textContent = r.error
+            ? r.error
+            : `${fmtN(r.files)} file${r.files === 1 ? "" : "s"}, ${fmtBytes(r.bytes)}; ${fmtBytes(r.free_bytes)} free there.`;
+          pv.className = "help " + (r.ok ? "ok" : "err");
+          start.disabled = !r.ok;
+        } catch (e) {
+          pv.textContent = e.message;
+          pv.className = "help err";
+        }
+      },
+    });
+    start.onclick = async () => {
+      const target = path.value.trim();
+      close();
+      let res = null;
+      try {
+        res = await runTask("Moving the library", async () =>
+          followJob((await post("/api/library/migrate", { path: target })).job_id, "Move library"));
+      } catch (e) { toast(e.message, "err"); return; }
+      if (!res) return;
+      if (res.ok) {
+        toast(`Library moved. The old folder at ${res.old_root} is yours to delete.`, "ok");
+        await refreshSettings(true);
+        resetVisibleGrids();
+        loadStats();
+      } else {
+        toast((res.failed && res.failed[0]) || res.error || "The library was not moved.", "err");
+      }
+    };
+  }
+
+  // The first time the app starts with no library folder: choose it and the device before anything else.
+  function maybeFirstRun() {
+    const st = state.settings;
+    if (!st || st.library_root || st.library_root_source === "environment") return;
+    const modal = $("#firstrun");
+    const root = $("#firstrun-root"), msg = $("#firstrun-msg");
+    const next = $("#firstrun-next"), back = $("#firstrun-back"), finish = $("#firstrun-finish");
+    state.draft = { device: "auto", device_index: 0 };
+    const show = (step) => {
+      $("#firstrun-step-root").hidden = step !== 1;
+      $("#firstrun-step-device").hidden = step !== 2;
+      $("#firstrun-steps").textContent = `Step ${step} of 2`;
+      next.hidden = step !== 1;
+      back.hidden = step !== 2;
+      finish.hidden = step !== 2;
+      msg.textContent = "";
+      if (step === 2) renderAccelList("#firstrun-accel", "fr-device", "#firstrun-gpu-field", "#firstrun-gpu");
+    };
+    $("#firstrun-browse").onclick = () => openPicker({
+      title: "Choose the library folder", mode: "output", initial: root.value.trim(), okLabel: "Use this folder",
+      info: "Your finished photos will be stored in this folder.",
+      onPick: (p) => { root.value = p; next.disabled = false; msg.textContent = ""; },
+    });
+    next.onclick = () => show(2);
+    back.onclick = () => show(1);
+    openOverlay(modal);
+    const releaseTrap = trapFocus(modal, () => {});  // Escape does nothing here
+    show(1);
+    finish.onclick = async () => {
+      finish.disabled = true;
+      try {
+        state.settings = await post("/api/settings", {
+          library_root: root.value.trim(), device: state.draft.device, device_index: num(state.draft.device_index) });
+      } catch (e) {
+        show(1);
+        msg.textContent = e.message;
+        finish.disabled = false;
+        return;
+      }
+      releaseTrap();
+      closeOverlay(modal);
+      renderChip();
+      fillDeviceSelect();
+      renderSettings();
+      loadStats();
+      toast("Library folder saved", "ok");
+    };
+  }
+
   async function refreshSettings(render) {
     try { state.settings = await api("/api/settings"); } catch (e) { return; }
     renderChip();
@@ -5194,9 +5429,9 @@
     if (render) renderSettings();
   }
 
-  function setupGpuIndex() {
+  function setupGpuIndex(fieldSel = "#gpu-index-field", selectSel = "#gpu-index") {
     const st = state.settings;
-    const field = $("#gpu-index-field");
+    const field = $(fieldSel);
     if (!st) { field.hidden = true; return; }
     const id = state.draft.device === "auto" ? st.selected : state.draft.device;
     const acc = (st.accelerators || []).find((a) => a.id === id);
@@ -5205,8 +5440,34 @@
     else if (acc && num(acc.count) > 1) names = Array.from({ length: num(acc.count) }, (_, i) => "GPU " + i);
     field.hidden = !names;
     if (!names) return;
-    $("#gpu-index").innerHTML = names.map((n, i) => `<option value="${i}">${i}: ${esc(n)}</option>`).join("");
-    $("#gpu-index").value = String(Math.min(num(state.draft.device_index), names.length - 1));
+    $(selectSel).innerHTML = names.map((n, i) => `<option value="${i}">${i}: ${esc(n)}</option>`).join("");
+    $(selectSel).value = String(Math.min(num(state.draft.device_index), names.length - 1));
+  }
+
+  // The accelerator radios and GPU picker, shared by the Settings page and the first-run popup.
+  function renderAccelList(listSel, radioName, fieldSel, gpuSel) {
+    const st = state.settings;
+    $(listSel).innerHTML = accelChoices().map((a) => {
+      const off = !a.available;
+      const hint = String(a.install_hint || "");
+      const cmd = /pip3? install/.test(hint) ? hintCommand(hint) : "";
+      const sub = a.sub || [a.name, a.memory_gb ? a.memory_gb + " GB" : ""].filter(Boolean).join(", ");
+      return `<label class="accel${off ? " off" : ""}" data-acc="${esc(a.id)}">
+        <input type="radio" name="${esc(radioName)}" value="${esc(a.id)}"${off ? " disabled" : ""}${state.draft.device === a.id ? " checked" : ""}>
+        <span class="radio"></span>
+        <span class="title">${esc(a.id === "auto" || a.id === "integrated" ? a.label : a.label || a.id)}</span>
+        <span class="tags">${a.id === st.selected ? '<span class="tag-pill active">In use</span>' : ""}${KIND_TEXT[a.kind] && a.id !== "auto" ? `<span class="tag-pill kind">${esc(KIND_TEXT[a.kind])}</span>` : ""}</span>
+        ${sub ? `<span class="sub">${esc(sub)}</span>` : ""}
+        ${off ? `<span class="why-off">Not available: ${esc(a.reason || "not detected")}.</span>` : ""}
+        ${off && cmd ? `<div class="codebox"><code>${esc(cmd)}</code><button class="btn sm" type="button" data-copytext="${esc(cmd)}">Copy</button></div>`
+          : off && hint && !cmd ? `<span class="sub">${esc(hint)}</span>` : ""}
+      </label>`;
+    }).join("");
+    $$(`${listSel} input[type=radio]`).forEach((r) => {
+      r.onchange = () => { state.draft.device = r.value; setupGpuIndex(fieldSel, gpuSel); };
+    });
+    setupGpuIndex(fieldSel, gpuSel);
+    $(gpuSel).onchange = (e) => { state.draft.device_index = num(e.target.value); };
   }
 
   function renderSettings() {
@@ -5214,6 +5475,16 @@
     if (!st) return;
     const saved = st.settings || {};
     state.draft = { device: saved.device || "auto", device_index: num(saved.device_index) };
+    const root = st.library_root, rootSource = st.library_root_source || "none";
+    $("#set-library-root").value = root || "";
+    $("#btn-browse-library").hidden = !!root;
+    $("#library-root-source").textContent = rootSource === "settings"
+      ? "Chosen in Settings. It cannot change here; use Move library to use another folder."
+      : rootSource === "environment"
+        ? "Set by PCUR_LIBRARY_ROOT. Change that variable or the mounted folder to use another one."
+        : "Not set yet. Choose where finished photos go.";
+    $("#btn-move-library").hidden = !(root && rootSource === "settings");
+    $("#set-default-op").value = st.default_operation || "move";
     const accs = st.accelerators || [];
     const active = accs.find((a) => a.id === st.selected);
     const activeLabel = active ? accShort(active) : String(st.selected || "CPU").toUpperCase();
@@ -5226,27 +5497,7 @@
       (st.fallback_reason
         ? `<div class="notice">${icon("alert", "sm")}<span>${esc(reqLabel)} could not be used: ${esc(st.fallback_reason)}. ${esc(activeLabel)} is being used instead.</span></div>` : "");
 
-    $("#accel-list").innerHTML = accelChoices().map((a) => {
-      const off = !a.available;
-      const hint = String(a.install_hint || "");
-      const cmd = /pip3? install/.test(hint) ? hintCommand(hint) : "";
-      const sub = a.sub || [a.name, a.memory_gb ? a.memory_gb + " GB" : ""].filter(Boolean).join(", ");
-      return `<label class="accel${off ? " off" : ""}" data-acc="${esc(a.id)}">
-        <input type="radio" name="device" value="${esc(a.id)}"${off ? " disabled" : ""}${state.draft.device === a.id ? " checked" : ""}>
-        <span class="radio"></span>
-        <span class="title">${esc(a.id === "auto" || a.id === "integrated" ? a.label : a.label || a.id)}</span>
-        <span class="tags">${a.id === st.selected ? '<span class="tag-pill active">In use</span>' : ""}${KIND_TEXT[a.kind] && a.id !== "auto" ? `<span class="tag-pill kind">${esc(KIND_TEXT[a.kind])}</span>` : ""}</span>
-        ${sub ? `<span class="sub">${esc(sub)}</span>` : ""}
-        ${off ? `<span class="why-off">Not available: ${esc(a.reason || "not detected")}.</span>` : ""}
-        ${off && cmd ? `<div class="codebox"><code>${esc(cmd)}</code><button class="btn sm" type="button" data-copytext="${esc(cmd)}">Copy</button></div>`
-          : off && hint && !cmd ? `<span class="sub">${esc(hint)}</span>` : ""}
-      </label>`;
-    }).join("");
-    $$("#accel-list input[type=radio]").forEach((r) => {
-      r.onchange = () => { state.draft.device = r.value; setupGpuIndex(); };
-    });
-    setupGpuIndex();
-    $("#gpu-index").onchange = (e) => { state.draft.device_index = num(e.target.value); };
+    renderAccelList("#accel-list", "device", "#gpu-index-field", "#gpu-index");
     state.draft.device_index = num(saved.device_index);
 
     const eff = st.effective || {};
@@ -5304,9 +5555,13 @@
       return;
     }
     const body = Object.assign({ device: state.draft.device, device_index: num(state.draft.device_index),
-      collision_policy: $("#set-collision").value }, workers);
+      collision_policy: $("#set-collision").value, default_operation: $("#set-default-op").value }, workers);
+    const chosenRoot = $("#set-library-root").value.trim();
+    if (!$("#btn-browse-library").hidden && chosenRoot) body.library_root = chosenRoot;
     try {
       state.settings = await post("/api/settings", body);
+      $("#op").value = state.settings.default_operation || "move";
+      $("#copy-hint").hidden = $("#op").value !== "copy";
       renderChip();
       fillDeviceSelect();
       renderSettings();
@@ -5358,11 +5613,12 @@
     const dockTotal = $("#dock-total");
     if (dockTotal) {
       dockTotal.textContent = fmtN(total);
-      $("#dock-label").textContent = total === 1 ? "photo in your library" : "photos in your library";
+      const where = state.stage === "trash" ? "in the trash" : "in your library";
+      $("#dock-label").textContent = `${total === 1 ? "photo" : "photos"} ${where}`;
     }
     $$(".comp-host").forEach((host) => {
       const head = `<div class="comp-head total"><b class="comp-total" id="total">${fmtN(total)}</b>
-        <span class="comp-label">${total === 1 ? "photo" : "photos"} in your library${total ? "" : ". Import a folder to see it sorted here."}</span></div>`;
+        <span class="comp-label">${total === 1 ? "photo" : "photos"} ${state.stage === "trash" ? "in the trash" : "in your library"}${total ? "" : state.stage === "trash" ? "" : ". Import a folder to see it sorted here."}</span></div>`;
       if (!total) {
         host.innerHTML = head + '<div class="comp-strip bar empty-strip"></div>';
         return;
@@ -5428,10 +5684,12 @@
     set("utility", Object.entries(ov.by_category).reduce((a, [c, n]) => a + (state.utility.has(c) ? n : 0), 0));
     set("actions", s.planned_actions);
 
-    const pBadge = $("#badge-mode-pipeline");
-    if (pBadge && ov.pipeline_count != null) pBadge.textContent = fmtN(ov.pipeline_count);
-    const lBadge = $("#badge-mode-library");
-    if (lBadge && ov.library_count != null) lBadge.textContent = fmtN(ov.library_count);
+    const stageCounts = ov.stage_counts || {};
+    $$("[data-stage-count]").forEach((b) => { b.textContent = fmtN(num(stageCounts[b.dataset.stageCount])); });
+    ["#btn-trash-empty", "#btn-trash-return-all"].forEach((sel) => {
+      const b = $(sel);
+      if (b) b.disabled = num(stageCounts.trash) === 0;  // nothing to empty or return
+    });
 
     const total = ov.total, pending = num(s.pending_inference), bursts = num(s.burst_groups);
     let stored = null;
@@ -5481,10 +5739,13 @@
     if (hint) hint.textContent = nextHint(flow, total);
   }
 
+  let statsSeq = 0;
   async function loadStats() {
+    const seq = ++statsSeq;
     try {
-      const sc = state.scope || "pipeline";
-      const ov = await api(`/api/overview?scope=${encodeURIComponent(sc)}`);
+      const sc = state.stage || "new";
+      const ov = await api(`/api/overview?stage=${encodeURIComponent(sc)}`);
+      if (seq !== statsSeq) return;  // a newer stage or refresh already owns the counts
       state.overview = ov;
       state.manualCount = num(ov.manual_count);
       updateLearn();
@@ -5504,7 +5765,15 @@
     $("#bulk-cat").innerHTML = '<option value="" disabled selected>Move to category</option>' + opts;
   }
 
+  // A tab is reachable only in the stages its nav button lists (settings has no list: always).
+  function tabAllowed(name, stage = state.stage) {
+    const btn = $(`.navitem[data-tab="${name}"]`);
+    const stages = btn && btn.dataset.stages;
+    return !stages || stages.split(" ").includes(stage);
+  }
+
   function showTab(name, keepPicks) {
+    if (!tabAllowed(name)) name = state.stage === "new" ? "library" : "categories";
     const changed = state.tab !== name;
     state.tab = name;
     state.triageGrid = null;
@@ -5526,7 +5795,7 @@
       afterAnim(entering, moMs("--mo-std", 260) + 40).then(() => { if (entering._enterSeq === seq) entering.classList.remove("enter"); });
     }
     positionNavIndicator();
-    const [title, sub] = TITLES[name] || [name, ""];
+    const [title, sub] = stageTitles(name);
     $("#page-title").textContent = title;
     $("#page-sub").textContent = sub;
     document.title = title + " - Photocure Studio";
@@ -5618,7 +5887,7 @@
   async function resetLibrary() {
     const okReset = await showConfirmDialog({
       title: "Clear the indexed library?",
-      message: "This removes every indexed photo, AI analysis, burst and plan from the Photocure database. Your original photo files are not deleted or modified.",
+      message: "This removes every indexed photo, AI analysis, burst and plan from the Photocure database. Your original photo files are not deleted or modified. A library folder chosen in the app is forgotten too (its files stay on disk), so you will be asked for one again.",
       confirmText: "Clear library", variant: "danger" });
     if (!okReset) return;
     const btns = [$("#btn-reset-library"), $("#btn-import-reset")];
@@ -5630,7 +5899,7 @@
       }
     });
     try {
-      await post("/api/reset");
+      const resetRes = await post("/api/reset");
       toast("Library cleared successfully", "ok");
       libLog("Library cleared: all indexed images and metadata removed.", "warn");
       const pathInput = $("#scan-path");
@@ -5645,6 +5914,8 @@
       renderProgress({ active: false, done: 0, total: 0, percent: 0, message: "" });
       await Promise.all([loadStats(), loadTransactions(), refreshBackend()]);
       resetVisibleGrids();
+      await refreshSettings(true);
+      if (resetRes && resetRes.library_root_cleared) maybeFirstRun();  // the folder was forgotten: ask again
     } catch (e) {
       toast("Failed to reset library: " + e.message, "err");
     } finally {
@@ -5841,7 +6112,9 @@
       state.thresholds = cfg.thresholds || null;
       state.junk = new Set(cfg.categories.filter((c) => c.junk).map((c) => c.value));
       state.utility = new Set(cfg.categories.filter((c) => c.utility).map((c) => c.value));
-      if (!$("#orgroot").value) $("#orgroot").value = cfg.default_output_dir;
+      if (cfg.default_operation) $("#op").value = cfg.default_operation;
+      const hint = $("#copy-hint");
+      if (hint) hint.hidden = $("#op").value !== "copy";
     } catch (e) {
       state.cats = sortCats(["people", "food", "scenery", "animal", "screenshot", "document",
         "graphic", "accidental", "duplicate", "uncertain", "unknown"]);
@@ -5859,39 +6132,37 @@
 
     $$(".tab").forEach((t) => (t.onclick = () => showTab(t.dataset.tab)));
 
-    function setMode(mode) {
-      state.scope = mode;
-      const pBtn = $("#btn-mode-pipeline");
-      const lBtn = $("#btn-mode-library");
-      const pipeGroup = $("#navgroup-pipeline");
-      const revGroup = $("#navgroup-review");
-      if (mode === "library") {
-        if (pBtn) { pBtn.classList.remove("active"); pBtn.setAttribute("aria-selected", "false"); }
-        if (lBtn) { lBtn.classList.add("active"); lBtn.setAttribute("aria-selected", "true"); }
-        if (pipeGroup) pipeGroup.style.display = "none";
-        if (revGroup) revGroup.style.display = "none";
-        post("/api/library/sync", {}).catch(() => {});
-        resetVisibleGrids();
-        loadStats();
-        if (["library", "uncertain", "duplicates", "junk", "actions"].includes(state.tab)) {
-          showTab("categories");
-        } else {
-          showTab(state.tab);
-        }
-      } else {
-        if (lBtn) { lBtn.classList.remove("active"); lBtn.setAttribute("aria-selected", "false"); }
-        if (pBtn) { pBtn.classList.add("active"); pBtn.setAttribute("aria-selected", "true"); }
-        if (pipeGroup) pipeGroup.style.display = "";
-        if (revGroup) revGroup.style.display = "";
-        resetVisibleGrids();
-        loadStats();
-        showTab(state.tab);
+    function setStage(stage) {
+      state.stage = stage;
+      document.body.dataset.stage = stage;
+      $$("#stage-switch [data-stage]").forEach((btn) => {
+        const on = btn.dataset.stage === stage;
+        btn.classList.toggle("active", on);
+        btn.setAttribute("aria-pressed", String(on));
+      });
+      $$(".navitem[data-stages]").forEach((btn) => {
+        btn.style.display = btn.dataset.stages.split(" ").includes(stage) ? "" : "none";
+      });
+      $$(".navgroup").forEach((g) => {
+        g.style.display = $$(".navitem", g).some((btn) => btn.style.display !== "none") ? "" : "none";
+      });
+      const gridLabel = $('.navitem[data-tab="categories"] > span');
+      if (gridLabel) gridLabel.textContent = stage === "trash" ? "Trash" : "Library";
+      state.libraryMissing = 0;
+      if (stage === "library") {
+        post("/api/library/sync", {}).then((r) => {
+          state.libraryMissing = num(r && r.missing);
+          applyStageTitles();
+        }).catch(() => {});
       }
+      resetVisibleGrids();
+      loadStats();
+      const cur = $(`.navitem[data-tab="${state.tab}"]`);
+      const allowed = !cur || cur.style.display !== "none" || state.tab === "settings";
+      showTab(allowed ? state.tab : (stage === "new" ? "library" : "categories"));
     }
-    const btnModePipe = $("#btn-mode-pipeline");
-    if (btnModePipe) btnModePipe.onclick = () => setMode("pipeline");
-    const btnModeLib = $("#btn-mode-library");
-    if (btnModeLib) btnModeLib.onclick = () => setMode("library");
+    $$("#stage-switch [data-stage]").forEach((btn) => { btn.onclick = () => setStage(btn.dataset.stage); });
+    document.body.dataset.stage = state.stage;
 
     $("#menu-btn").onclick = () => document.body.classList.toggle("nav-open");
     document.addEventListener("click", (e) => {
@@ -6013,16 +6284,6 @@
       $$("#tab-utility [data-ukind]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
       grids.utility.reset();
     }));
-    $("#btn-rescore").onclick = async () => {
-      try {
-        const r = await post("/api/rescore", {});
-        if (r.note) { toast(r.note, "err"); return; }
-        const res = await followJob(r.job_id, "Re-check");
-        toast(`Re-checked ${fmtN(res.updated)} photos`, "ok");
-        await sortNow(true);
-        grids.utility.reset();
-      } catch (e) { toast(e.message, "err"); }
-    };
     $("#minaes").addEventListener("change", () => {
       if (isEventView()) renderEventHighlights(); else grids.highlights.reset();
     });
@@ -6049,6 +6310,12 @@
     };
     $("#bulk-del-people").onclick = bulkDeletePeople;
     $("#bulk-lock").onclick = () => bulkLock();
+    $("#bulk-restore").onclick = restoreSelected;
+    $("#bulk-return").onclick = returnSelected;
+    $("#bulk-purge").onclick = () => purgePhotos(Array.from(state.picks));
+    $("#btn-trash-reanalyse").onclick = reanalyseTrash;
+    $("#btn-trash-return-all").onclick = returnAllToOrigin;
+    $("#btn-trash-empty").onclick = emptyTrash;
     $("#bulk-delete").onclick = () => bulkMarkDelete();
     $("#bulk-junk").onclick = bulkJunk;
     $("#bulk-best").onclick = async () => {
@@ -6069,7 +6336,7 @@
     $("#ce-close").onclick = $("#ce-cancel").onclick = () => closeOverlay($("#cleanexport"));
     $("#ce-browse").onclick = () => openPicker({
       title: "Choose where the clean copies go", mode: "output", initial: $("#ce-dest").value.trim(),
-      okLabel: "Use this folder", onPick: (p) => { $("#ce-dest").value = p; },
+      okLabel: "Use this folder", info: "The clean copies will be written into this folder.", onPick: (p) => { $("#ce-dest").value = p; },
     });
     $("#bulk-cat").onchange = (e) => { if (e.target.value) bulkReassign(e.target.value); e.target.selectedIndex = 0; };
 
@@ -6157,7 +6424,7 @@
       if (!r) return;
       if (!r.grouped) {
         libLog("Nothing new to analyze", "ok");
-        toast("Nothing new to analyze. Use Reanalyse to re-check photos you already analyzed.", "ok");
+        toast("Nothing new to analyze.", "ok");
         await afterTask();
         return;
       }
@@ -6168,41 +6435,6 @@
       const sorted = await afterTask(true);
       libLog(sorted ? "Photos sorted into categories" : "Could not sort photos into categories", sorted ? "ok" : "warn");
       if (sorted) await approveProposedDeletes(true);
-    };
-    $("#btn-recheck").onclick = async () => {
-      const r = await runTask("Re-checking rules", async () => {
-        const job = await post("/api/rescore", {});
-        if (job.note) return { note: job.note };
-        const res = await followJob(job.job_id, "Re-check");
-        await sortNow(true);
-        return res;
-      });
-      if (!r) return;
-      if (r.note) { toast(r.note, "err"); return; }
-      toast(`Re-checked ${fmtN(r.updated)} photos`, "ok");
-      libLog(`Re-checked ${fmtN(r.updated)} photos and re-sorted them`, "ok");
-      grids.utility.reset();
-    };
-    $("#btn-reanalyse-all").onclick = async () => {
-      const total = state.overview ? state.overview.total : 0;
-      const ok = await showConfirmDialog({
-        title: "Reanalyse everything?",
-        message: `This runs the AI on all ${fmtN(total)} photos again and can take a long time. Photos you already sorted by hand are kept.`,
-        confirmText: "Reanalyse", variant: "warning" });
-      if (!ok) return;
-      const device = $("#infer-device").value;
-      const r = await runTask(`Reanalysing photos (${device})`, async () => {
-        const inferred = await post("/api/infer", { device, reanalyze: true });
-        if (inferred && inferred.stopped) return inferred;
-        const grouped = await post("/api/cluster", {});
-        if (grouped && grouped.stopped) return grouped;
-        return { inferred, grouped };
-      });
-      if (!r) return;
-      libLog(`Reanalysis finished: ${fmtN(r.inferred.processed)} photos, ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
-      toast(`Reanalysed ${fmtN(r.inferred.processed)} photos`, "ok");
-      markGrouped();
-      await afterTask(true);
     };
     $("#btn-ingest-all").onclick = async () => {
       const path = needPath();
@@ -6226,6 +6458,7 @@
       } catch (e) { toast(e.message, "err"); }
     };
 
+    $("#op").onchange = () => { $("#copy-hint").hidden = $("#op").value !== "copy"; };
     $("#btn-rebuild").onclick = async () => {
       try {
         const r = await post("/api/plan/rebuild", planBody());
@@ -6286,6 +6519,7 @@
     await Promise.all([loadStats(), loadTransactions(), refreshSettings(false)]);
     const start = (location.hash || "").slice(1);
     showTab(TITLES[start] ? start : "library");
+    maybeFirstRun();
     pollProgress();
   }
 

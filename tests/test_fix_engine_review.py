@@ -23,31 +23,22 @@ def test_reapply_move_does_not_rename_organized_photos(tmp_path):
     w.planner.execute_plan(p1)
     before = _files(w.out)
     p2 = w.planner.build_plan(organize_root=w.out, operation="move")
+    assert p2.total == 0  # finished photos are not planned again
     rep = w.planner.execute_plan(p2)
-    assert rep.executed == 0 and rep.in_place == 3 and rep.failures == 0
+    assert rep.executed == 0 and rep.failures == 0
     assert _files(w.out) == before
     assert not any("(1)" in n for n in _files(w.out))
     for i in w.ids:
         assert get_img(w, i).route_status == "executed"
 
 
-def test_reapply_hardlink_in_place_is_idempotent(tmp_path):
-    w = build_world(tmp_path, n=2)
-    from photocure.rules.organizer import OrganizeMode
-    for _ in range(3):
-        p = w.planner.build_plan(organize_root=w.out, operation="move",
-                                 mode=OrganizeMode.IN_PLACE)
-        w.planner.execute_plan(p)
-    assert len(_files(w.root)) == 2
-    assert not list(w.root.rglob("* (*).jpg"))
-
-
 def test_reapply_copy_does_not_duplicate_library(tmp_path):
     w = build_world(tmp_path, n=3)
     w.planner.execute_plan(w.planner.build_plan(organize_root=w.out, operation="copy"))
-    rep = w.planner.execute_plan(w.planner.build_plan(organize_root=w.out,
-                                                      operation="copy"))
-    assert rep.executed == 0 and rep.in_place == 3
+    p2 = w.planner.build_plan(organize_root=w.out, operation="copy")
+    assert p2.total == 0  # finished photos are not planned again
+    rep = w.planner.execute_plan(p2)
+    assert rep.executed == 0 and rep.failures == 0
     assert len(_files(w.out)) == 3
 
 
@@ -87,16 +78,15 @@ def test_failed_mutation_still_marks_ledger_failed(tmp_path, monkeypatch):
         assert [r.status for r in rows] == ["failed"]
 
 
-def test_purge_trash_marks_ledger_with_relative_output_dir(tmp_path, monkeypatch):
+def test_empty_trash_marks_ledger_with_a_relative_library_root(tmp_path, monkeypatch):
     w = build_world(tmp_path, n=1)
     set_bucket(w, w.ids[0], "graphic")
     approve_delete(w, w.ids[0])
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     rep = w.planner.execute_plan(p, trash=True)
     monkeypatch.chdir(tmp_path)
-    res = w.planner.purge_trash(type(w.out)("out"), older_than_days=30,
-                                now=time.time() + 31 * 86400)
-    assert res["removed_transactions"] == [rep.transaction_id]
+    res = w.planner.empty_trash(type(w.out)("out"))
+    assert res["deleted"] == 1
     with get_session(w.db) as s:
         rows = PhotoRepository(s).ledger_by_txn(rep.transaction_id)
         assert rows[0].status == "purged"

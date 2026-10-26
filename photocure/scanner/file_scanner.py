@@ -56,6 +56,7 @@ class ScanResult:
     new: int = 0
     modified: int = 0
     skipped_known: int = 0
+    skipped_library: int = 0
     duplicates: int = 0
     near_duplicates: int = 0
     geocoded: int = 0
@@ -113,6 +114,10 @@ class _WorkerResult:
     error: str = ""
 
 
+# Returned by build_record for a file already in the library or trash: not an error, not new.
+_SKIPPED = object()
+
+
 @dataclass
 class _Known:
     id: int
@@ -120,6 +125,7 @@ class _Known:
     stamp: float | None
     status: str
     created: float | None = None
+    stage: str = "new"
 
 
 class FileScanner:
@@ -206,6 +212,7 @@ class FileScanner:
         """Scan only the given files (used by watch mode); never prunes."""
         root = Path(root).expanduser().resolve()
         exts = {e.lower() for e in self.cfg.extensions}
+        lib_root = Path(self.cfg.library_root).expanduser().resolve() if self.cfg.library_root else None
         files: list[Path] = []
         for p in paths:
             if cancel_check and cancel_check():
@@ -216,6 +223,8 @@ class FileScanner:
                 p.relative_to(root)
             except (ValueError, OSError):
                 continue
+            if lib_root is not None and (p == lib_root or lib_root in p.parents):
+                continue  # the library is Photocure's own output, never a source
             rel = p.relative_to(root).parts
             if (any(part.startswith(".") or _is_library_bundle(part) for part in rel)
                     or p.suffix.lower() not in exts):
@@ -256,11 +265,11 @@ class FileScanner:
     # ------------------------------------------------------------------- run
     def _known_rows(self, session: Session) -> dict[str, _Known]:
         cols = [ImageRecord.path, ImageRecord.id, ImageRecord.file_size,
-                ImageRecord.scan_status, ImageRecord.file_mtime, ImageRecord.created_at]
+                ImageRecord.scan_status, ImageRecord.file_mtime, ImageRecord.created_at, ImageRecord.stage]
         out: dict[str, _Known] = {}
-        for path, iid, size, status, mtime, created in session.exec(sselect(*cols)).all():
+        for path, iid, size, status, mtime, created, stage in session.exec(sselect(*cols)).all():
             out[path] = _Known(iid, size or 0, mtime, status,
-                               _as_utc_ts(created) if created is not None else None)
+                               _as_utc_ts(created) if created is not None else None, stage)
         return out
 
     @staticmethod
@@ -391,7 +400,7 @@ class FileScanner:
         blocked = tuple(str(Path(d)) + os.sep for d in result.walk_errors)
         gone = [k.id for path, k in known.items()
                 if path.startswith(prefix) and path not in seen
-                and k.status != "missing"
+                and k.status != "missing" and k.stage == "new"  # finished photos live in the library, not here
                 and not (blocked and path.startswith(blocked))]
         for chunk in _chunks(gone, _IN_CHUNK):
             for row in session.exec(sselect(ImageRecord).where(
@@ -489,6 +498,10 @@ class FileScanner:
             else:
                 rec = ImageRecord(path=str(wr.path), filename=wr.path.name)
             fill(rec, wr)
+            if existing_id is None and rec.quick_hash in known_qh \
+                    and self._find_in_library(rec, wr.path, repo) is not None:
+                result.skipped_library += 1
+                return _SKIPPED
             self._resolve_dedup(rec, wr.path, repo, seen_qh, pending_dupes,
                                 known_qh, result)
             if existing_id is None:
@@ -544,7 +557,9 @@ class FileScanner:
                     path, eid = futures[fut]
                     wr = fut.result()
                     rec = build_record(wr, eid)
-                    if rec is not None:
+                    if rec is _SKIPPED:
+                        pass
+                    elif rec is not None:
                         if eid is None:
                             result.new += 1
                         else:
@@ -632,10 +647,38 @@ class FileScanner:
         seen_qh.setdefault(rec.quick_hash, []).append(rec)
 
     @staticmethod
+    def _find_in_library(rec: ImageRecord, path: Path, repo) -> ImageRecord | None:
+        """A library or trash photo with this exact content (trash rows are marked missing)."""
+        origin = repo.s.exec(sselect(ImageRecord).where(
+            ImageRecord.origin_path == str(path), ImageRecord.stage.in_(("library", "trash")),
+            ImageRecord.route_status != "purged")).first()
+        if origin is not None and origin.file_size == rec.file_size:
+            return origin  # the photo came from this very path and is the same size: no need to read it
+        stmt = sselect(ImageRecord).where(
+            ImageRecord.quick_hash == rec.quick_hash,
+            ImageRecord.stage.in_(("library", "trash")),
+            ImageRecord.route_status != "purged")
+        cands = repo.s.exec(stmt).all()
+        if not cands:
+            return None
+        sha = rec.sha256 or _safe_sha256(path)
+        if not sha:
+            return None
+        rec.sha256 = sha
+        for cand in cands:
+            if not cand.sha256:
+                cand.sha256 = _safe_sha256(Path(cand.path))
+                repo.s.flush()
+            if cand.sha256 == sha:
+                return cand
+        return None
+
+    @staticmethod
     def _find_db_original(sha: str, repo, rec: ImageRecord) -> ImageRecord | None:
         """Locate a definitive SHA-256 match already persisted (any live path)."""
         stmt = sselect(ImageRecord).where(ImageRecord.sha256 == sha,
-                                          ImageRecord.scan_status != "missing")
+                                          ImageRecord.scan_status != "missing",
+                                          ImageRecord.is_duplicate == False)  # noqa: E712
         if rec.id is not None:
             stmt = stmt.where(ImageRecord.id != rec.id)
         hit = repo.s.exec(stmt).first()
@@ -643,7 +686,7 @@ class FileScanner:
             return hit
         # A prior *lazy* run may have left a candidate's sha256 empty: backfill.
         for cand in repo.find_by_quick_hash(rec.quick_hash, exclude_id=rec.id):
-            if cand.scan_status == "missing":
+            if cand.scan_status == "missing" or cand.is_duplicate:
                 continue
             if not cand.sha256:
                 cand.sha256 = _safe_sha256(Path(cand.path))

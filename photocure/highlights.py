@@ -83,13 +83,14 @@ def highlight_expr(w: HighlightWeights):
     return base + stars + fav
 
 
-def candidate_filters() -> list:
+def candidate_filters(stage: str = "all") -> list:
     """Conditions every highlight shares: scored, not a duplicate or alternate, not rejected."""
+    from .db.repository import stage_clause
     I, S = ImageRecord, SemanticScore
     return [col(S.aesthetic).is_not(None),
             col(I.is_duplicate) == False,  # noqa: E712
             col(I.is_alternate) == False,  # noqa: E712
-            col(I.scan_status) != "missing",
+            stage_clause(stage),
             or_(col(I.rating).is_(None), col(I.rating) != -1)]
 
 
@@ -106,7 +107,7 @@ def _by_capture_time(taken: dict):
 
 
 def best_of_events(session, w: HighlightWeights, per_event: int = 1,
-                   min_score: float | None = None, scale_of=None) -> list[dict]:
+                   min_score: float | None = None, scale_of=None, stage: str = "all") -> list[dict]:
     """The top ``per_event`` photos of every event, events in time order.
 
     With ``scale_of`` (photo ids to scale labels, or None) the selection is balanced across shot
@@ -114,7 +115,7 @@ def best_of_events(session, w: HighlightWeights, per_event: int = 1,
     """
     expr = highlight_expr(w)
     stmt = _joined(select(ImageRecord.id, ImageRecord.event_id, expr)).where(
-        col(ImageRecord.event_id).is_not(None), *candidate_filters())
+        col(ImageRecord.event_id).is_not(None), *candidate_filters(stage))
     if min_score is not None:
         stmt = stmt.where(col(SemanticScore.aesthetic) >= min_score)  # the model score, as in the photo grid
     by_event: dict[int, list[tuple[int, float]]] = {}

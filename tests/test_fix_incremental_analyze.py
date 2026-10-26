@@ -154,30 +154,6 @@ def test_approve_only_new_touches_only_last_analyzed_junk(env):
     assert got[new_id] is True and got[old[0].id] is False
 
 
-def test_reanalyze_reprocesses_everything_and_keeps_rows(env):
-    app, client, _ = env
-    infer(client)
-    n = len(rows(app))
-    again = infer(client, reanalyze=True)
-    assert again["processed"] == n
-    assert len(rows(app)) == n
-    assert infer(client)["processed"] == 0
-
-
-def test_reanalyze_skips_missing_or_trashed_images(env):
-    app, client, _ = env
-    infer(client)
-    rws = rows(app)
-    # Mark one image as missing (e.g. moved to trash)
-    with get_session(app.state.db) as s:
-        rec = s.get(M.ImageRecord, rws[0].id)
-        rec.scan_status = "missing"
-        rec.route_status = "trashed"
-    again = infer(client, reanalyze=True)
-    # Processed count must exclude the missing photo
-    assert again["processed"] == len(rws) - 1
-
-
 def test_prune_bursts_cleans_up_singleton_and_dead_bursts(env):
     app, client, _ = env
     from photocure.db.repository import PhotoRepository
@@ -205,17 +181,3 @@ def test_prune_bursts_cleans_up_singleton_and_dead_bursts(env):
         assert len(repo.all_bursts()) == 0
         assert rws[0].burst_id is None and rws[0].is_best_shot is False
         assert rws[1].burst_id is None and rws[1].is_best_shot is False
-
-
-
-def test_ui_has_reanalyse_buttons_and_skips_when_nothing_new():
-    html = (STATIC / "index.html").read_text()
-    js = (STATIC / "app.js").read_text()
-    for bid in ("btn-recheck", "btn-reanalyse-all"):
-        assert f'id="{bid}" data-busy class="btn"' in html
-    assert "Nothing new to analyze. Use Reanalyse to re-check photos you already analyzed." in js
-    assert '{ only_new: true }' in js and "reanalyze: true" in js
-    seg = js[js.index('$("#btn-recheck").onclick'):js.index('$("#btn-reanalyse-all").onclick')]
-    assert "/api/cluster" not in seg and "approveProposedDeletes" not in seg
-    seg = js[js.index('$("#btn-reanalyse-all").onclick'):js.index('$("#btn-ingest-all").onclick')]
-    assert "showConfirmDialog" in seg and "approveProposedDeletes" not in seg

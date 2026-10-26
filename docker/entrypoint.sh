@@ -9,6 +9,14 @@ if ! mkdir -p "$(python -c 'import site; print(site.getusersitepackages())')" 2>
   exit 1
 fi
 
+# Finished photos go to the library folder; say so now instead of failing at the first apply.
+if [ -n "$PCUR_LIBRARY_ROOT" ]; then
+  LIB_PARENT="$(dirname "$PCUR_LIBRARY_ROOT")"
+  if [ -d "$LIB_PARENT" ] && [ ! -w "$LIB_PARENT" ] && [ ! -d "$PCUR_LIBRARY_ROOT" ]; then
+    echo "photocure: warning: cannot create the library folder $PCUR_LIBRARY_ROOT because $LIB_PARENT is not writable by uid $(id -u). Chown the host folder mounted there or set 'user:' to match its owner." >&2
+  fi
+fi
+
 # Volumes created before the app was renamed keep their database and settings.
 if [ -f "$DATA_DIR/photo_curator.db" ] && [ ! -f "$DATA_DIR/photocure.db" ]; then
   for ext in "" -wal -shm; do

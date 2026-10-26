@@ -65,7 +65,7 @@ def test_organizer_flat_categories(cfg):
 
 
 def test_shared_people_and_ignored_faces(tmp_path):
-    """Verify deleting a person marks faces ignored=True, reanalyze=True on pipeline never resurrects deleted faces,
+    """Verify deleting a person marks faces ignored=True, analysing new photos never resurrects deleted faces,
     Library photos are never re-analysed, and new pipeline imports match against named Library people centroids.
     """
     db_file = tmp_path / "people_test.db"
@@ -94,6 +94,7 @@ def test_shared_people_and_ignored_faces(tmp_path):
             path=str(f_lib),
             filename="lib_alice.jpg",
             route_status="executed",
+            stage="library",
             scan_status="active",
             infer_status="inferred",
             faces_schema_version=cfg.face.schema_version,
@@ -145,7 +146,7 @@ def test_shared_people_and_ignored_faces(tmp_path):
         pipe_img_id = pipe_img.id
 
     # 1. Deleting a person marks faces ignored=True
-    del_res = client.delete(f"/api/people/{pipe_person_id}?scope=pipeline")
+    del_res = client.delete(f"/api/people/{pipe_person_id}?stage=new")
     assert del_res.status_code == 200
 
     with get_session(db_file) as s:
@@ -153,15 +154,15 @@ def test_shared_people_and_ignored_faces(tmp_path):
         assert f.ignored is True
         assert f.person_id is None
 
-    # 2. Trigger reanalyze=True -> Library photo must NOT be re-analyzed
-    infer_res = client.post("/api/infer", json={"reanalyze": True})
+    # 2. Analyze runs on new photos only -> a Library photo is never re-analyzed
+    infer_res = client.post("/api/infer", json={})
     assert infer_res.status_code == 200
 
     with get_session(db_file) as s:
         lib_rec = s.get(ImageRecord, lib_img_id)
         assert lib_rec.faces_schema_version == cfg.face.schema_version  # untouched!
         pipe_rec = s.get(ImageRecord, pipe_img_id)
-        assert pipe_rec.faces_schema_version == 0  # reset for pipeline!
+        assert pipe_rec.faces_schema_version == cfg.face.schema_version  # nothing pending, nothing redone
 
 
 def test_apply_completion_gate(tmp_path):
@@ -208,6 +209,8 @@ def test_apply_completion_gate(tmp_path):
         s.commit()
         r1_id, r2_id = r1.id, r2.id
 
+    assert client.post("/api/settings", json={"library_root": str(out_dir)}).status_code == 200
+
     # Check readiness: should report uncompleted issues
     readiness = client.get("/api/plan/readiness").json()
     assert readiness["ready"] is False
@@ -215,7 +218,7 @@ def test_apply_completion_gate(tmp_path):
     assert readiness["unresolved_junk"] == 1
 
     # Attempt apply: must be rejected with 409 Conflict
-    apply_res = client.post("/api/plan/apply", json={"output_dir": str(out_dir), "operation": "copy"})
+    apply_res = client.post("/api/plan/apply", json={"operation": "copy"})
     assert apply_res.status_code == 409
     assert "uncertain" in apply_res.text.lower() or "finalize" in apply_res.text.lower()
 
@@ -230,7 +233,7 @@ def test_apply_completion_gate(tmp_path):
     assert readiness2["unresolved_junk"] == 0
 
     # Apply succeeds
-    apply_res2 = client.post("/api/plan/apply", json={"output_dir": str(out_dir), "operation": "copy"})
+    apply_res2 = client.post("/api/plan/apply", json={"operation": "copy"})
     assert apply_res2.status_code == 202
 
 
@@ -273,6 +276,7 @@ def test_pipeline_vs_library_scopes(tmp_path):
             filename="food_photo.jpg",
             category="food",
             route_status="executed",
+            stage="library",
             scan_status="active",
             infer_status="inferred",
         )
@@ -281,21 +285,21 @@ def test_pipeline_vs_library_scopes(tmp_path):
         lib_img_id = rec_lib.id
 
     # 1. Check /api/images scoped
-    imgs_pipe = client.get("/api/images?scope=pipeline").json()
+    imgs_pipe = client.get("/api/images?stage=new").json()
     assert imgs_pipe["total"] == 1
     assert imgs_pipe["items"][0]["filename"] == "pipe.jpg"
 
-    imgs_lib = client.get("/api/images?scope=library").json()
+    imgs_lib = client.get("/api/images?stage=library").json()
     assert imgs_lib["total"] == 1
     assert imgs_lib["items"][0]["filename"] == "food_photo.jpg"
 
     # 2. Check /api/overview scoped
-    ov_pipe = client.get("/api/overview?scope=pipeline").json()
+    ov_pipe = client.get("/api/overview?stage=new").json()
     assert ov_pipe["total"] == 1
     assert ov_pipe["pipeline_count"] == 1
     assert ov_pipe["library_count"] == 1
 
-    ov_lib = client.get("/api/overview?scope=library").json()
+    ov_lib = client.get("/api/overview?stage=library").json()
     assert ov_lib["total"] == 1
 
     # 3. Manual category change in Library mode moves file on disk immediately
@@ -311,15 +315,16 @@ def test_pipeline_vs_library_scopes(tmp_path):
         assert updated.path == str(new_path)
         assert updated.category == "scenery"
 
-    # 4. Delete photo in Library mode moves to .trash immediately
+    # 4. Delete photo in Library mode moves it into the trash (a ledger transaction folder)
     del_res = client.delete(f"/api/images/{lib_img_id}")
     assert del_res.status_code == 200
     assert not new_path.exists()
-    assert (lib_root / ".trash" / "food_photo.jpg").exists()
+    assert list((lib_root / ".trash").rglob("food_photo.jpg"))
 
     with get_session(db_file) as s:
         trashed = s.get(ImageRecord, lib_img_id)
         assert trashed.route_status == "trashed"
+        assert trashed.stage == "trash"
         assert trashed.scan_status == "missing"
 
 
@@ -353,6 +358,7 @@ def test_library_sync_external_changes(tmp_path):
             filename="moving.jpg",
             category="food",
             route_status="executed",
+            stage="library",
             scan_status="active",
             infer_status="inferred",
             file_size=f1.stat().st_size,
@@ -362,6 +368,7 @@ def test_library_sync_external_changes(tmp_path):
             filename="deleting.jpg",
             category="food",
             route_status="executed",
+            stage="library",
             scan_status="active",
             infer_status="inferred",
             file_size=f2.stat().st_size,

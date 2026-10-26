@@ -72,24 +72,24 @@
         <span id="nav-indicator" class="nav-indicator" aria-hidden="true"></span>
         <div class="navgroup" id="navgroup-pipeline">
           <h2>Get started</h2>
-          <button class="tab navitem active" data-tab="library"><svg class="ic" aria-hidden="true"><use href="#i-pipeline"/></svg><span>Pipeline</span><em class="count"></em></button>
+          <button class="tab navitem active" data-tab="library" data-stages="new"><svg class="ic" aria-hidden="true"><use href="#i-pipeline"/></svg><span>Pipeline</span><em class="count"></em></button>
         </div>
         <div class="navgroup" id="navgroup-browse" style="margin-top:18px">
           <h2>Browse</h2>
-          <button class="tab navitem" data-tab="categories"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span>Library</span><em class="count" data-count="categories"></em></button>
-          <button class="tab navitem" data-tab="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span>Search</span><em class="count"></em></button>
-          <button class="tab navitem" data-tab="bursts"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span>Bursts</span><em class="count" data-count="bursts"></em></button>
-          <button class="tab navitem" data-tab="people"><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg><span>People</span><em class="count" data-count="people"></em></button>
-          <button class="tab navitem" data-tab="highlights"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg><span>Highlights</span><em class="count"></em></button>
-          <button class="tab navitem" data-tab="events"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg><span>Events</span><em class="count"></em></button>
-          <button class="tab navitem" data-tab="utility"><svg class="ic" aria-hidden="true"><use href="#i-inbox"/></svg><span>Utility</span><em class="count" data-count="utility"></em></button>
+          <button class="tab navitem" data-tab="categories" data-stages="new library trash"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span>Library</span><em class="count" data-count="categories"></em></button>
+          <button class="tab navitem" data-tab="search" data-stages="new library"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><span>Search</span><em class="count"></em></button>
+          <button class="tab navitem" data-tab="bursts" data-stages="new library trash"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg><span>Bursts</span><em class="count" data-count="bursts"></em></button>
+          <button class="tab navitem" data-tab="people" data-stages="new library trash"><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg><span>People</span><em class="count" data-count="people"></em></button>
+          <button class="tab navitem" data-tab="highlights" data-stages="new library"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg><span>Highlights</span><em class="count"></em></button>
+          <button class="tab navitem" data-tab="events" data-stages="new library"><svg class="ic" aria-hidden="true"><use href="#i-cal"/></svg><span>Events</span><em class="count"></em></button>
+          <button class="tab navitem" data-tab="utility" data-stages="new library"><svg class="ic" aria-hidden="true"><use href="#i-inbox"/></svg><span>Utility</span><em class="count" data-count="utility"></em></button>
         </div>
         <div class="navgroup" id="navgroup-review" style="margin-top:18px">
           <h2>Review</h2>
-          <button class="tab navitem" data-tab="uncertain"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><span>Finalize</span><em class="count" data-count="uncertain"></em></button>
-          <button class="tab navitem" data-tab="duplicates"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>Duplicates</span><em class="count" data-count="duplicates"></em></button>
-          <button class="tab navitem" data-tab="junk"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Junk</span><em class="count" data-count="junk"></em></button>
-          <button class="tab navitem" data-tab="actions"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg><span>Apply and undo</span><em class="count" data-count="actions"></em></button>
+          <button class="tab navitem" data-tab="uncertain" data-stages="new"><svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg><span>Finalize</span><em class="count" data-count="uncertain"></em></button>
+          <button class="tab navitem" data-tab="duplicates" data-stages="new"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>Duplicates</span><em class="count" data-count="duplicates"></em></button>
+          <button class="tab navitem" data-tab="junk" data-stages="new"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Junk</span><em class="count" data-count="junk"></em></button>
+          <button class="tab navitem" data-tab="actions" data-stages="new"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg><span>Apply and undo</span><em class="count" data-count="actions"></em></button>
         </div>
       </nav>
 
@@ -122,14 +122,18 @@
           <h1 id="page-title">Pipeline</h1>
           <div class="sub" id="page-sub"></div>
         </div>
-        <div class="top-mode-switch" id="top-mode-switch" role="tablist" aria-label="Mode Selection">
-          <button class="top-mode-btn active" id="btn-mode-pipeline" role="tab" aria-selected="true" data-mode="pipeline">
-            <span>New Pipeline</span>
-            <span class="mode-badge" id="badge-mode-pipeline">0</span>
+        <div class="top-mode-switch" id="stage-switch" role="group" aria-label="Where your photos are">
+          <button class="top-mode-btn active" type="button" aria-pressed="true" data-stage="new">
+            <svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span>New</span>
+            <span class="mode-badge" data-stage-count="new">0</span>
           </button>
-          <button class="top-mode-btn" id="btn-mode-library" role="tab" aria-selected="false" data-mode="library">
-            <span>Photo Library</span>
-            <span class="mode-badge" id="badge-mode-library">0</span>
+          <button class="top-mode-btn" type="button" aria-pressed="false" data-stage="library">
+            <svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg><span>Library</span>
+            <span class="mode-badge" data-stage-count="library">0</span>
+          </button>
+          <button class="top-mode-btn" type="button" aria-pressed="false" data-stage="trash">
+            <svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Trash</span>
+            <span class="mode-badge" data-stage-count="trash">0</span>
           </button>
         </div>
         <div id="progress-card" class="progress-card" hidden>
@@ -156,7 +160,7 @@
             <span id="progress-counts"></span>
           </div>
         </div>
-        <button id="header-version-badge" class="version-pill" type="button" title="Click to view About Photocure Studio" data-goto="settings"></button>
+        <button id="header-version-badge" class="version-pill" type="button" title="Click to view About Photocure Studio" data-goto="settings" tabindex="-1" aria-hidden="true"></button>
       </header>
 
       <main id="main">
@@ -243,8 +247,6 @@
               </div>
               <div class="actions">
                 <button id="btn-infer" data-busy class="btn primary"><svg class="ic sm" aria-hidden="true"><use href="#i-play"/></svg>Analyze Now</button>
-                <button id="btn-recheck" data-busy class="btn" aria-label="Re-check rules for all analyzed photos" title="Re-score every photo from its stored AI results and re-sort. Fast, the AI is not run again.">Re-check rules</button>
-                <button id="btn-reanalyse-all" data-busy class="btn" aria-label="Reanalyse every photo with the AI" title="Run the AI again on every photo. Slow on large libraries.">Reanalyse everything</button>
                 <span class="step-hint" id="infer-hint">Nothing waiting to analyze.</span>
               </div>
             </li>
@@ -278,6 +280,12 @@
         <!-- LIBRARY -->
         <section id="tab-categories" class="panel">
           <div class="comp comp-host" data-target="categories"></div>
+          <div class="trash-toolbar" id="trash-toolbar" role="group" aria-label="Trash actions">
+            <button id="btn-trash-reanalyse" data-busy class="btn" title="Run the AI again on the trashed photos">Reanalyse trash</button>
+            <button id="btn-trash-return-all" data-busy class="btn" title="Move every trashed photo back to the folder it came from">Return all to origin</button>
+            <span class="grow"></span>
+            <button id="btn-trash-empty" data-busy class="btn danger" title="Delete everything in the trash for good">Empty trash</button>
+          </div>
           <div class="toolbar">
             <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
               <input id="q" type="search" placeholder="Search by file name or path" aria-label="Search photos"></div>
@@ -367,7 +375,7 @@
               <span>Save deletions (<span id="people-toolbar-save-count">0</span>)</span>
             </button>
             <button class="chip-btn" id="people-recluster-btn" type="button" title="Separate mixed-up people and recalculate clusters with strict facial identity matching">
-              <svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg>
+              <svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>
               <span>Re-cluster faces</span>
             </button>
             <label class="density people-density">Size <input type="range" id="people-density" class="people-density-slider" min="160" max="340" step="10" value="210" aria-label="Person card size"></label>
@@ -408,7 +416,6 @@
               <button type="button" class="chip-btn" data-ukind="slide" aria-pressed="false">Notes and whiteboards</button>
               <button type="button" class="chip-btn" data-ukind="utility" aria-pressed="false">Labels, signs and packaging</button>
             </div>
-            <button id="btn-rescore" class="btn sm secondary" type="button" title="Looks at your already analyzed photos again with the latest categories. No photo is read again.">Re-check my photos</button>
             <span class="grow"></span>
             <label class="density">Size <input type="range" class="density-slider" min="220" max="340" step="10" value="220" aria-label="Thumbnail size"></label>
             <span id="utilitycount" class="rowcount"></span>
@@ -531,24 +538,8 @@
                 <select id="op">
                   <option value="move">Move them</option>
                   <option value="copy">Copy them</option>
-                  <option value="hardlink">Hard link them (same disk)</option>
-                  <option value="symlink">Symbolic link them</option>
                 </select>
-              </div>
-              <div class="field">
-                <label for="orgmode">Folder layout</label>
-                <select id="orgmode">
-                  <option value="category_first">Sort into category folders</option>
-                  <option value="in_place">Leave originals, add links</option>
-                </select>
-              </div>
-              <div class="field wide">
-                <label for="orgroot">Destination folder</label>
-                <div class="with-btn">
-                  <input id="orgroot" type="text" placeholder="Choose where organized photos go" autocomplete="off" spellcheck="false">
-                  <button class="btn" id="btn-browse-out" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
-                </div>
-                <p class="help">Pick a folder outside your photo library so the result is easy to review.</p>
+                <p class="help" id="copy-hint" hidden>Originals stay where they are, including the ones marked for delete. A copy of those goes to the trash folder.</p>
               </div>
               <div class="field">
                 <label for="onlycat">Apply to</label>
@@ -557,7 +548,7 @@
               <div class="field">
                 <span class="lbl">Junk handling</span>
                 <label class="toggle" style="align-self:flex-start"><input type="checkbox" id="trash" checked>Move photos marked for delete to a trash folder</label>
-                <p class="help">Photos you marked for delete are always left out of the result. With this on, they are moved to a trash folder that you can restore or purge later. Junk you did not mark stays in the junk review folder.</p>
+                <p class="help">Photos you marked for delete are always left out of the result. With this on, they go to the trash folder, where you can restore them or delete them for good. Junk you did not mark stays in the junk review folder.</p>
               </div>
             </div>
             <div class="btn-row">
@@ -603,6 +594,30 @@
 
         <!-- SETTINGS -->
         <section id="tab-settings" class="panel">
+          <div class="sect" id="sect-library">
+            <h2>Library folder</h2>
+            <p class="lede">Every finished photo lives in this one folder, sorted by category. You choose it once. To use another folder later, move the whole library there.</p>
+            <div class="field wide">
+              <label for="set-library-root">Folder</label>
+              <div class="with-btn">
+                <input id="set-library-root" type="text" readonly placeholder="Not set yet" autocomplete="off" spellcheck="false">
+                <button class="btn" id="btn-browse-library" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+              </div>
+              <p class="help" id="library-root-source"></p>
+            </div>
+            <div class="btn-row">
+              <button id="btn-move-library" class="btn secondary" type="button" hidden>Move library to another folder</button>
+            </div>
+            <div class="field">
+              <label for="set-default-op">New plans start with</label>
+              <select id="set-default-op">
+                <option value="move">Move the photos</option>
+                <option value="copy">Copy the photos</option>
+              </select>
+              <p class="help">Copy leaves your originals where they are, which suits read-only folders.</p>
+            </div>
+          </div>
+
           <div class="sect">
             <h2>Processing device</h2>
             <p class="lede">Choose what runs the analysis. Automatic picks the fastest device that works on this computer.</p>
@@ -705,6 +720,9 @@
     <button class="btn sm danger burst-only" id="bulk-rest" title="Mark every frame you did not select for delete. The best shot is kept."><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete the other <span id="bulk-rest-n">0</span></button>
     <button class="btn sm danger lib-only" id="bulk-delete" title="Leave the selected photos out of the result"><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Mark for delete</button>
     <button class="btn sm ghost lib-only" id="bulk-clean" title="Make copies without location or other hidden details">Clean export</button>
+    <button class="btn sm primary trash-only" id="bulk-restore" data-busy title="Put the selected photos back in the library, sorted by category">Restore</button>
+    <button class="btn sm ghost trash-only" id="bulk-return" data-busy title="Move the selected photos back to the folder they came from">Return to origin</button>
+    <button class="btn sm danger trash-only" id="bulk-purge" data-busy title="Delete the selected photos for good"><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete permanently</button>
     <button class="btn sm primary people-only" id="bulk-merge" title="Merge the selected people into one person" disabled><svg class="ic sm" aria-hidden="true"><use href="#i-users"/></svg>Merge</button>
     <button class="btn sm ghost people-only" id="bulk-name" title="Name the selected person" disabled>Name...</button>
     <button class="btn sm danger people-only" id="bulk-del-people" title="Delete the selected people. Photos stay in your library."><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete people</button>
@@ -805,6 +823,69 @@
       <div class="ppo-body">
         <div id="ppo-grid" class="ppo-grid"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- first run: library folder, then device -->
+  <div id="firstrun" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="firstrun-title">
+      <header>
+        <h2 id="firstrun-title">Welcome to Photocure Studio</h2>
+      </header>
+      <div class="modal-body">
+        <p class="help" id="firstrun-steps">Step 1 of 2</p>
+        <section id="firstrun-step-root">
+          <p class="lede">Choose the library folder. Every finished photo is stored here, sorted by category. You choose it once.</p>
+          <div class="field wide">
+            <label for="firstrun-root">Library folder</label>
+            <div class="with-btn">
+              <input id="firstrun-root" type="text" readonly placeholder="Not chosen yet" autocomplete="off" spellcheck="false">
+              <button class="btn" id="firstrun-browse" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+            </div>
+          </div>
+        </section>
+        <section id="firstrun-step-device" hidden>
+          <p class="lede">Choose what runs the analysis. Automatic picks the fastest device that works on this computer.</p>
+          <div id="firstrun-accel" class="accel-list" role="radiogroup" aria-label="Processing device"></div>
+          <div class="field gpu-index" id="firstrun-gpu-field" hidden>
+            <label for="firstrun-gpu">Which GPU</label>
+            <select id="firstrun-gpu"></select>
+          </div>
+        </section>
+        <p class="help err" id="firstrun-msg" role="status"></p>
+      </div>
+      <footer>
+        <span class="grow"></span>
+        <button class="btn" id="firstrun-back" type="button" hidden>Back</button>
+        <button class="btn primary" id="firstrun-next" type="button" disabled>Next</button>
+        <button class="btn primary" id="firstrun-finish" type="button" hidden>Finish</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- move the library to another folder -->
+  <div id="movelib" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="movelib-title">
+      <header>
+        <h2 id="movelib-title">Move the library</h2>
+        <button class="icon-btn" id="movelib-close" type="button" aria-label="Close"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="modal-body">
+        <p class="lede">Choose an empty folder. Photocure copies every photo there, checks each copy, then switches over. The old folder is not deleted.</p>
+        <div class="field wide">
+          <label for="movelib-path">New folder</label>
+          <div class="with-btn">
+            <input id="movelib-path" type="text" readonly placeholder="Not chosen yet" autocomplete="off" spellcheck="false">
+            <button class="btn" id="movelib-browse" type="button"><svg class="ic" aria-hidden="true"><use href="#i-folder"/></svg>Browse</button>
+          </div>
+        </div>
+        <p class="help" id="movelib-preview" role="status"></p>
+      </div>
+      <footer>
+        <span class="grow"></span>
+        <button class="btn" id="movelib-cancel" type="button">Cancel</button>
+        <button class="btn primary" id="movelib-start" type="button" disabled>Move library</button>
+      </footer>
     </div>
   </div>
 

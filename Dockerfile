@@ -38,7 +38,7 @@ USER curator
 ENV HOME=/data \
     PCUR_CACHE_DIR=/data/.cache \
     PCUR_BROWSE_ROOTS=/photos,/output \
-    PCUR_DEFAULT_OUTPUT=/output/Organized
+    PCUR_LIBRARY_ROOT=/output/Organized
 WORKDIR /data
 VOLUME ["/data"]
 EXPOSE 8080

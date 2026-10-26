@@ -30,10 +30,9 @@ services:
       # Set to 0 to stop installing at start (offline or pre-baked images).
       PCUR_AUTO_SETUP: ${PCUR_AUTO_SETUP:-1}
     volumes:
-      # Hardlinks only work inside one filesystem. To organize with hardlinks instead of copies,
-      # mount a common parent (for example -v /mnt/storage:/media with /media/raw and
-      # /media/curated) rather than two unrelated folders; otherwise files are copied and
-      # Photocure says so after the apply.
+      # Finished photos go to the library folder, /output inside the container (PCUR_LIBRARY_ROOT is
+      # already set to /output/Organized by the image), so the app never asks for it.
+      # Choose Copy in the app when the photos mount is read-only.
       # Use :ro instead of :rw if you only want to scan and copy, never move originals.
       - ${PHOTOS_DIR:-./photos}:/photos:rw
       - ${OUTPUT_DIR:-./output}:/output:rw

@@ -34,7 +34,7 @@ def test_nav_item_panel_and_chips_exist():
     nav = re.search(r"<nav>(.*?)</nav>", html, re.S).group(1)
     assert 'data-tab="utility"' in nav and 'data-count="utility"' in nav and "<span>Utility</span>" in nav
     tab = re.search(r'<section id="tab-utility"[^>]*>(.*?)</section>', html, re.S).group(1)
-    for needle in ('id="utilitygrid"', 'id="utilitygrid-more"', 'id="utilitycount"', 'id="btn-rescore"'):
+    for needle in ('id="utilitygrid"', 'id="utilitygrid-more"', 'id="utilitycount"'):
         assert needle in tab, needle
     kinds = re.findall(r'data-ukind="([^"]*)"', tab)
     assert kinds == ["", "screenshot", "document", "slide", "utility"]
@@ -47,18 +47,6 @@ def test_junk_filter_no_longer_offers_screenshots_or_documents():
     assert 'value="graphic"' in junk and 'value="duplicate"' in junk
 
 
-def test_js_wires_grid_counts_titles_and_rescore():
-    js = _read("app.js")
-    assert 'makeGrid("utility"' in js and "group=utility" in js
-    assert "utility: [" in js.split("const TITLES", 1)[1].split("};", 1)[0]
-    assert 'set("utility"' in js.split("function renderCounts", 1)[1].split("\n  }\n", 1)[0]
-    assert "state.utility = new Set(" in js
-    assert '"utility"' in js.split("const CAT_ORDER", 1)[1].split("];", 1)[0]
-    assert "Label or sign" in js
-    handler = js.split('$("#btn-rescore").onclick', 1)[1].split("};", 1)[0]
-    assert '"/api/rescore"' in handler and "followJob(" in handler and "sortNow(" in handler and "grids.utility.reset()" in handler
-
-
 def test_junk_empty_state_no_longer_promises_screenshots_or_documents():
     js = _read("app.js")
     text = re.search(r'makeGrid\("junk".*?empty: \{[^}]*\}', js, re.S).group(0)
@@ -69,3 +57,13 @@ def test_chip_and_category_styles_exist():
     css = re.sub(r"/\*.*?\*/", "", _read("style.css"), flags=re.S)
     assert "--c-utility:" in css
     assert ".chip-btn {" in css and '.chip-btn[aria-pressed="true"]' in css
+
+
+def test_js_wires_grid_counts_and_titles():
+    js = _read("app.js")
+    assert 'makeGrid("utility"' in js and "group=utility" in js
+    assert "utility: [" in js.split("const TITLES", 1)[1].split("};", 1)[0]
+    assert 'set("utility"' in js.split("function renderCounts", 1)[1].split("\n  }\n", 1)[0]
+    assert "state.utility = new Set(" in js
+    assert '"utility"' in js.split("const CAT_ORDER", 1)[1].split("];", 1)[0]
+    assert "Label or sign" in js

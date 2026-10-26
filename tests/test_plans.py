@@ -51,21 +51,6 @@ def test_plan_cannot_be_applied_twice(tmp_path):
         w.planner.execute_plan(p.plan_id)
 
 
-def test_in_place_never_moves_originals_even_with_move_override(tmp_path):
-    w = build_world(tmp_path)
-    p = w.planner.build_plan(organize_root=w.out, operation="move",
-                             mode=OrganizeMode.IN_PLACE)
-    assert {a.operation for a in p.actions} == {"hardlink"}
-    rep = w.planner.execute_plan(p, operation="move")
-    assert rep.executed == 4
-    for src in w.paths:
-        assert src.exists()
-    for a in p.actions:
-        assert os.path.samefile(a.source, a.target)
-    for i in w.ids:
-        assert get_img(w, i).path in {str(x) for x in w.paths}
-
-
 def test_move_updates_db_path_and_undo_restores_it(tmp_path):
     w = build_world(tmp_path)
     p = w.planner.build_plan(organize_root=w.out, operation="move")
@@ -214,17 +199,15 @@ def test_reassigning_clears_delete_approval(tmp_path):
     assert not get_img(w, w.ids[0]).delete_approved
 
 
-def test_purge_trash_respects_retention_and_marks_ledger(tmp_path):
+def test_empty_trash_deletes_the_files_and_marks_the_ledger(tmp_path):
     w = build_world(tmp_path, n=1)
     set_bucket(w, w.ids[0], "graphic")
     approve_delete(w, w.ids[0])
     p = w.planner.build_plan(organize_root=w.out, operation="move")
     rep = w.planner.execute_plan(p, trash=True)
-    kept = w.planner.purge_trash(w.out, older_than_days=30)
-    assert kept["removed_transactions"] == []
-    res = w.planner.purge_trash(w.out, older_than_days=30,
-                                now=time.time() + 31 * 86400)
-    assert res["removed_transactions"] == [rep.transaction_id] and res["files"] == 1
+    assert list((w.out / ".trash").rglob("*.jpg"))  # nothing leaves the trash on a timer
+    res = w.planner.empty_trash(w.out)
+    assert res["deleted"] == 1 and res["bytes"] > 0
     assert not (w.out / ".trash").exists()
     with get_session(w.db) as s:
         rows = PhotoRepository(s).ledger_by_txn(rep.transaction_id)
@@ -322,7 +305,7 @@ def test_any_marked_photo_is_trashed_and_unmarked_ones_are_not(tmp_path):
     assert any(w.out.rglob(_src(w, 1).name))
 
 
-def test_marked_photo_is_left_out_without_trash_or_when_copying(tmp_path):
+def test_marked_photo_is_left_out_without_trash(tmp_path):
     w = build_world(tmp_path, n=2)
     approve_delete(w, w.ids[0])
     p = w.planner.build_plan(organize_root=w.out, operation="move")
@@ -332,9 +315,20 @@ def test_marked_photo_is_left_out_without_trash_or_when_copying(tmp_path):
     w2 = build_world(tmp_path / "copy", n=2)
     approve_delete(w2, w2.ids[0])
     p2 = w2.planner.build_plan(organize_root=w2.out, operation="copy")
-    rep2 = w2.planner.execute_plan(p2, trash=True)
+    rep2 = w2.planner.execute_plan(p2, trash=False)
     assert rep2.marked_left_out == 1 and _src(w2, 0).exists()
     assert not any(w2.out.rglob(_src(w2, 0).name))
+
+
+def test_marked_photo_is_copied_into_the_trash_when_copying(tmp_path):
+    w = build_world(tmp_path, n=2)
+    approve_delete(w, w.ids[0])
+    p = w.planner.build_plan(organize_root=w.out, operation="copy")
+    rep = w.planner.execute_plan(p, trash=True)
+    assert rep.marked_left_out == 0 and _src(w, 0).exists()  # the original stays put
+    trash = w.out / ".trash" / rep.transaction_id
+    assert list(trash.rglob(_src(w, 0).name))
+    assert not [f for f in w.out.rglob(_src(w, 0).name) if trash not in f.parents]
 
 
 def test_marked_burst_alternate_is_trashed_unmarked_stays(tmp_path):
@@ -373,7 +367,7 @@ def test_trashed_photo_removed_from_index_and_undo_restores_it(tmp_path):
         assert PhotoRepository(s).count_category("graphic") == 0
 
     p2 = w.planner.build_plan(organize_root=w.out, operation="move", persist=False)
-    assert p2.total == 2
+    assert p2.total == 0  # applied and trashed photos are not planned again
     assert w.ids[0] not in {a.image_id for a in p2.actions}
 
     # Undo restores the trashed photo to disk and back into the active index
@@ -385,4 +379,3 @@ def test_trashed_photo_removed_from_index_and_undo_restores_it(tmp_path):
     with get_session(w.db) as s:
         assert PhotoRepository(s).stats()["total_images"] == 3
         assert PhotoRepository(s).count_category("graphic") == 1
-
