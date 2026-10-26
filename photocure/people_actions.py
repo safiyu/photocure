@@ -584,7 +584,9 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = 
 
 
 def detach_faces(s, image_id: int) -> int:
-    """Take a photo's faces out of their people (it left the library); empty unnamed people go."""
+    """Take a photo's faces out of their people (it left the library); empty unnamed people go.
+
+    The faces keep their ignored flag: only a person the user deleted marks faces ignored."""
     n = 0
     for f in s.exec(select(M.FaceDetection).where(M.FaceDetection.image_id == image_id)).all():
         if f.person_id is not None:
@@ -593,8 +595,7 @@ def detach_faces(s, image_id: int) -> int:
                 c.face_count = max(0, c.face_count - 1)
                 if c.face_count <= 0 and not c.name:
                     s.delete(c)
-        f.ignored = True
-        f.person_id = None
+        f.person_id = None  # detached, not rejected: Reanalyse and Restore may cluster it again
         n += 1
     s.flush()
     return n

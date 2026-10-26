@@ -96,7 +96,7 @@ def test_delete_in_library_moves_into_a_txn_trash_folder_and_detaches_faces(lib)
     assert trash in path.parents and path.parent.parent != trash  # .trash/<txn>/<category>/name
     with get_session(lib.db) as s:
         f = s.get(M.FaceDetection, fid)
-        assert f.ignored is True and f.person_id is None
+        assert f.ignored is False and f.person_id is None  # detached, not rejected
         assert s.get(M.PersonCluster, pid) is None  # unnamed and now empty
 
 
@@ -138,3 +138,24 @@ def test_best_shot_in_library_keeps_alternates_where_they_are(lib):
     assert not (lib.out.resolve() / "Bursts").exists()
     assert Path(_row(lib, ids[0])["path"]).exists() and Path(_row(lib, ids[1])["path"]).exists()
     assert _row(lib, ids[0])["path"] == paths_before[ids[0]]
+
+
+def test_a_trashed_photos_faces_can_be_clustered_in_the_trash_and_restored(lib):
+    from photocure import trash_actions
+    from photocure.people_actions import recluster_people
+    from photocure.db.repository import quantize_embedding
+    iid = _first(lib)
+    emb = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    with get_session(lib.db) as s:
+        s.add(M.FaceDetection(image_id=iid, bbox_x1=0, bbox_y1=0, bbox_x2=1, bbox_y2=1, confidence=0.9,
+                              x1=0.1, y1=0.1, x2=0.3, y2=0.3, embedding_json=quantize_embedding(emb)))
+        s.commit()
+    assert lib.client.delete(f"/api/images/{iid}").status_code == 200
+    out = recluster_people(lib.db, stage="trash")  # reanalysing the trash can only cluster faces that are not ignored
+    assert out["clusters_created"] == 1 and out["faces_clustered"] == 1
+    trash_actions.restore(lib.db, lib.app.state.cfg, [iid])
+    with get_session(lib.db) as s:
+        face = s.exec(M.FaceDetection.__table__.select().where(M.FaceDetection.image_id == iid)).first()
+        person = s.get(M.PersonCluster, face.person_id)
+        assert person.stage == "library" and face.ignored == 0
+        assert not [c for c in s.query(M.PersonCluster).all() if c.stage == "trash"]

@@ -232,7 +232,7 @@ Actions available in Trash:
 `PersonCluster` gets a `stage` column: `"library"` or `"trash"`. People created
 by analysing New photos and by apply belong to `library` (New and Library share
 one set of people, as they do today). Trashing a photo detaches its faces
-(`person_id = None`, `ignored = True`, face counts decremented, empty unnamed
+(`person_id = None`, face counts decremented, `ignored` left alone so Reanalyse can cluster them; empty unnamed
 people deleted), which is what manual delete already does; apply-trash starts
 doing the same. The People view in Trash is therefore empty until Reanalyse
 runs; Reanalyse clusters trash faces into `trash` people only, and the New and
