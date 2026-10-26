@@ -473,6 +473,12 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = 
         # Clear old pipeline clusters that have no Library faces
         for c in old_clusters:
             if c.id not in anchored_cluster_ids:
+                if stage != "trash" and c.name and s.exec(
+                        select(func.count(M.FaceDetection.id))
+                        .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
+                        .where(M.FaceDetection.person_id == c.id)
+                        .where(M.ImageRecord.stage == "library")).one():
+                    continue  # a person the user named keeps their finished photos, centroid or not
                 s.delete(c)
         s.flush()
 

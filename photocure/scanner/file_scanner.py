@@ -125,6 +125,7 @@ class _Known:
     stamp: float | None
     status: str
     created: float | None = None
+    stage: str = "new"
 
 
 class FileScanner:
@@ -261,11 +262,11 @@ class FileScanner:
     # ------------------------------------------------------------------- run
     def _known_rows(self, session: Session) -> dict[str, _Known]:
         cols = [ImageRecord.path, ImageRecord.id, ImageRecord.file_size,
-                ImageRecord.scan_status, ImageRecord.file_mtime, ImageRecord.created_at]
+                ImageRecord.scan_status, ImageRecord.file_mtime, ImageRecord.created_at, ImageRecord.stage]
         out: dict[str, _Known] = {}
-        for path, iid, size, status, mtime, created in session.exec(sselect(*cols)).all():
+        for path, iid, size, status, mtime, created, stage in session.exec(sselect(*cols)).all():
             out[path] = _Known(iid, size or 0, mtime, status,
-                               _as_utc_ts(created) if created is not None else None)
+                               _as_utc_ts(created) if created is not None else None, stage)
         return out
 
     @staticmethod
@@ -396,7 +397,7 @@ class FileScanner:
         blocked = tuple(str(Path(d)) + os.sep for d in result.walk_errors)
         gone = [k.id for path, k in known.items()
                 if path.startswith(prefix) and path not in seen
-                and k.status != "missing"
+                and k.status != "missing" and k.stage == "new"  # finished photos live in the library, not here
                 and not (blocked and path.startswith(blocked))]
         for chunk in _chunks(gone, _IN_CHUNK):
             for row in session.exec(sselect(ImageRecord).where(
@@ -645,6 +646,11 @@ class FileScanner:
     @staticmethod
     def _find_in_library(rec: ImageRecord, path: Path, repo) -> ImageRecord | None:
         """A library or trash photo with this exact content (trash rows are marked missing)."""
+        origin = repo.s.exec(sselect(ImageRecord).where(
+            ImageRecord.origin_path == str(path), ImageRecord.stage.in_(("library", "trash")),
+            ImageRecord.route_status != "purged")).first()
+        if origin is not None and origin.file_size == rec.file_size:
+            return origin  # the photo came from this very path and is the same size: no need to read it
         stmt = sselect(ImageRecord).where(
             ImageRecord.quick_hash == rec.quick_hash,
             ImageRecord.stage.in_(("library", "trash")),
@@ -668,7 +674,8 @@ class FileScanner:
     def _find_db_original(sha: str, repo, rec: ImageRecord) -> ImageRecord | None:
         """Locate a definitive SHA-256 match already persisted (any live path)."""
         stmt = sselect(ImageRecord).where(ImageRecord.sha256 == sha,
-                                          ImageRecord.scan_status != "missing")
+                                          ImageRecord.scan_status != "missing",
+                                          ImageRecord.is_duplicate == False)  # noqa: E712
         if rec.id is not None:
             stmt = stmt.where(ImageRecord.id != rec.id)
         hit = repo.s.exec(stmt).first()
@@ -676,7 +683,7 @@ class FileScanner:
             return hit
         # A prior *lazy* run may have left a candidate's sha256 empty: backfill.
         for cand in repo.find_by_quick_hash(rec.quick_hash, exclude_id=rec.id):
-            if cand.scan_status == "missing":
+            if cand.scan_status == "missing" or cand.is_duplicate:
                 continue
             if not cand.sha256:
                 cand.sha256 = _safe_sha256(Path(cand.path))

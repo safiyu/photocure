@@ -715,10 +715,14 @@ class InferencePipeline:
         result: list[int | None] = [None] * len(faces)
         claimed_in_image: set[int] = set()
         resolved_person_ids: set[int] = set()
-        for i, f in enumerate(faces):
+        # Faces that continue an earlier identity are resolved first, so a face that merely clusters
+        # nearby cannot take that person and push the true continuation onto someone else.
+        for i in sorted(range(len(faces)), key=lambda k: 0 if k in remap else 1):
+            f = faces[i]
             if f.embedding is None:
                 continue
-            if i in remap and self._live_cluster(repo, centroids, remap[i]) is not None:
+            if (i in remap and remap[i] not in claimed_in_image
+                    and self._live_cluster(repo, centroids, remap[i]) is not None):
                 pid = remap[i]
             else:
                 while True:

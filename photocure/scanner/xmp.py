@@ -106,7 +106,7 @@ def parse_xmp(data: bytes) -> XmpInfo:
             if r is not None:
                 try:
                     info.rating = max(-1, min(5, int(float(r))))
-                except ValueError:
+                except (ValueError, OverflowError):  # "abc", "nan", "inf", "1e999"
                     pass
         if not info.label:
             info.label = _attr_or_child(desc, "xmp", "Label") or ""
