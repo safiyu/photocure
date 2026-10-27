@@ -5945,7 +5945,8 @@
         if (el) el.textContent = "";
       });
       renderProgress({ active: false, done: 0, total: 0, percent: 0, message: "" });
-      await Promise.all([loadStats(), loadTransactions(), refreshBackend()]);
+      applyBusy(false);
+      await Promise.all([loadStats(), loadTransactions(), refreshBackend(), refreshWatch()]);
       resetVisibleGrids();
       await refreshSettings(true);
       if (resetRes && resetRes.library_root_cleared) maybeFirstRun();  // the folder was forgotten: ask again

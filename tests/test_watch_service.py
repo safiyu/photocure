@@ -286,3 +286,16 @@ def test_a_saved_folder_that_has_gone_does_not_stop_the_app_starting(tmp_path):
         c.headers["X-PCUR-Token"] = app.state.token
         st = c.get("/api/watch").json()
         assert st["running"] is False and "gone" in (st["last_error"] or "")
+
+
+def test_reset_library_stops_active_watch_and_disables_it(env):
+    r = env.client.post("/api/watch", json={"enabled": True, "path": str(env.lib)})
+    assert r.status_code == 200 and r.json()["running"] is True
+    assert features.load_features(env.app.state.db)["watch_enabled"] is True
+
+    reset_res = env.client.post("/api/reset")
+    assert reset_res.status_code == 200
+    assert env.client.get("/api/watch").json()["running"] is False
+    f = features.load_features(env.app.state.db)
+    assert f["watch_enabled"] is False and f["watch_path"] == ""
+

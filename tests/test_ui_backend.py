@@ -29,6 +29,7 @@ def _fresh_backend():
 def env(tmp_path):
     app = create_app(str(tmp_path / "ui.db"))
     app.state.cfg.cache_dir = tmp_path / "cache"
+    app.state.cfg.library_root = tmp_path / "lib"
     client = TestClient(app)
     client.headers["X-PCUR-Token"] = app.state.token
     lib = tmp_path / "photos"

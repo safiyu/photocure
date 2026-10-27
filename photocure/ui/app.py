@@ -2364,6 +2364,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.post("/api/reset", dependencies=auth)
     def reset_library():
+        if hasattr(app.state, "watch") and app.state.watch is not None:
+            app.state.watch.stop()
+        from ..features import save_features
+        save_features(dbp, {"watch_enabled": False, "watch_path": ""})
         with exclusive():
             with get_session(dbp) as s:
                 repo = PhotoRepository(s)
