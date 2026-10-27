@@ -486,8 +486,9 @@ button { cursor: pointer; }
 
 .hero .progress-card { flex: 1 1 340px; max-width: 520px; min-width: 0; margin: 0; padding: 0; background: none; border: 0; gap: 8px; }
 .hero .progress-header { flex-direction: column; align-items: stretch; gap: 8px; }
-.hero .progress-task { min-width: 0; }
-.hero #progress-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hero .progress-task { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.hero #progress-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.hero .progress-sub { min-width: 0; }
 .hero .progress-track { height: 4px; }
 
 main {
@@ -1676,10 +1677,10 @@ body.has-picks .tools, body.has-picks .hover-actions {
 /* ----------------------------------------------------- progress card (global) */
 .progress-card { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px 20px; margin: 4px 0 20px; display: flex; flex-direction: column; gap: 10px; }
 .progress-header { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
-.progress-task { display: flex; align-items: center; gap: 10px; }
-.progress-pct { font-weight: 600; }
+.progress-task { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.progress-pct { font-weight: 600; white-space: nowrap; flex-shrink: 0; }
 /* C8: right-hand cluster — visualizer + live ratio + pct + stop/dismiss. */
-.progress-controls { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.progress-controls { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: nowrap; }
 .progress-ratio {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
   font-size: 12px; font-weight: 600; color: var(--mut); white-space: nowrap;
@@ -1694,8 +1695,29 @@ body.has-picks .tools, body.has-picks .hover-actions {
   background-size: 28px 28px, 100% 100%; animation: stripes 1s linear infinite;
 }
 @keyframes stripes { to { background-position: 28px 0, 0 0; } }
-.progress-sub { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--mut); }
-.progress-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.progress-sub {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--mut);
+  min-width: 0;
+  line-height: 1.3;
+  min-height: 1.3em;
+}
+.progress-msg {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+#progress-counts {
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-align: right;
+}
 .dismiss-btn { border: 0; background: none; color: var(--mut); border-radius: 6px; padding: 2px 8px; }
 .dismiss-btn:hover { background: var(--well); color: var(--ink); }
 .stop-btn {

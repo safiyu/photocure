@@ -683,6 +683,15 @@ def test_get_people_lists_known_clusters(env):
     assert {"id": pid, "name": "Alice", "face_count": 3, "sample_face_id": None} in items
 
 
+def test_get_people_names_endpoint(env):
+    _seed_person(env, name="Alice", face_count=1)
+    _seed_person(env, name="Bob", face_count=2)
+    _seed_person(env, name=None, face_count=3)
+    names = env.client.get("/api/people/names").json()["names"]
+    assert names == ["Alice", "Bob"]
+
+
+
 def test_rename_person_endpoint_merges_duplicates(env):
     keep = _seed_person(env, name="Safi", face_count=1)
     dup = _seed_person(env, name=None, face_count=2)

@@ -108,6 +108,9 @@ def _copy_and_switch(dbp: Path, old: Path, olds: tuple[Path, ...], new: Path, on
     if failed:
         return result
 
+    if on_progress and files:
+        on_progress(len(files), len(files), "Updating library records...")
+
     previous = load_settings(dbp).get("library_root")
     with get_session(dbp) as s:
         for rec in s.exec(select(M.ImageRecord).where(M.ImageRecord.stage.in_(("library", "trash")))).all():

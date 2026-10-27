@@ -2797,9 +2797,24 @@
       list.innerHTML = "";
       $("#burstdetail").innerHTML = emptyHTML({
         icon: "layers", title: "No burst groups yet",
-        text: "Bursts are shots taken seconds apart. Run the Group bursts step to find them.",
-        action: { label: "Go to Import", attr: 'data-goto="library"' },
+        text: "Bursts are shots taken seconds apart. Run grouping to find them.",
+        action: { label: "Group bursts now", attr: 'id="btn-group-bursts-now"' },
       });
+      const btn = $("#btn-group-bursts-now");
+      if (btn) {
+        btn.onclick = async () => {
+          await runTask("Grouping bursts", async () => {
+            const res = await post("/api/cluster", { only_new: false });
+            if (res && res.burst_groups != null) {
+              libLog(`Grouping finished: ${fmtN(res.burst_groups)} burst groups`, "ok");
+              toast(`Found ${fmtN(res.burst_groups)} burst groups`, "ok");
+            }
+            await loadStats();
+            await renderBursts();
+            return res;
+          });
+        };
+      }
       return;
     }
     list.innerHTML = data.items.map((b) =>
@@ -2911,6 +2926,15 @@
   }
 
   const allKnownPeopleNames = new Set();
+  async function fetchKnownPeopleNames() {
+    try {
+      const data = await api("/api/people/names");
+      if (data && Array.isArray(data.names)) {
+        activeOverlayPeopleNames = data.names;
+        data.names.forEach((n) => allKnownPeopleNames.add(n));
+      }
+    } catch (_) {}
+  }
   function getKnownPeopleNames() {
     const dl = $("#people-names");
     if (dl) Array.from(dl.options || []).forEach((o) => { if (o.value) allKnownPeopleNames.add(o.value); });
@@ -3922,6 +3946,9 @@
     const face = activeOverlayFaces.find((f) => f.id === faceId);
     if (!overlay || !face || !anchor) return;
     closeFaceRename();
+    if (!activeOverlayPeopleNames.length) {
+      fetchKnownPeopleNames();
+    }
     const current = face.personId != null ? face.name : "";
     const input = el("input", {
       type: "text", id: "face-rename-input", class: "face-rename-input",
@@ -3941,6 +3968,7 @@
       ok.disabled = true;
       await reassignFace(faceId, { new_name: name });
       allKnownPeopleNames.add(name);
+      if (!activeOverlayPeopleNames.includes(name)) activeOverlayPeopleNames.push(name);
       ok.disabled = false;
     };
     pop.addEventListener("submit", async (ev) => {
@@ -3997,16 +4025,18 @@
     const reveal = () => { overlay.hidden = false; enterFacePanel(overlay); };
 
     try {
-      const [burstData, faceData, peopleData] = await Promise.all([
+      if (!activeOverlayPeopleNames.length) {
+        fetchKnownPeopleNames();
+      }
+
+      const [burstData, faceData] = await Promise.all([
         burstId ? api("/api/burst/" + num(burstId)) : Promise.resolve(null),
         api(`/api/images/${num(imageId)}/faces`),
-        api("/api/people").catch(() => ({ items: [] })),
       ]);
       if (req !== overlayReq) return;
 
       activeOverlayBurstData = burstData;
       activeOverlayMembers = (burstData && burstData.members) || [];
-      activeOverlayPeopleNames = (peopleData.items || []).filter((p) => p.name).map((p) => p.name);
       activeOverlayStandaloneMember = activeOverlayMembers.length ? null : {
         id: imageId, filename: faceData.filename, width: faceData.width, height: faceData.height,
         orientation: faceData.orientation, taken_at: faceData.taken_at,
@@ -5144,10 +5174,9 @@
     const track = $("#progress-card .progress-track");
     if (track) track.setAttribute("aria-valuenow", String(Math.round(p.active ? num(p.percent) : 100)));
 
-    const isBusy = p.active || p.busy;
     [$("#btn-stop-progress")].forEach((btn) => {
       if (!btn) return;
-      btn.style.display = isBusy ? "inline-flex" : "none";
+      btn.style.display = p.active ? "inline-flex" : "none";
       if (p.stopping) {
         btn.disabled = true;
         btn.textContent = "Stopping...";
@@ -5158,7 +5187,7 @@
     });
 
     const dis = $("#btn-dismiss-progress");
-    if (dis) dis.style.display = isBusy ? "none" : "inline-block";
+    if (dis) dis.style.display = p.active ? "none" : "inline-block";
   }
 
   function applyBusy(busy) {
@@ -5363,12 +5392,15 @@
       } catch (e) { toast(e.message, "err"); return; }
       if (!res) return;
       if (res.ok) {
+        libLog(`Library moved to ${res.new_root} (${fmtN(res.copied)} files)`, "ok");
         toast(`Library moved. The old folder at ${res.old_root} is yours to delete.`, "ok");
         await refreshSettings(true);
         resetVisibleGrids();
         loadStats();
       } else {
-        toast((res.failed && res.failed[0]) || res.error || "The library was not moved.", "err");
+        const err = (res.failed && res.failed[0]) || res.error || "The library was not moved.";
+        libLog(`Library move failed: ${err}`, "err");
+        toast(err, "err");
       }
     };
   }
@@ -5858,6 +5890,7 @@
       return null;
     } finally {
       state.taskRunning = false;
+      $$(".logline.running").forEach((e) => e.classList.remove("running"));
       pollProgress();
     }
   }
@@ -6416,8 +6449,10 @@
       const r = await runTask(`Analyzing photos (${device})`, async () => {
         const inferred = await post("/api/infer", { device });
         if (inferred && inferred.stopped) return inferred;
-        if (!inferred.new_ids_count) return { inferred, grouped: null };
-        const grouped = await post("/api/cluster", { only_new: true });
+        const ov = state.overview || {};
+        const hasBursts = num(ov.stats && ov.stats.burst_groups) > 0;
+        if (!inferred.new_ids_count && hasBursts) return { inferred, grouped: null };
+        const grouped = await post("/api/cluster", { only_new: !!inferred.new_ids_count });
         if (grouped && grouped.stopped) return grouped;
         return { inferred, grouped };
       });
@@ -6430,12 +6465,28 @@
       }
       libLog(`Analysis finished: ${fmtN(r.inferred.processed)} photos, ${fmtN(r.inferred.faces_total)} faces in ${r.inferred.duration_s}s`, "ok");
       libLog(`Grouping finished: ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
-      toast(`Analyzed ${fmtN(r.inferred.processed)} new photos`, "ok");
+      toast(`Analyzed photos: found ${fmtN(r.grouped.burst_groups)} burst groups`, "ok");
       markGrouped();
       const sorted = await afterTask(true);
       libLog(sorted ? "Photos sorted into categories" : "Could not sort photos into categories", sorted ? "ok" : "warn");
       if (sorted) await approveProposedDeletes(true);
     };
+    const clusterBtn = $("#btn-cluster-only");
+    if (clusterBtn) {
+      clusterBtn.onclick = async () => {
+        const r = await runTask("Grouping bursts", async () => {
+          const res = await post("/api/cluster", { only_new: false });
+          if (res && res.stopped) return res;
+          return res;
+        });
+        if (!r) return;
+        libLog(`Grouping finished: ${fmtN(r.burst_groups)} burst groups`, "ok");
+        toast(`Found ${fmtN(r.burst_groups)} burst groups`, "ok");
+        markGrouped();
+        await loadStats();
+        await renderBursts();
+      };
+    }
     $("#btn-ingest-all").onclick = async () => {
       const path = needPath();
       if (!path) return;
@@ -6517,6 +6568,7 @@
     if (btnImportReset) btnImportReset.onclick = resetLibrary;
     $("#infer-device").addEventListener("change", (e) => { e.target.dataset.user = "1"; });
     await Promise.all([loadStats(), loadTransactions(), refreshSettings(false)]);
+    fetchKnownPeopleNames();
     const start = (location.hash || "").slice(1);
     showTab(TITLES[start] ? start : "library");
     maybeFirstRun();

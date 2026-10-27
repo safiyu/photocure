@@ -1562,6 +1562,17 @@ def create_app(db_path: str | None = None) -> FastAPI:
         from ..people_actions import list_people
         return {"items": list_people(dbp, sort=sort, stage=stage)}
 
+    @app.get("/api/people/names")
+    def list_people_names_endpoint():
+        """Lightweight endpoint returning distinct names of known people for autocomplete."""
+        with get_session(dbp) as s:
+            names = s.exec(
+                select(M.PersonCluster.name)
+                .where(M.PersonCluster.name.isnot(None))
+                .distinct()
+            ).all()
+            return {"names": sorted([n for n in names if n])}
+
     @app.delete("/api/people/{person_id}", dependencies=auth)
     def delete_person_endpoint(person_id: int, stage: StageFilter = Query("all")):
         """Delete a person cluster and unassign all its associated faces."""
@@ -2242,11 +2253,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
             with get_session(dbp) as s:
                 repo = PhotoRepository(s)
                 new_ids = getattr(app.state, "last_analyzed_ids", None)
-                if body.only_new and new_ids:
+                all_b = repo.all_bursts()
+                if body.only_new and new_ids and all_b:
                     records, bursts = _burst_neighbourhood(
                         s, new_ids, float(c.burst.window_seconds))
                 else:
-                    records, bursts = repo.all_images(), repo.all_bursts()
+                    records, bursts = repo.all_images(), all_b
                 old_best = {b.best_shot_id for b in bursts if b.best_shot_id}
                 for r in records:
                     r.burst_id = None

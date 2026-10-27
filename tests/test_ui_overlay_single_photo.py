@@ -58,3 +58,11 @@ def test_generic_cards_get_a_faces_entry_point_when_they_have_faces():
     assert "data-faces" in card_body
     delegate_body = _fn(js, "bindDelegates")
     assert "dataset.faces" in delegate_body and "dataset.burst" in delegate_body and "openBiometricProjection(" in delegate_body
+
+
+def test_open_projection_does_not_block_on_heavy_people_endpoint():
+    js = _read("app.js")
+    body = _fn(js, "openBiometricProjection")
+    assert 'api("/api/people")' not in body
+    assert "api(`/api/images/${num(imageId)}/faces`)" in body
+
