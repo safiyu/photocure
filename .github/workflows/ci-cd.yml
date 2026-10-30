@@ -14,7 +14,7 @@ permissions:
 jobs:
   test:
     name: Test Suite
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
     name: Sync Version and Tag
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       new_tag: ${{ steps.tag_version.outputs.new_tag }}
       new_version: ${{ steps.tag_version.outputs.new_version }}
@@ -81,7 +81,7 @@ jobs:
     name: Build & Release Debian Package
     needs: [test, tag-and-release]
     if: always() && needs.test.result == 'success' && !cancelled()
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
