@@ -5102,16 +5102,12 @@
         toast(msg, count ? "ok" : "info");
         if (ids && ids.length) clearPicks();
         await Promise.all([loadStats(), refreshBackend(), loadTransactions()]);
-        if (state.tab === "categories") await renderGrid();
-        else if (state.tab === "people") await renderPeople();
-        else if (state.tab === "duplicates") await renderDuplicates();
-        else if (state.tab === "utility") await renderUtility();
-        else if (state.tab === "junk") await renderJunk();
-        else if (state.tab === "uncertain") await renderUncertain();
+        resetVisibleGrids();
+        if (state.tab === "people") await renderPeople();
+        else if (state.tab === "duplicates") loadDuplicates(false);
         else if (state.tab === "bursts") await renderBursts();
-        else if (state.tab === "highlights") await renderHighlights();
-        else if (state.tab === "events") await renderEvents();
-        else if (state.tab === "search") await renderSearch();
+        else if (state.tab === "events") await loadEvents();
+        else if (state.tab === "search") runSearch();
       }
       return res;
     });

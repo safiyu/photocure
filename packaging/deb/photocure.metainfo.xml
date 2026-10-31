@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.5.8" type="stable" date="2026-10-31">
+      <description>
+        <p>Fix UI grid refresh in finalizeSection using resetVisibleGrids instead of undefined tab renderers.</p>
+      </description>
+    </release>
     <release version="1.5.7" type="stable" date="2026-10-31">
       <description>
         <p>Fix SQLAlchemy expression wrapping for category queries in finalize_deletes across utility, junk, and duplicates sections.</p>
