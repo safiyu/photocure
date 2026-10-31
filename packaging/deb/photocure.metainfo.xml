@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.5.9" type="stable" date="2026-10-31">
+      <description>
+        <p>Photocure release 1.5.9.</p>
+      </description>
+    </release>
     <release version="1.5.8" type="stable" date="2026-10-31">
       <description>
         <p>Fix UI grid refresh in finalizeSection using resetVisibleGrids instead of undefined tab renderers.</p>

@@ -144,8 +144,8 @@ class ScanReq(RunOverrides):
 
 class InferReq(RunOverrides):
     batch_size: int = 32
-    # "new" analyses unfinished photos; "trash" redoes the trashed ones. Library photos never run.
-    stage: Literal["new", "trash"] = "new"
+    # "new" analyses unfinished photos; "trash" and "library" redo the photos already there.
+    stage: Literal["new", "trash", "library"] = "new"
 
 
 class ClusterReq(BaseModel):
@@ -442,9 +442,23 @@ def _burst_neighbourhood(s, new_ids, window_s: float) -> tuple[list, list]:
     I, B = M.ImageRecord, M.BurstGroup
     new = _by_ids(s, new_ids)
     wd = timedelta(seconds=window_s)
-    spans = [(r.taken_at - wd, r.taken_at + wd) for r in new if r.taken_at is not None]
+    unplaced = (I.taken_at.is_(None)) | I.taken_at_source.in_(("mtime", "unknown"))
+
+    def _untimed(r) -> bool:
+        return r.taken_at is None or (r.taken_at_source or "") in ("mtime", "unknown")
+
+    spans = [(r.taken_at - wd, r.taken_at + wd) for r in new
+             if r.taken_at is not None and not _untimed(r)]
     records = {r.id: r for r in new}
     bursts: dict[int, M.BurstGroup] = {}
+    if any(_untimed(r) for r in new):
+        # Photos without a capture time are grouped on look alone, against all of their kind.
+        for r in s.exec(select(I).where(unplaced)).all():
+            records[r.id] = r
+            if r.burst_id is not None and r.burst_id not in bursts:
+                b = s.get(B, r.burst_id)
+                if b is not None:
+                    bursts[b.id] = b
     while spans:
         spans.sort()
         merged = [list(spans[0])]
@@ -2320,7 +2334,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             pipeline = InferencePipeline(c, backend=detect_for(c))
             res = pipeline.run(db_path=dbp, on_progress=on_prog, show_progress=False,
                                cancel_check=progress_mgr.is_stopped,
-                               stage=body.stage, reanalyze=body.stage == "trash")
+                               stage=body.stage, reanalyze=body.stage in ("trash", "library"))
         except InterruptedError:
             progress_mgr.stop("Inference stopped by user")
             return {"ok": False, "stopped": True, "message": "Inference stopped by user"}
@@ -2352,8 +2366,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 new_ids = getattr(app.state, "last_analyzed_ids", None)
                 all_b = repo.all_bursts()
                 if body.only_new and new_ids and all_b:
-                    records, bursts = _burst_neighbourhood(
-                        s, new_ids, float(c.burst.window_seconds))
+                    # Retakes hours apart are grouped too, so the neighbourhood is that wide.
+                    reach = max(float(c.burst.window_seconds),
+                                float(getattr(c.burst, "near_window_seconds", 0) or 0),
+                                float(getattr(c.burst, "far_window_seconds", 0) or 0))
+                    records, bursts = _burst_neighbourhood(s, new_ids, reach)
                 else:
                     records, bursts = repo.all_images(), all_b
                 old_best = {b.best_shot_id for b in bursts if b.best_shot_id}
@@ -2420,6 +2437,51 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def cluster_bursts(body: ClusterReq = ClusterReq()):
         with exclusive():
             return do_cluster(req_cfg(), body)
+
+    @app.post("/api/library/reanalyse", dependencies=auth)
+    def reanalyse_library(body: InferReq = InferReq()):
+        """Analyse every library photo again, regroup bursts, then refile what the AI now sees differently."""
+        from ..library import LibraryRootMissing, require_library_root
+        from ..library_actions import refile_library
+        try:
+            require_library_root(dbp, app.state.cfg)
+        except LibraryRootMissing:
+            raise HTTPException(400, "Choose a library folder in Settings first.") from None
+        with exclusive(timeout=5.0):
+            c = run_cfg(body)
+            try:
+                infer_res = do_infer(c, body.model_copy(update={"stage": "library"}), finish=False)
+                if progress_mgr.is_stopped() or (isinstance(infer_res, dict) and infer_res.get("stopped")):
+                    progress_mgr.stop("Library analysis stopped by user")
+                    return {"ok": False, "stopped": True, "message": "Library analysis stopped by user"}
+                progress_mgr.start("Library", "Grouping bursts and look-alike photos...", 1,
+                                   "Comparing every photo with its neighbours...")
+                cluster_res = do_cluster(
+                    c, ClusterReq(window_seconds=c.burst.window_seconds,
+                                  similarity_threshold=c.burst.similarity_threshold), finish=False)
+                if progress_mgr.is_stopped() or (isinstance(cluster_res, dict) and cluster_res.get("stopped")):
+                    progress_mgr.stop("Library analysis stopped by user")
+                    return {"ok": False, "stopped": True, "message": "Library analysis stopped by user"}
+                progress_mgr.start("Library", "Filing photos by what they show...", 1,
+                                   "Moving photos whose category changed...")
+                refile_res = refile_library(dbp, c, cancel_check=progress_mgr.is_stopped)
+            except InterruptedError:
+                progress_mgr.stop("Library analysis stopped by user")
+                return {"ok": False, "stopped": True, "message": "Library analysis stopped by user"}
+            except Exception as e:
+                progress_mgr.error(str(e))
+                raise
+            bursts = cluster_res.get("burst_groups", 0) if isinstance(cluster_res, dict) else 0
+            progress_mgr.finish(
+                f"Library analysed: {infer_res.get('processed', 0)} photos, {bursts} burst groups, "
+                f"{refile_res['moved']} moved to a new category")
+            return {"ok": True, "processed": infer_res.get("processed", 0),
+                    "faces_total": infer_res.get("faces_total", 0),
+                    "failures": infer_res.get("failures", 0),
+                    "burst_groups": bursts, "recategorised": refile_res["recategorised"],
+                    "moved": refile_res["moved"], "move_failures": refile_res["failed"],
+                    "transaction_id": refile_res["transaction_id"],
+                    "duration_s": infer_res.get("duration_s", 0)}
 
     @app.post("/api/ingest", dependencies=auth)
     def ingest_folder(body: ScanReq):
@@ -2937,7 +2999,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def undo(body: UndoReq):
         tid = body.transaction_id or latest_undoable()
         if not tid:
-            return JSONResponse({"ok": False, "error": "no transactions found"}, status_code=200)
+            return JSONResponse({"ok": False, "error": "no transactions found"}, status_code=404)
         planner = make_planner(req_cfg())
         if not body.verify and not _accepts(planner.undo, "verify"):
             raise _not_impl("undo without verification")

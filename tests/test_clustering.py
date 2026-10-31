@@ -60,7 +60,24 @@ def _far(v: np.ndarray) -> np.ndarray:
     return _unit(-v)
 
 
+def _at(v: np.ndarray, cos: float, rng: np.random.Generator) -> np.ndarray:
+    """A unit vector whose cosine with ``v`` is exactly ``cos``."""
+    u = rng.normal(size=v.shape).astype(np.float32)
+    u -= float(u @ v) * v
+    u /= np.linalg.norm(u)
+    return _unit(cos * v + np.sqrt(1.0 - cos * cos) * u)
+
+
+def strict(cfg):
+    """Only the tightest rule: same moment (30 s) and no grouping of photos without a time."""
+    cfg.burst.near_window_seconds = 0
+    cfg.burst.far_window_seconds = 0
+    cfg.burst.untimed_similarity_threshold = 2.0
+    return cfg
+
+
 def test_burst_grouping_within_window(cfg):
+    strict(cfg)
     t0 = datetime(2024, 5, 12, 15, 30, 0)
     rng = np.random.default_rng(0)
     base = _unit(rng.normal(size=512))
@@ -92,6 +109,7 @@ def test_burst_grouping_within_window(cfg):
 
 
 def test_burst_window_boundary(cfg):
+    strict(cfg)
     t0 = datetime(2024, 5, 12, 15, 30, 0)
     rng = np.random.default_rng(1)
     base = _unit(rng.normal(size=512))
@@ -124,6 +142,7 @@ def test_transitive_burst_chaining(cfg):
 
 
 def test_singletons_excluded(cfg):
+    strict(cfg)
     t0 = datetime(2024, 5, 12, 15, 30, 0)
     rng = np.random.default_rng(3)
     base = _unit(rng.normal(size=512))
@@ -146,6 +165,99 @@ def test_missing_embedding_or_time_excluded(cfg):
     # Only 1 and 4 can form a burst.
     assert len(groups) == 1
     assert sorted(groups[0]) == [1, 4]
+
+
+# ---------------------------------------------------------------------------
+# Retakes minutes or hours apart, and photos without a capture time
+# ---------------------------------------------------------------------------
+
+def _pair(cos, gap, rng, source="exif:dtoriginal"):
+    t0 = datetime(2024, 5, 12, 15, 0, 0)
+    base = _unit(rng.normal(size=512))
+    return [BurstInput(1, t0, base.tolist(), taken_at_source=source),
+            BurstInput(2, t0 + timedelta(seconds=gap), _at(base, cos, rng).tolist(),
+                       taken_at_source=source)]
+
+
+def test_retakes_minutes_apart_form_a_burst(cfg):
+    rng = np.random.default_rng(21)
+    assert len(BurstDetector(cfg).cluster(_pair(0.95, 300, rng))) == 1
+    assert BurstDetector(strict(cfg)).cluster(_pair(0.95, 300, rng)) == []
+
+
+def test_retakes_hours_apart_need_to_look_alike(cfg):
+    rng = np.random.default_rng(22)
+    assert len(BurstDetector(cfg).cluster(_pair(0.91, 3600, rng))) == 1
+    assert BurstDetector(cfg).cluster(_pair(0.80, 3600, rng)) == []      # a different scene
+    assert BurstDetector(cfg).cluster(_pair(0.97, 4 * 3600, rng)) == []  # too long ago
+
+
+def test_loose_tiers_do_not_chain_into_a_different_scene(cfg):
+    rng = np.random.default_rng(23)
+    base = _unit(rng.normal(size=512))
+    a = base
+    b = _at(a, 0.93, rng)
+    c = _unit(b + (_at(b, 0.93, rng) - b))          # next to b, further from a
+    assert float(a @ c) < cfg.burst.loose_floor
+    t0 = datetime(2024, 5, 12, 15, 0, 0)
+    items = [BurstInput(i + 1, t0 + timedelta(minutes=3 * i), v.tolist(),
+                        taken_at_source="exif:dtoriginal")
+             for i, v in enumerate((a, b, c))]
+    sizes = sorted(len(g) for g in BurstDetector(cfg).cluster(items))
+    assert sizes == [2]            # a and b (or b and c) pair up, the third stays out
+
+
+def test_screens_only_group_when_taken_in_the_same_moment(cfg):
+    rng = np.random.default_rng(24)
+    near_pair = _pair(0.95, 300, rng)
+    for it in near_pair:
+        it.flat_content = True
+    assert BurstDetector(cfg).cluster(near_pair) == []
+    quick = _pair(0.95, 5, rng)
+    for it in quick:
+        it.flat_content = True
+    assert len(BurstDetector(cfg).cluster(quick)) == 1
+
+
+def test_photos_without_a_time_group_when_near_identical(cfg):
+    rng = np.random.default_rng(25)
+    for src in ("mtime", "unknown"):
+        assert len(BurstDetector(cfg).cluster(_pair(0.97, 86400 * 3, rng, source=src))) == 1
+        assert BurstDetector(cfg).cluster(_pair(0.92, 0, rng, source=src)) == []   # not alike enough
+    items = _pair(0.97, 0, rng)
+    for it in items:
+        it.taken_at = None          # no date at all
+    assert len(BurstDetector(cfg).cluster(items)) == 1
+
+
+def test_photos_without_a_time_never_join_a_timed_group(cfg):
+    rng = np.random.default_rng(26)
+    t0 = datetime(2024, 5, 12, 15, 0, 0)
+    base = _unit(rng.normal(size=512))
+    items = [BurstInput(1, t0, base.tolist(), taken_at_source="exif:dtoriginal"),
+             BurstInput(2, t0 + timedelta(seconds=2), _near(base, rng).tolist(),
+                        taken_at_source="exif:dtoriginal"),
+             BurstInput(3, t0, _near(base, rng).tolist(), taken_at_source="mtime"),
+             BurstInput(4, t0, _near(base, rng).tolist(), taken_at_source="mtime")]
+    groups = sorted(sorted(g) for g in BurstDetector(cfg).cluster(items))
+    assert groups == [[1, 2], [3, 4]]
+
+
+def test_untimed_groups_are_capped_and_stay_cohesive(cfg):
+    cfg.burst.untimed_max_group = 4
+    rng = np.random.default_rng(27)
+    base = _unit(rng.normal(size=512))
+    items = [BurstInput(i, None, _near(base, rng, 0.02).tolist(), taken_at_source="mtime")
+             for i in range(1, 11)]
+    groups = BurstDetector(cfg).cluster(items)
+    assert groups and all(len(g) <= 4 for g in groups)
+
+
+def test_untimed_look_alike_pass_can_be_switched_off_and_is_bounded(cfg):
+    rng = np.random.default_rng(28)
+    items = _pair(0.99, 0, rng, source="mtime")
+    cfg.burst.untimed_max_items = 1
+    assert BurstDetector(cfg).cluster(items) == []
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +324,8 @@ def _scene(n, spacing_s, source="exif:dtoriginal", start_id=1, seed=11):
             for i in range(n)]
 
 
-def test_mtime_and_unknown_sources_never_form_bursts(cfg):
+def test_mtime_and_unknown_sources_are_never_placed_on_the_timeline(cfg):
+    strict(cfg)
     for src in ("mtime", "unknown"):
         assert BurstDetector(cfg).cluster(_scene(6, 1, source=src)) == []
 
@@ -223,6 +336,7 @@ def test_filename_and_exif_sources_can_form_bursts(cfg):
 
 
 def test_mixed_sources_only_cluster_trustworthy_frames(cfg):
+    strict(cfg)
     good = _scene(3, 1, start_id=1)
     bad = _scene(3, 1, source="mtime", start_id=10)
     groups = BurstDetector(cfg).cluster(good + bad)
@@ -230,6 +344,7 @@ def test_mixed_sources_only_cluster_trustworthy_frames(cfg):
 
 
 def test_burst_span_is_capped(cfg):
+    strict(cfg)
     # 25 frames 25 s apart chain through the 30 s window for 600 s overall.
     items = _scene(25, 25)
     groups = BurstDetector(cfg).cluster(items)
@@ -242,11 +357,13 @@ def test_burst_span_is_capped(cfg):
 
 
 def test_burst_span_cap_is_configurable(cfg):
+    strict(cfg)
     cfg.burst.__dict__["max_burst_duration_s"] = 10_000
     assert len(BurstDetector(cfg).cluster(_scene(25, 25))) == 1
 
 
 def test_vectorized_clustering_matches_bruteforce(cfg):
+    strict(cfg)
     rng = np.random.default_rng(5)
     t0 = datetime(2024, 1, 1, 12, 0, 0)
     centers = [_unit(rng.normal(size=64)) for _ in range(4)]
@@ -282,6 +399,7 @@ def test_vectorized_clustering_matches_bruteforce(cfg):
 
 
 def test_cluster_records_skips_mtime_dated_rows(cfg):
+    strict(cfg)
     from photocure.db.models import ImageRecord, SemanticScore
     from photocure.db.repository import quantize_embedding
     rng = np.random.default_rng(2)

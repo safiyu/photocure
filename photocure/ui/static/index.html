@@ -287,6 +287,12 @@
             <span class="grow"></span>
             <button id="btn-trash-empty" data-busy class="btn danger" title="Delete everything in the trash for good">Empty trash</button>
           </div>
+          <div class="trash-toolbar" id="library-toolbar" role="group" aria-label="Library actions">
+            <button id="btn-library-reanalyse" data-busy class="btn" type="button" title="Run the AI again on every photo left in the library, find bursts that were missed and file photos by what they show now">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-undo"/></svg><span>Reanalyse library</span>
+            </button>
+            <span class="help">Run the AI again on what is left, then group look-alike photos into bursts.</span>
+          </div>
           <div class="toolbar">
             <button id="btn-finalize-categories" data-busy class="btn primary btn-finalize-section" data-section="categories" type="button" title="Finalize: move photos marked for delete to trash">
               <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>

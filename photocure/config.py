@@ -125,6 +125,19 @@ class BurstThresholds(BaseSettings):
 
     window_seconds: int = 30
     similarity_threshold: float = 0.88
+    # Looser tiers for retakes: the longer the gap, the more alike the photos must be.
+    near_window_seconds: int = 600
+    near_similarity_threshold: float = 0.89
+    far_window_seconds: int = 10800
+    far_similarity_threshold: float = 0.89
+    # Joining two groups across a looser tier needs every cross pair at least this alike.
+    loose_floor: float = 0.87
+    # Photos with no trustworthy capture time (chat apps and downloads strip it) are grouped on
+    # look alone: only near-identical pairs, and a new member must be close to the whole group.
+    untimed_similarity_threshold: float = 0.95
+    untimed_floor: float = 0.90
+    untimed_max_group: int = 12
+    untimed_max_items: int = 40000
     # Burst group must contain >= 2 members to be a burst.
     min_group_size: int = 2
     # Best-shot composite weights (rebalanced to sum to 1.00).

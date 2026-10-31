@@ -1834,8 +1834,10 @@ body.has-picks .tools, body.has-picks .hover-actions {
 .bulk .trash-only { display: none; }
 .bulk.trash-ctx .trash-only { display: inline-flex; }
 .bulk.trash-ctx .lib-only, .bulk.trash-ctx .burst-only, .bulk.trash-ctx #bulk-lock { display: none; }
-#trash-toolbar { display: none; align-items: center; gap: 10px; margin: 0 0 14px; }
+#trash-toolbar, #library-toolbar { display: none; align-items: center; gap: 10px; margin: 0 0 14px; }
 body[data-stage="trash"] #trash-toolbar { display: flex; }
+body[data-stage="library"] #library-toolbar { display: flex; }
+#library-toolbar .help { color: var(--muted); font-size: .85rem; }
 body[data-stage="trash"] .card .btn-lock, body[data-stage="trash"] .card .btn-similar { display: none; }
 body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-finalize-all-bursts, body[data-stage="trash"] #bulk-finalize { display: none !important; }
 .toast-action {

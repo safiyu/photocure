@@ -159,3 +159,47 @@ def test_a_trashed_photos_faces_can_be_clustered_in_the_trash_and_restored(lib):
         person = s.get(M.PersonCluster, face.person_id)
         assert person.stage == "library" and face.ignored == 0
         assert not [c for c in s.query(M.PersonCluster).all() if c.stage == "trash"]
+
+
+def test_refile_library_moves_recategorised_photos_and_respects_manual_and_locked(lib):
+    items = lib.client.get("/api/images?stage=library&limit=50").json()["items"]
+    id_change, id_locked, id_manual = items[0]["id"], items[1]["id"], items[2]["id"]
+    before_change = Path(_row(lib, id_change)["path"])
+    before_locked = Path(_row(lib, id_locked)["path"])
+    with get_session(lib.db) as s:
+        for iid in (id_change, id_locked, id_manual):
+            sem = s.query(M.SemanticScore).filter_by(image_id=iid).one()
+            sem.top1_category, sem.top1_score = "food", 0.95
+            sem.top2_category, sem.top2_score = "scenery", 0.05
+            sem.score_margin = 0.90
+            sem.distribution = '{"food": 0.95, "scenery": 0.05}'
+            qual = s.query(M.QualityMetric).filter_by(image_id=iid).one()
+            qual.is_blurry = qual.is_too_dark = qual.is_overexposed = False
+            qual.quality_score = 0.9
+            for f in s.query(M.FaceDetection).filter_by(image_id=iid).all():
+                s.delete(f)
+        s.get(M.ImageRecord, id_locked).locked = True
+        s.get(M.ImageRecord, id_manual).manual_bucket = "scenery"
+        s.commit()
+
+    out = library_actions.refile_library(lib.db, lib.app.state.cfg)
+    assert out["ok"] is True and out["moved"] >= 1 and out["transaction_id"]
+    after_change = Path(_row(lib, id_change)["path"])
+    assert after_change.parent == lib.out.resolve() / "Non-Human" / "Food"
+    assert after_change.exists() and not before_change.exists()
+    assert _row(lib, id_change)["category"] == "food"
+    assert Path(_row(lib, id_locked)["path"]) == before_locked
+    assert _row(lib, id_manual)["manual_bucket"] == "scenery"
+
+    rb = RollbackEngine(lib.app.state.cfg, db_path=lib.db).rollback_transaction(out["transaction_id"])
+    assert rb.failures == 0 and before_change.exists()
+
+
+def test_api_library_reanalyse_runs_infer_cluster_and_refile(lib):
+    r = lib.client.post("/api/library/reanalyse", json={"device": "cpu"})
+    assert r.status_code == 200
+    j = r.json()
+    assert j["ok"] is True
+    assert j["processed"] == 4
+    assert "moved" in j and "recategorised" in j and "burst_groups" in j
+

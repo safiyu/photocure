@@ -219,9 +219,11 @@ class InferencePipeline:
     # ------------------------------------------------------------ selection
     @staticmethod
     def _stage_scope(stage: str):
-        """Rows a run may touch: unfinished photos, or the trash (whose rows are marked missing)."""
+        """Rows a run may touch: unfinished photos, the library, or the trash (whose rows are marked missing)."""
         if stage == "trash":
             return and_(ImageRecord.stage == "trash", ImageRecord.route_status != "purged")
+        if stage == "library":
+            return and_(ImageRecord.stage == "library", ImageRecord.scan_status != "missing")
         return and_(ImageRecord.stage == "new", ImageRecord.scan_status != "missing")
 
     def _select_records(self, repo: PhotoRepository, only_paths: list[str] | None,
@@ -265,9 +267,10 @@ class InferencePipeline:
             stage: str = "new",
             reanalyze: bool = False,
             ) -> InferResult:
-        """Analyse photos of one stage. Finished photos are never analysed; ``stage="trash"``
-        with ``reanalyze`` redoes every trashed photo whose file is still there."""
-        if stage not in ("new", "trash"):
+        """Analyse photos of one stage. Finished photos are only analysed again on request:
+        ``reanalyze`` with ``stage="trash"`` or ``stage="library"`` redoes every photo of that
+        stage whose file is still there."""
+        if stage not in ("new", "trash", "library"):
             raise ValueError(f"cannot analyse photos in the {stage} stage")
         # People found in the trash stay in their own clusters, apart from the library's.
         self._cluster_stage = "trash" if stage == "trash" else "library"

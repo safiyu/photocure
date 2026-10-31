@@ -99,3 +99,72 @@ def trash_image(dbp: Path, cfg: CuratorConfig, image_id: int) -> dict:
         PhotoRepository(s).prune_bursts()
         s.commit()
     return {"ok": True, "trashed": True, "transaction_id": txn}
+
+
+def refile_library(dbp: Path, cfg: CuratorConfig, *, root: Path | None = None,
+                   cancel_check=None) -> dict:
+    """Decide the category of every library photo again and move the files whose folder changed.
+
+    Used after the library was analysed again, when the AI may see things differently. Photos you
+    sorted by hand, kept (locked) or marked for delete stay where they are, and so do frames that
+    sit in a burst: those are settled by finalizing the burst. The moves are one transaction, so
+    Undo puts every file back.
+    """
+    from sqlalchemy.orm import selectinload
+
+    from .db.repository import PhotoRepository
+    from .rules.decision_matrix import DecisionMatrix
+    from .rules.organizer import FolderOrganizer
+
+    root = Path(root).resolve() if root else require_library_root(dbp, cfg)
+    changes: dict[int, tuple[str, str]] = {}  # image id -> (category, subcategory) once settled
+    actions: list[PlannedAction] = []
+    unchanged = 0
+    with get_session(dbp) as s:
+        matrix = DecisionMatrix(cfg)
+        organizer = FolderOrganizer(cfg, organize_root=root)
+        organizer.set_bursts(list(PhotoRepository(s).all_bursts()))
+        rows = s.exec(select(M.ImageRecord).where(
+            M.ImageRecord.stage == STAGE_LIBRARY,
+            M.ImageRecord.scan_status != "missing",
+            M.ImageRecord.locked == False,  # noqa: E712
+            M.ImageRecord.delete_approved == False,  # noqa: E712
+            M.ImageRecord.manual_bucket.is_(None),
+            M.ImageRecord.is_alternate == False,  # noqa: E712
+        ).options(selectinload(M.ImageRecord.semantic), selectinload(M.ImageRecord.quality),
+                  selectinload(M.ImageRecord.faces))).all()
+        for r in rows:
+            if cancel_check and cancel_check():
+                break
+            dec = matrix.evaluate_record(r)
+            cat = dec.category.value
+            target = organizer.full_target(r, dec)
+            src = Path(r.path)
+            if src.parent == target.parent or not src.exists():
+                if (r.category, r.subcategory or "") != (cat, dec.subcategory or ""):
+                    changes[r.id] = (cat, dec.subcategory or "")
+                else:
+                    unchanged += 1
+                continue
+            actions.append(PlannedAction(image_id=r.id, source=src, target=target, operation="move",
+                                         category=dec.category, reason="library analysed again"))
+            changes[r.id] = (cat, dec.subcategory or "")
+
+    moved, failed, txn = 0, 0, ""
+    if actions:
+        rep = ActionEngine(cfg, db_path=dbp).execute(actions, organize_root=root)
+        txn = rep.transaction_id
+        moved, failed = rep.executed, rep.failures
+        for a in actions:
+            if a.image_id in rep.resolved_targets:
+                _move_sidecar(a.source, Path(rep.resolved_targets[a.image_id]))
+            else:
+                changes.pop(a.image_id, None)  # the file stayed, so its category must too
+    with get_session(dbp) as s:
+        for iid, (cat, sub) in changes.items():
+            rec = s.get(M.ImageRecord, iid)
+            if rec is not None:
+                rec.category, rec.subcategory = cat, sub
+        s.commit()
+    return {"ok": True, "checked": len(changes) + unchanged, "recategorised": len(changes),
+            "moved": moved, "failed": failed, "transaction_id": txn}

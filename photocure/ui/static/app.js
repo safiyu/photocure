@@ -1383,6 +1383,31 @@
     loadStats();
   }
 
+  async function reanalyseLibrary() {
+    if (state.busy || state.taskRunning) {
+      toast("Another task is currently running. Please wait for it to complete.", "warn");
+      return;
+    }
+    const n = num(((state.overview || {}).stage_counts || {}).library);
+    const ok = await showConfirmDialog({
+      title: "Reanalyse the library?",
+      message: `The AI looks at ${photos(n)} in the library again, groups look-alike photos into bursts, and moves photos to the folder that fits what it now sees. This can take a while. You can undo the moves afterwards.`,
+      confirmText: "Reanalyse", variant: "primary" });
+    if (!ok) return;
+    const device = $("#infer-device").value;
+    const r = await runTask(`Reanalysing the library (${device})`, async () => {
+      setTimeout(pollProgress, 100);
+      return post("/api/library/reanalyse", { device });
+    });
+    if (!r || r.stopped) return;
+    const moved = num(r.moved) ? ` ${photos(num(r.moved))} moved to a better folder.` : "";
+    const bursts = num(r.burst_groups) ? ` ${fmtN(num(r.burst_groups))} burst group${num(r.burst_groups) === 1 ? "" : "s"} found.` : " No bursts found.";
+    toast(`Reanalysed ${photos(num(r.processed))}.${bursts}${moved}`, "ok");
+    resetVisibleGrids();
+    await Promise.all([loadStats(), refreshBackend(), loadTransactions()]);
+    if (state.tab === "bursts") renderBursts().catch(() => {});
+  }
+
   async function bulkMarkDelete() {
     const ids = Array.from(state.picks);
     try {
@@ -6519,6 +6544,7 @@
     $("#bulk-return").onclick = returnSelected;
     $("#bulk-purge").onclick = () => purgePhotos(Array.from(state.picks));
     $("#btn-trash-reanalyse").onclick = reanalyseTrash;
+    $("#btn-library-reanalyse").onclick = reanalyseLibrary;
     $("#btn-trash-return-all").onclick = returnAllToOrigin;
     $("#btn-trash-empty").onclick = emptyTrash;
     $("#bulk-delete").onclick = () => bulkMarkDelete();
