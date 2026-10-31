@@ -38,12 +38,29 @@ def test_a_weak_face_does_not_protect_a_blurry_photo():
     assert _eval(_rec(quality=q, faces=[_face(0.40)])).category == CategoryType.ACCIDENTAL
 
 
-def test_dark_plus_blurry_with_a_face_reports_only_the_dark_verdict():
+def test_a_dark_photo_of_a_person_stays_in_people():
+    q = _good_quality()
+    q.is_too_dark = True
+    assert _eval(_rec(quality=q, faces=[_face(0.92)])).category == CategoryType.PEOPLE
+
+
+def test_dark_plus_blurry_with_a_face_stays_in_people():
     q = _good_quality()
     q.is_too_dark = True
     q.is_blurry = True
     d = _eval(_rec(quality=q, faces=[_face(0.95)]))
-    assert d.category == CategoryType.ACCIDENTAL and d.subcategory == "too_dark"
+    assert d.category == CategoryType.PEOPLE
+
+
+def test_near_duplicate_with_face_stays_in_people():
+    rec = _rec(quality=_good_quality(), faces=[_face(0.92)], near_dup_of=42)
+    assert _eval(rec).category == CategoryType.PEOPLE
+
+
+def test_photo_with_face_beats_graphic_and_never_goes_to_junk():
+    rec = _rec(quality=_good_quality(), faces=[_face(0.9)],
+               semantic=_semantic("graphic", 0.85, top2="slide", top2_score=0.05))
+    assert _eval(rec).category == CategoryType.PEOPLE
 
 
 # ------------------------------------------------------ presenters vs slides

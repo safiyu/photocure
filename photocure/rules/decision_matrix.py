@@ -10,8 +10,8 @@ Implements spec section 4.B (and the milestone-4 routing rules). Precedence:
     5. Pathological quality (dark/blurry) -> Junk_Review/Accidental/
        (skipped when CLIP is confident the frame is screen content, since
        flat dark UI screenshots and documents are not accidents; a confident
-       face also protects a photo from the blurry and overexposed verdicts, so
-       a soft photo of a person is flagged for review, not junked)
+       face also protects a photo from dark, blurry and overexposed verdicts, so
+       photos of people are never junked)
     6. Human face (conf > 0.65)           -> People/
     7. Low-confidence / close-call CLIP   -> Uncertain_Review/
        (confidence is judged per group of look-alike classes, see taxonomy)
@@ -46,10 +46,10 @@ class Decision:
 
 SCREEN_GROUP = "screen"
 
-# Confident classes that win over a detected face: avatars and thumbnails inside screenshots,
-# graphics and documents are not people photos. Slides, whiteboards and labels are photos of
-# real places, so a presenter's face still routes to People.
-FACE_OVERRIDDEN_BY = frozenset({"screenshot", "document", "graphic", "illustration"})
+# Confident classes that win over a detected face: avatars and thumbnails inside screenshots
+# and documents are not people photos. Photos with faces should never go to junk (graphics).
+# Slides, whiteboards and labels are photos of real places, so a presenter's face still routes to People.
+FACE_OVERRIDDEN_BY = frozenset({"screenshot", "document", "illustration"})
 
 
 def _label(name: str) -> str:
@@ -191,14 +191,6 @@ class DecisionMatrix:
                 is_alternate=True,
             )
 
-        # 4. Perceptual near-duplicate (burst members are handled by bursts).
-        if getattr(rec, "near_dup_of", None) is not None and rec.burst_id is None:
-            return Decision(
-                CategoryType.NEAR_DUPLICATE,
-                reason=f"near-duplicate of image {rec.near_dup_of}",
-                subcategory="near_duplicate",
-            )
-
         # Gather child metrics.
         q = getattr(rec, "quality", None)
         sem = getattr(rec, "semantic", None)
@@ -215,12 +207,21 @@ class DecisionMatrix:
         best_face = max(faces, key=lambda f: f.confidence, default=None)
         has_face = best_face is not None and best_face.confidence > \
             self.tax.face_confidence_min
+        protected = has_face and not confident_flat
 
-        # 5. Pathological quality -> accidental junk (not for screen content).
+        # 4. Perceptual near-duplicate (burst members are handled by bursts;
+        #    photos with faces never go to junk near-duplicates).
+        if getattr(rec, "near_dup_of", None) is not None and rec.burst_id is None and not protected:
+            return Decision(
+                CategoryType.NEAR_DUPLICATE,
+                reason=f"near-duplicate of image {rec.near_dup_of}",
+                subcategory="near_duplicate",
+            )
+
+        # 5. Pathological quality -> accidental junk (not for screen content or photos with faces).
         if (self.cfg.quality.force_review_quality and q is not None
                 and not confident_screen):
-            protected = has_face and not confident_flat
-            bad_dark = q.is_too_dark
+            bad_dark = q.is_too_dark and not protected
             bad_over = q.is_overexposed and not protected
             bad_blur = q.is_blurry and not protected
             if bad_dark or bad_over or bad_blur:
@@ -240,7 +241,7 @@ class DecisionMatrix:
 
         # 6. Face routing (highest-confidence face).
         # A confident screenshot can contain avatars or thumbnails; the face must not win.
-        if has_face and not confident_flat:
+        if protected:
             return Decision(
                 CategoryType.PEOPLE,
                 reason=f"face conf {best_face.confidence:.2f}",

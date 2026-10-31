@@ -155,12 +155,12 @@ def test_face_beats_clip_precedence():
     assert _eval(rec).category == CategoryType.PEOPLE
 
 
-def test_dark_beats_face_precedence():
-    """A pitch-black photo with a 'detected face' is still junk (the detection is likely false)."""
+def test_face_beats_dark_precedence():
+    """Photos with faces are protected from quality verdicts and never go to junk."""
     q = _good_quality()
     q.is_too_dark = True
     rec = _rec(quality=q, faces=[_face(0.95)])
-    assert _eval(rec).category == CategoryType.ACCIDENTAL
+    assert _eval(rec).category == CategoryType.PEOPLE
 
 
 # ---------------------------------------------------------------------------

@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.5.1" type="stable" date="2026-10-31">
+      <description>
+        <p>Ensure photos with faces are never routed to junk categories, protecting portraits in low-light, soft focus, and near-duplicate scenarios.</p>
+      </description>
+    </release>
     <release version="1.5.0" type="stable" date="2026-10-26">
       <description>
         <p>One library folder for every finished photo, and a clear New, Library and Trash switch. Trash keeps removed photos until you empty it, with restore, return to origin and reanalyse. A first-run popup asks for the library folder and device, and the whole library can be moved to another folder later.</p>
