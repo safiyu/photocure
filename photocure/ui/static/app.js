@@ -702,6 +702,7 @@
         const e = typeof cfg.empty === "function" ? cfg.empty() : (cfg.empty || {});
         g.vg.showEmpty(emptyNode(Object.assign({ title: "No photos here" }, e)));
       }
+      updateSelectAllButtons();
     };
     Object.defineProperty(g, "total", { get: () => g.vg.total });
     g.reset = () => {
@@ -1137,6 +1138,136 @@
       $("#bulk-count").textContent = `${fmtN(n)} selected`;
       $("#bulk-sub").textContent = pickSummary();
     }
+    updateSelectAllButtons();
+  }
+
+  function getSectionLoadedIds(section) {
+    if (section === "people") {
+      return $$("#peoplegrid .people-card").map((c) => num(c.dataset.personId)).filter((id) => !isNaN(id));
+    }
+    if (section === "search") {
+      return $$("#searchgrid .card").map((c) => num(c.dataset.id)).filter((id) => !isNaN(id));
+    }
+    if (section === "highlights" && isEventView()) {
+      return $$("#hl-events .card").map((c) => num(c.dataset.id)).filter((id) => !isNaN(id));
+    }
+    const gridKeyMap = {
+      categories: "cat",
+      utility: "utility",
+      junk: "junk",
+      uncertain: "uncertain",
+      highlights: "highlights",
+      events: "event",
+    };
+    const gk = gridKeyMap[section];
+    const g = gk ? grids[gk] : null;
+    if (g && g.vg && Array.isArray(g.vg.items)) {
+      return g.vg.items.filter(Boolean).map((x) => num(x.id));
+    }
+    return [];
+  }
+
+  function updateSelectAllButtons() {
+    $$(".btn-select-all").forEach((btn) => {
+      const sec = btn.dataset.section;
+      const lbl = $("span", btn);
+      if (sec === "people") {
+        const ids = getSectionLoadedIds("people");
+        const allPicked = ids.length > 0 && ids.every((id) => state.peoplePicks.has(id));
+        btn.setAttribute("aria-pressed", String(allPicked));
+        btn.classList.toggle("on", allPicked);
+        if (lbl) lbl.textContent = allPicked ? "Deselect all" : "Select all";
+        return;
+      }
+      const gridKeyMap = {
+        categories: "cat",
+        utility: "utility",
+        junk: "junk",
+        uncertain: "uncertain",
+        highlights: "highlights",
+        events: "event",
+      };
+      const gk = gridKeyMap[sec];
+      const g = (gk && !(sec === "highlights" && isEventView())) ? grids[gk] : null;
+      const ids = getSectionLoadedIds(sec);
+      const total = g && g.vg && g.vg.total != null ? g.vg.total : ids.length;
+      const allPicked = total > 0 && ids.length >= total && ids.every((id) => state.picks.has(id));
+      btn.setAttribute("aria-pressed", String(allPicked));
+      btn.classList.toggle("on", allPicked);
+      if (lbl) lbl.textContent = allPicked ? "Deselect all" : "Select all";
+    });
+  }
+
+  async function selectAllInSection(section, btn) {
+    const sec = section || state.tab || "categories";
+    if (sec === "people") {
+      const ids = getSectionLoadedIds("people");
+      if (!ids.length) {
+        toast("No people to select", "info");
+        return;
+      }
+      const allPicked = ids.every((id) => state.peoplePicks.has(id));
+      if (allPicked) {
+        ids.forEach((id) => state.peoplePicks.delete(id));
+      } else {
+        ids.forEach((id) => state.peoplePicks.add(id));
+      }
+      applyPicks();
+      return;
+    }
+
+    const gridKeyMap = {
+      categories: "cat",
+      utility: "utility",
+      junk: "junk",
+      uncertain: "uncertain",
+      highlights: "highlights",
+      events: "event",
+    };
+    const gk = gridKeyMap[sec];
+    const g = (gk && !(sec === "highlights" && isEventView())) ? grids[gk] : null;
+
+    if (g && g.vg) {
+      const total = g.vg.total || 0;
+      if (!total) {
+        toast("No photos to select", "info");
+        return;
+      }
+      const loadedBefore = getSectionLoadedIds(sec);
+      const alreadyAll = loadedBefore.length >= total && loadedBefore.every((id) => state.picks.has(id));
+      if (alreadyAll) {
+        loadedBefore.forEach((id) => state.picks.delete(id));
+        state.lastPick = null;
+        applyPicks();
+        return;
+      }
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add("loading");
+      }
+      try {
+        await g.vg.ensureLoaded(0, total);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove("loading");
+        }
+      }
+    }
+
+    const ids = getSectionLoadedIds(sec);
+    if (!ids.length) {
+      toast("No photos to select", "info");
+      return;
+    }
+    const allPicked = ids.every((id) => state.picks.has(id));
+    if (allPicked) {
+      ids.forEach((id) => state.picks.delete(id));
+      state.lastPick = null;
+    } else {
+      ids.forEach((id) => state.picks.add(id));
+    }
+    applyPicks();
   }
 
   function syncPeopleSel() {
@@ -1702,6 +1833,7 @@
       });
       if (story && !data.balanced && data.note) blocks.unshift(el("p", { class: "help", role: "status", text: data.note }));
       host.replaceChildren(...blocks);
+      updateSelectAllButtons();
     } catch (e) {
       host.replaceChildren(emptyNode({ icon: "alert", title: "Could not load highlights", text: e.message }));
     }
@@ -2081,6 +2213,7 @@
         nodes.push(more);
       }
       host.replaceChildren(...nodes);
+      updateSelectAllButtons();
     } catch (e) {
       if (seq !== searchSeq) return;
       count.textContent = "";
@@ -3379,6 +3512,7 @@
         icon: "users", title: "No faces grouped yet",
         text: "Photocure groups faces it believes are the same person as photos are analyzed. Run Analyze to find them.",
       });
+      updateSelectAllButtons();
       return;
     }
 
@@ -3458,6 +3592,7 @@
       </div>`).join("");
 
     // ── Card Interactions, Inline Editing, Merging, Drag & Drop ──────────────
+    updateSelectAllButtons();
     let dragSourceId = null;
     let dragSourceCount = 0;
 
@@ -4924,34 +5059,46 @@
       }).join("") + `</section>`;
 
     const bar = $("#blinkbar");
-    const addBtn = (label, fn, isPrimary = false, idAttr = "", isBusy = false) => {
+    const makeGroup = (extraClass = "") => {
+      const g = document.createElement("div");
+      g.className = "burst-action-group" + (extraClass ? " " + extraClass : "");
+      g.setAttribute("role", "group");
+      return g;
+    };
+    const inspectGroup = makeGroup("burst-inspect-group");
+    const triageGroup = makeGroup("burst-triage-group");
+    const commitGroup = makeGroup("burst-commit-group");
+
+    const addBtn = (target, label, fn, variant = "", idAttr = "", isBusy = false) => {
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "pill" + (isPrimary ? " primary" : "");
+      b.className = "pill" + (variant ? " " + variant : "");
       if (idAttr) b.id = idAttr;
       if (isBusy) b.setAttribute("data-busy", "");
       b.innerHTML = label;
       b.onclick = fn;
-      bar.appendChild(b);
+      target.appendChild(b);
     };
     if (group && group.status === "composite") {
-      addBtn("Create fixed photo", () => makeComposite(id, "fixed"), true);
-      addBtn("Export layered PSD", () => makeComposite(id, "layered"));
+      addBtn(inspectGroup, "Create fixed photo", () => makeComposite(id, "fixed"), "secondary");
+      addBtn(inspectGroup, "Export layered PSD", () => makeComposite(id, "layered"));
     }
     if (data.face_matrix && data.face_matrix.subjects && data.face_matrix.subjects.length > 0) {
-      addBtn("Compare all faces (Matrix)", () => openBiometricProjection(id, data.members[0].id, "matrix"), true);
+      addBtn(inspectGroup, '<svg class="ic sm" aria-hidden="true"><use href="#i-face"/></svg><span>Compare all faces (Matrix)</span>', () => openBiometricProjection(id, data.members[0].id, "matrix"), "secondary", "btn-compare-faces-matrix");
     }
     const others = data.members.filter((m) => !m.is_best_shot);
     const unmarked = others.filter((m) => !m.delete_approved).map((m) => m.id);
     const marked = others.filter((m) => m.delete_approved).map((m) => m.id);
-    if (unmarked.length) addBtn(`Mark ${fmtN(unmarked.length)} other frame${unmarked.length === 1 ? "" : "s"} for delete`, () => markBurstDeletes(id, unmarked, true));
-    if (marked.length) addBtn(`Clear ${fmtN(marked.length)} delete mark${marked.length === 1 ? "" : "s"}`, () => markBurstDeletes(id, marked, false));
-    if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
-    if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
+    if (unmarked.length) addBtn(triageGroup, `<svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg><span>Mark ${fmtN(unmarked.length)} other frame${unmarked.length === 1 ? "" : "s"} for delete</span>`, () => markBurstDeletes(id, unmarked, true));
+    if (marked.length) addBtn(triageGroup, `<span>Clear ${fmtN(marked.length)} delete mark${marked.length === 1 ? "" : "s"}</span>`, () => markBurstDeletes(id, marked, false));
+    if (data.can_reject_blinks) addBtn(triageGroup, "<span>Reject all blinks</span>", () => rejectBlinks(id, data.reject_count));
+    if (data.rejected_blinks) addBtn(triageGroup, `<span>Restore ${data.rejected_blinks} from Junk review</span>`, () => restoreBlinks(id));
     if (state.stage !== "trash") {
-      addBtn('<svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize burst</span>', () => finalizeBurst(id, data), true, "btn-finalize-burst", true);
-      addBtn('<span>Finalize all</span>', () => finalizeAllBursts(), false, "btn-finalize-all-pill", true);
+      addBtn(commitGroup, '<svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize burst</span>', () => finalizeBurst(id, data), "primary", "btn-finalize-burst", true);
     }
+    if (inspectGroup.children.length) bar.appendChild(inspectGroup);
+    if (triageGroup.children.length) bar.appendChild(triageGroup);
+    if (commitGroup.children.length) bar.appendChild(commitGroup);
     $$("[data-makebest]", $("#burstdetail")).forEach((b) => {
       b.onclick = () => makeBestShot(id, num(b.dataset.makebest));
     });
@@ -6575,6 +6722,9 @@
     }
     $$(".btn-finalize-section").forEach((btn) => {
       btn.onclick = () => finalizeSection(btn.dataset.section);
+    });
+    $$(".btn-select-all").forEach((btn) => {
+      btn.onclick = () => selectAllInSection(btn.dataset.section, btn);
     });
     const bulkFin = $("#bulk-finalize");
     if (bulkFin) {

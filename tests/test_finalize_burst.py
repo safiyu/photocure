@@ -185,12 +185,16 @@ def test_ui_has_finalize_burst_button():
     assert 'id="btn-finalize-all-bursts"' in html
     assert 'id="bursts-toolbar"' in html
     assert 'btn-finalize-burst' in js
-    assert 'btn-finalize-all-pill' in js
+    assert 'btn-finalize-all-pill' not in js
     assert 'Finalize burst' in js
     assert 'Finalize all' in js
     assert 'finalizeAllBursts' in js
     assert 'api/bursts/' in js and '/finalize' in js
     assert 'api/bursts/finalize-all' in js
+    assert 'selectAllInSection' in js
+    for sec in ("categories", "search", "people", "utility", "junk", "uncertain", "highlights", "events"):
+        assert f'id="btn-select-all-{sec}"' in html
+    assert 'id="btn-select-all-bursts"' not in html
 
 
 @pytest.fixture()

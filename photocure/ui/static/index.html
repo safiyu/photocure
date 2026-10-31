@@ -294,9 +294,15 @@
             <span class="help">Run the AI again on what is left, then group look-alike photos into bursts.</span>
           </div>
           <div class="toolbar">
-            <button id="btn-finalize-categories" data-busy class="btn primary btn-finalize-section" data-section="categories" type="button" title="Finalize: move photos marked for delete to trash">
-              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
-            </button>
+            <div class="toolbar-actions" role="group" aria-label="Section actions">
+              <button id="btn-select-all-categories" class="btn secondary btn-select-all" data-section="categories" type="button" aria-pressed="false" title="Select or deselect all photos in this view">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Select all</span>
+              </button>
+              <button id="btn-finalize-categories" data-busy class="btn primary btn-finalize-section" data-section="categories" type="button" title="Finalize: move photos marked for delete to trash">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+              </button>
+            </div>
+            <span class="toolbar-sep" aria-hidden="true"></span>
             <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
               <input id="q" type="search" placeholder="Search by file name or path" aria-label="Search photos"></div>
             <select id="catfilter" aria-label="Category"><option value="">All categories</option></select>
@@ -342,9 +348,15 @@
         <!-- SEARCH -->
         <section id="tab-search" class="panel">
           <form id="search-form" class="toolbar" role="search">
-            <button id="btn-finalize-search" data-busy class="btn primary btn-finalize-section" data-section="search" type="button" title="Finalize: move photos marked for delete to trash">
-              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
-            </button>
+            <div class="toolbar-actions" role="group" aria-label="Section actions">
+              <button id="btn-select-all-search" class="btn secondary btn-select-all" data-section="search" type="button" aria-pressed="false" title="Select or deselect all search results">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Select all</span>
+              </button>
+              <button id="btn-finalize-search" data-busy class="btn primary btn-finalize-section" data-section="search" type="button" title="Finalize: move photos marked for delete to trash">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+              </button>
+            </div>
+            <span class="toolbar-sep" aria-hidden="true"></span>
             <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
               <input id="searchq" type="search" maxlength="300" autocomplete="off"
                      placeholder="Describe a photo, like dog on the beach" aria-label="Describe the photo you are looking for"></div>
@@ -360,9 +372,11 @@
         <!-- BURSTS -->
         <section id="tab-bursts" class="panel">
           <div class="toolbar" id="bursts-toolbar">
-            <button id="btn-finalize-all-bursts" data-busy class="btn primary" type="button" title="Finalize all bursts: move frames marked for delete to trash and keep the rest in library">
-              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize all</span>
-            </button>
+            <div class="toolbar-actions" role="group" aria-label="Burst list actions">
+              <button id="btn-finalize-all-bursts" data-busy class="btn primary" type="button" title="Finalize all bursts: move frames marked for delete to trash and keep the rest in library">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize all</span>
+              </button>
+            </div>
             <span class="grow"></span>
             <span id="bursts-summary" class="rowcount" role="status"></span>
           </div>
@@ -375,6 +389,15 @@
         <!-- PEOPLE -->
         <section id="tab-people" class="panel">
           <div class="people-toolbar">
+            <div class="toolbar-actions" role="group" aria-label="Section actions">
+              <button id="btn-select-all-people" class="btn secondary btn-select-all" data-section="people" type="button" aria-pressed="false" title="Select or deselect all people">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Select all</span>
+              </button>
+              <button id="btn-finalize-people" data-busy class="btn primary btn-finalize-section" data-section="people" type="button" title="Finalize: move photos marked for delete to trash">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+              </button>
+            </div>
+            <span class="toolbar-sep" aria-hidden="true"></span>
             <div class="people-sort-group" role="radiogroup" aria-label="Sort people">
               <span class="people-sort-caption">Arrange:</span>
               <button class="chip-btn" id="people-sort-similar" data-sort="similarity" aria-pressed="true" type="button" title="Group visually similar faces together to spot and merge duplicates">
@@ -394,9 +417,6 @@
               <svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>
               <span>Save deletions (<span id="people-toolbar-save-count">0</span>)</span>
             </button>
-            <button id="btn-finalize-people" data-busy class="btn primary btn-finalize-section" data-section="people" type="button" title="Finalize: move photos marked for delete to trash">
-              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
-            </button>
             <button class="chip-btn" id="people-recluster-btn" type="button" title="Separate mixed-up people and recalculate clusters with strict facial identity matching">
               <svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>
               <span>Re-cluster faces</span>
@@ -413,16 +433,19 @@
         <!-- DUPLICATES -->
         <section id="tab-duplicates" class="panel">
           <div class="toolbar">
-            <button id="btn-finalize-duplicates" data-busy class="btn primary btn-finalize-section" data-section="duplicates" type="button" title="Finalize: move duplicates marked for delete to trash">
-              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
-            </button>
+            <div class="toolbar-actions" role="group" aria-label="Section actions">
+              <button id="btn-finalize-duplicates" data-busy class="btn primary btn-finalize-section" data-section="duplicates" type="button" title="Finalize: move duplicates marked for delete to trash">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+              </button>
+              <button id="btn-dup-all" class="btn commit" type="button" title="Keeps the suggested photo in every group and marks the rest as duplicates.">Accept all suggestions</button>
+            </div>
+            <span class="toolbar-sep" aria-hidden="true"></span>
             <select id="dup-kind" aria-label="Type of duplicate">
               <option value="">All duplicates</option>
               <option value="exact">Identical files</option>
               <option value="near">Look-alikes</option>
             </select>
             <label class="toggle"><input type="checkbox" id="dup-reviewed">Show decided groups</label>
-            <button id="btn-dup-all" class="btn commit" type="button" title="Keeps the suggested photo in every group and marks the rest as duplicates.">Accept all suggestions</button>
             <span class="grow"></span>
             <span id="dup-summary" class="rowcount" role="status"></span>
           </div>
@@ -435,9 +458,15 @@
         <section id="tab-utility" class="panel">
           <p class="dup-intro">Receipts, notes, screenshots, labels, signs and packaging live here, apart from your photos and from Junk. Nothing in this tab is treated as clutter.</p>
           <div class="toolbar">
-            <button id="btn-finalize-utility" data-busy class="btn primary btn-finalize-section" data-section="utility" type="button" title="Finalize: move photos marked for delete to trash">
-              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
-            </button>
+            <div class="toolbar-actions" role="group" aria-label="Section actions">
+              <button id="btn-select-all-utility" class="btn secondary btn-select-all" data-section="utility" type="button" aria-pressed="false" title="Select or deselect all photos in this view">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Select all</span>
+              </button>
+              <button id="btn-finalize-utility" data-busy class="btn primary btn-finalize-section" data-section="utility" type="button" title="Finalize: move photos marked for delete to trash">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+              </button>
+            </div>
+            <span class="toolbar-sep" aria-hidden="true"></span>
             <div class="kind-chips" role="group" aria-label="Kind of reference photo">
               <button type="button" class="chip-btn" data-ukind="" aria-pressed="true">All</button>
               <button type="button" class="chip-btn" data-ukind="screenshot" aria-pressed="false">Screenshots</button>
@@ -456,9 +485,15 @@
         <!-- JUNK -->
         <section id="tab-junk" class="panel">
           <div class="toolbar">
-            <button id="btn-finalize-junk" data-busy class="btn primary btn-finalize-section" data-section="junk" type="button" title="Finalize: move junk marked for delete to trash">
-              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
-            </button>
+            <div class="toolbar-actions" role="group" aria-label="Section actions">
+              <button id="btn-select-all-junk" class="btn secondary btn-select-all" data-section="junk" type="button" aria-pressed="false" title="Select or deselect all photos in this view">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Select all</span>
+              </button>
+              <button id="btn-finalize-junk" data-busy class="btn primary btn-finalize-section" data-section="junk" type="button" title="Finalize: move junk marked for delete to trash">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+              </button>
+            </div>
+            <span class="toolbar-sep" aria-hidden="true"></span>
             <select id="junkfilter" aria-label="Junk type">
               <option value="">All junk</option>
               <option value="duplicate">Duplicates</option>
@@ -479,9 +514,15 @@
         <section id="tab-uncertain" class="panel">
           <div class="banner-host"></div>
           <div class="toolbar">
-            <button id="btn-finalize-uncertain" data-busy class="btn primary btn-finalize-section" data-section="uncertain" type="button" title="Finalize: move photos marked for delete to trash">
-              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
-            </button>
+            <div class="toolbar-actions" role="group" aria-label="Section actions">
+              <button id="btn-select-all-uncertain" class="btn secondary btn-select-all" data-section="uncertain" type="button" aria-pressed="false" title="Select or deselect all photos in this view">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Select all</span>
+              </button>
+              <button id="btn-finalize-uncertain" data-busy class="btn primary btn-finalize-section" data-section="uncertain" type="button" title="Finalize: move photos marked for delete to trash">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+              </button>
+            </div>
+            <span class="toolbar-sep" aria-hidden="true"></span>
             <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
               <input id="q-uncertain" type="search" placeholder="Search by file name or path" aria-label="Search finalize photos"></div>
             <select id="filter-uncertain-status" aria-label="Filter status">
@@ -502,9 +543,15 @@
         <!-- HIGHLIGHTS -->
         <section id="tab-highlights" class="panel">
           <div class="toolbar">
-            <button id="btn-finalize-highlights" data-busy class="btn primary btn-finalize-section" data-section="highlights" type="button" title="Finalize: move photos marked for delete to trash">
-              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
-            </button>
+            <div class="toolbar-actions" role="group" aria-label="Section actions">
+              <button id="btn-select-all-highlights" class="btn secondary btn-select-all" data-section="highlights" type="button" aria-pressed="false" title="Select or deselect all photos in this view">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Select all</span>
+              </button>
+              <button id="btn-finalize-highlights" data-busy class="btn primary btn-finalize-section" data-section="highlights" type="button" title="Finalize: move photos marked for delete to trash">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+              </button>
+            </div>
+            <span class="toolbar-sep" aria-hidden="true"></span>
             <select id="hl-view" aria-label="Show">
               <option value="all">All photos, best first</option>
               <option value="events">Best of each event</option>
@@ -548,9 +595,15 @@
         <!-- EVENTS -->
         <section id="tab-events" class="panel">
           <div class="toolbar">
-            <button id="btn-finalize-events" data-busy class="btn primary btn-finalize-section" data-section="events" type="button" title="Finalize: move photos marked for delete to trash">
-              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
-            </button>
+            <div class="toolbar-actions" role="group" aria-label="Section actions">
+              <button id="btn-select-all-events" class="btn secondary btn-select-all" data-section="events" type="button" aria-pressed="false" title="Select or deselect all photos in this event">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Select all</span>
+              </button>
+              <button id="btn-finalize-events" data-busy class="btn primary btn-finalize-section" data-section="events" type="button" title="Finalize: move photos marked for delete to trash">
+                <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+              </button>
+            </div>
+            <span class="toolbar-sep" aria-hidden="true"></span>
             <label class="inline-num">Gap between events <input id="ev-gap" type="number" step="0.5" value="2"> hours</label>
             <label class="inline-num">Distance <input id="ev-km" type="number" step="0.5" value="1"> km</label>
             <button id="btn-events" class="btn primary" data-busy>Find events</button>
