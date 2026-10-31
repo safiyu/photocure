@@ -127,3 +127,115 @@ def clean_export_selection(cfg: CuratorConfig, ids: list[int], output_dir: str, 
             "flagged": res.flagged, "blurred": res.blurred, "skipped_flagged": res.skipped_flagged,
             "flagged_photos": flagged, "failures": res.failures[:20],
             "scan_skipped": scan_skipped[:20]}
+
+
+def finalize_burst(db_path: Path | str, cfg: CuratorConfig, burst_id: int, *, operation: str = "move") -> dict:
+    """Finalize a single burst: move marked-for-delete frames to trash and finalize kept frames into the library."""
+    from .library import require_library_root
+    from .db.repository import PhotoRepository
+    from .rules.decision_matrix import DecisionMatrix
+    from .rules.organizer import FolderOrganizer
+    from .engine.action_engine import ActionEngine, PlannedAction
+    from .library_actions import _category_enum, _move_sidecar
+    from .people_actions import detach_faces
+
+    dbp = Path(db_path)
+    root = require_library_root(dbp, cfg)
+
+    with get_session(dbp) as s:
+        bg = s.get(M.BurstGroup, burst_id)
+        if bg is None:
+            raise ActionError("burst not found", 404)
+        members = s.exec(
+            select(M.ImageRecord).where(
+                M.ImageRecord.burst_id == burst_id,
+                M.ImageRecord.scan_status != "missing",
+                M.ImageRecord.stage != M.STAGE_TRASH,
+            ).options(
+                selectinload(M.ImageRecord.quality),
+                selectinload(M.ImageRecord.faces),
+                selectinload(M.ImageRecord.semantic),
+            )
+        ).all()
+        if not members:
+            return {"ok": True, "burst_id": burst_id, "trashed": 0, "finalized": 0, "message": "no active members"}
+
+        matrix = DecisionMatrix(cfg)
+        organizer = FolderOrganizer(cfg, organize_root=root)
+        organizer.set_bursts([bg])
+
+        actions: list[PlannedAction] = []
+        missing_sources = []
+        for r in members:
+            src = Path(r.path)
+            if not src.exists() and r.target_path and Path(r.target_path).exists():
+                src = Path(r.target_path)
+            if not src.exists():
+                missing_sources.append(r)
+                continue
+
+            dec = matrix.evaluate_record(r)
+            cat = _category_enum(cfg, r.manual_bucket) if r.manual_bucket else dec.category
+            target = organizer.full_target(r, dec)
+            op = "move" if r.delete_approved else operation
+            actions.append(PlannedAction(
+                image_id=r.id,
+                source=src,
+                target=target,
+                operation=op,
+                category=cat,
+                reason="burst finalized (marked for delete)" if r.delete_approved else "burst finalized",
+                is_alternate=r.is_alternate,
+                burst_name=bg.name if r.is_alternate else None,
+            ))
+
+    txn = ""
+    trashed_count = 0
+    finalized_count = 0
+
+    if actions:
+        engine = ActionEngine(cfg, db_path=dbp)
+        rep = engine.execute(actions, organize_root=root, trash=True)
+        if rep.failures:
+            raise ActionError(f"failed to move burst photos: {rep.errors[0]}", 500)
+        txn = rep.transaction_id
+
+        for a in actions:
+            dest = Path(rep.resolved_targets.get(a.image_id, a.target))
+            _move_sidecar(a.source, dest)
+
+    with get_session(dbp) as s:
+        repo = PhotoRepository(s)
+        for r_miss in missing_sources:
+            rec = s.get(M.ImageRecord, r_miss.id)
+            if rec and rec.delete_approved:
+                rec.stage = M.STAGE_TRASH
+                rec.route_status = "trashed"
+                rec.scan_status = "missing"
+                detach_faces(s, rec.id)
+                trashed_count += 1
+        for a in actions:
+            rec = s.get(M.ImageRecord, a.image_id)
+            if rec:
+                if rec.delete_approved and rec.stage == M.STAGE_TRASH:
+                    detach_faces(s, a.image_id)
+                    trashed_count += 1
+                elif rec.stage == M.STAGE_LIBRARY:
+                    finalized_count += 1
+        if txn:
+            for e in s.exec(select(M.ActionLedger).where(M.ActionLedger.transaction_id == txn)).all():
+                rec = s.get(M.ImageRecord, e.image_id)
+                if rec and rec.stage == M.STAGE_TRASH:
+                    e.prev_delete_approved = False
+        repo.prune_bursts()
+        burst_pruned = s.get(M.BurstGroup, burst_id) is None
+        s.commit()
+
+    return {
+        "ok": True,
+        "burst_id": burst_id,
+        "trashed": trashed_count,
+        "finalized": finalized_count,
+        "transaction_id": txn,
+        "pruned": burst_pruned,
+    }

@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.5.2" type="stable" date="2026-10-31">
+      <description>
+        <p>Support finalizing individual bursts separately with automatic staging of marked-for-delete frames directly to the trash.</p>
+      </description>
+    </release>
     <release version="1.5.1" type="stable" date="2026-10-31">
       <description>
         <p>Ensure photos with faces are never routed to junk categories, protecting portraits in low-light, soft focus, and near-duplicate scenarios.</p>

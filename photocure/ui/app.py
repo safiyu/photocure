@@ -1886,6 +1886,20 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 pass  # the best shot is chosen either way; its folder is already a category folder
         return {"ok": True, "burst_id": burst_id, "best_shot_id": body.image_id}
 
+    @app.post("/api/bursts/{burst_id}/finalize", dependencies=auth)
+    def finalize_burst_endpoint(burst_id: int):
+        from ..burst_actions import ActionError, finalize_burst
+        from ..library import LibraryRootMissing
+        try:
+            with exclusive():
+                return finalize_burst(dbp, app.state.cfg, burst_id)
+        except ActionError as e:
+            raise HTTPException(e.status, str(e))
+        except LibraryRootMissing as e:
+            raise HTTPException(400, "Choose a library folder in Settings first.")
+        except LookupError as e:
+            raise HTTPException(404, str(e))
+
     @app.get("/api/overview")
     def overview(stage: StageFilter = Query("all")):
         """Composition by effective category for one stage, plus the photo count of every stage."""

@@ -4870,11 +4870,12 @@
       }).join("") + `</section>`;
 
     const bar = $("#blinkbar");
-    const addBtn = (label, fn, isPrimary = false) => {
+    const addBtn = (label, fn, isPrimary = false, idAttr = "") => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "pill" + (isPrimary ? " primary" : "");
-      b.textContent = label;
+      if (idAttr) b.id = idAttr;
+      b.innerHTML = label;
       b.onclick = fn;
       bar.appendChild(b);
     };
@@ -4892,6 +4893,7 @@
     if (marked.length) addBtn(`Clear ${fmtN(marked.length)} delete mark${marked.length === 1 ? "" : "s"}`, () => markBurstDeletes(id, marked, false));
     if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
     if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
+    addBtn('<svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize burst</span>', () => finalizeBurst(id, data), true, "btn-finalize-burst");
     $$("[data-makebest]", $("#burstdetail")).forEach((b) => {
       b.onclick = () => makeBestShot(id, num(b.dataset.makebest));
     });
@@ -4940,6 +4942,41 @@
       toast("Best shot updated", "ok");
       await renderBursts(burstId);
     } catch (e) { toast(e.message, "err"); }
+  }
+
+  async function finalizeBurst(id, data) {
+    const burstData = data || state.burst;
+    const members = (burstData && burstData.members) || [];
+    const markedCount = members.filter((m) => m.delete_approved).length;
+    const keptCount = members.length - markedCount;
+    const promptMsg = markedCount > 0
+      ? `${fmtN(markedCount)} frame${markedCount === 1 ? "" : "s"} marked for delete will be moved to the trash. The remaining ${fmtN(keptCount)} will be kept in the library.`
+      : `All ${fmtN(keptCount)} frame${keptCount === 1 ? "" : "s"} will be kept in the library.`;
+
+    const ok = await showConfirmDialog({
+      title: "Finalize this burst?",
+      message: promptMsg,
+      confirmText: "Finalize burst",
+      variant: "primary",
+    });
+    if (!ok) return;
+
+    try {
+      applyBusy(true);
+      const res = await post(`/api/bursts/${num(id)}/finalize`, {});
+      if (res && res.ok) {
+        const msg = res.trashed
+          ? `Burst finalized: ${fmtN(res.trashed)} moved to trash, ${fmtN(res.finalized)} kept in library`
+          : `Burst finalized: ${fmtN(res.finalized)} kept in library`;
+        toast(msg, "ok");
+        await Promise.all([loadStats(), refreshBackend(), loadTransactions()]);
+        await renderBursts();
+      }
+    } catch (e) {
+      toast(e.message || "Could not finalize burst", "err");
+    } finally {
+      applyBusy(false);
+    }
   }
 
   // ------------------------------------------------------------------ events
@@ -6364,6 +6401,14 @@
       if (!bi || !bi.rest.length) return;
       await markBurstDeletes(currentBurstId, bi.rest.map((m) => num(m.id)), true);
     };
+    const bfb = $("#bulk-finalize-burst");
+    if (bfb) {
+      bfb.onclick = async () => {
+        if (currentBurstId != null) {
+          await finalizeBurst(currentBurstId, state.burst);
+        }
+      };
+    }
     $("#bulk-clean").onclick = openCleanExport;
     $("#ce-scan").onclick = ceScan;
     $("#ce-go").onclick = ceExport;
