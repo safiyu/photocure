@@ -303,10 +303,11 @@ TAXONOMY: tuple[TaxonomyEntry, ...] = (
     _entry(
         CategoryType.PRODUCT, "objects",
         "a product photo of an object on a plain background",
-        "a photo of an item for sale such as electronics or clothing",
-        "a close-up photo of a gadget or device",
-        "a photo of a package or box",
-        "a photo of a tool or household object",
+        "a photo of an item for sale such as electronics, clothing, cosmetics or beauty products",
+        "a photo of jewelry, gold bangles, bracelets, rings or necklaces",
+        "a close-up photo of a gadget, device or tool",
+        "a photo of a package, bottle or box",
+        "a photo of a household object or consumer product",
     ),
 )
 

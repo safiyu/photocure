@@ -365,6 +365,7 @@ def learn_from_corrections(session, cfg: CuratorConfig | None = None,
     tcfg = cfg.taxonomy
     weight = float(getattr(tcfg, "feedback_weight", 0.6))
     min_examples = int(getattr(tcfg, "feedback_min_examples", 2))
+    min_cosine = float(getattr(tcfg, "feedback_min_cosine", 0.60))
     summary = {"updated": 0, "classes_used": 0, "examples": 0}
 
     engine = SemanticEngine(cfg, backend=backend)
@@ -414,7 +415,9 @@ def learn_from_corrections(session, cfg: CuratorConfig | None = None,
                 continue
             logits = (text @ e) * 100.0
             for ci, proto in protos.items():
-                logits[ci] += weight * 100.0 * float(proto @ e)
+                sim = float(proto @ e)
+                if sim > min_cosine:
+                    logits[ci] += weight * 100.0 * (sim - min_cosine)
             logits -= logits.max()
             probs = np.exp(logits)
             probs /= probs.sum()

@@ -210,6 +210,8 @@ class TaxonomySettings(BaseSettings):
     feedback_weight: float = 0.6
     # Corrected photos needed in a class before it is learned from.
     feedback_min_examples: int = 2
+    # Minimum prototype cosine similarity required before learned feedback applies to a photo.
+    feedback_min_cosine: float = 0.60
     clip_model_name: str = "ViT-B-16"
     clip_pretrained: str = "openai"
 

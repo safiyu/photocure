@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.5.5" type="stable" date="2026-10-31">
+      <description>
+        <p>Fix prototype feedback bias in learning from corrections, add jewelry and cosmetics prompts to Product category, and protect non-matching photos from prototype hijacking.</p>
+      </description>
+    </release>
     <release version="1.5.4" type="stable" date="2026-10-31">
       <description>
         <p>Stage-aware burst counts across overview and sidebar, visual progress feedback and loader card during burst finalization, and graceful lock acquisition timeout.</p>

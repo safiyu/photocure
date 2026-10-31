@@ -145,6 +145,25 @@ def test_learn_respects_configured_weight_and_minimum(world):
         assert sem_of(s, "ambig").top1_score == pytest.approx(before, abs=1e-5)  # weight 0
 
 
+def test_learn_below_min_cosine_does_not_shift_unrelated_photo(world):
+    cfg, db, t, q, rng = world
+    cfg.taxonomy.feedback_min_examples = 2
+    cfg.taxonomy.feedback_min_cosine = 0.60
+    with get_session(db) as s:
+        # Product photo with moderate baseline similarity (0.50) to people prototype
+        # but below the 0.60 threshold: should NOT receive any boost.
+        add_image(s, "jewelry", unit(t["product"]))
+        for i in range(2):
+            add_image(s, f"person{i}", unit(t["people"]), manual="people")
+        rescore_from_embeddings(s, cfg, stub_bs())
+        before = sem_of(s, "jewelry")
+        assert before.top1_category == "product"
+        learn_from_corrections(s, cfg, stub_bs())
+        after = sem_of(s, "jewelry")
+        assert after.top1_category == "product"
+        assert after.top1_score == pytest.approx(before.top1_score, abs=1e-4)
+
+
 # --------------------------------------------------------- stub re-analysis
 def _rows(db):
     with get_session(db) as s:
