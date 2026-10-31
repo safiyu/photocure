@@ -347,6 +347,13 @@
 
         <!-- BURSTS -->
         <section id="tab-bursts" class="panel">
+          <div class="toolbar" id="bursts-toolbar">
+            <button id="btn-finalize-all-bursts" class="btn primary" type="button" title="Finalize all bursts: move frames marked for delete to trash and keep the rest in library">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize all</span>
+            </button>
+            <span class="grow"></span>
+            <span id="bursts-summary" class="rowcount" role="status"></span>
+          </div>
           <div class="split">
             <div id="burstlist" class="burstlist"></div>
             <div id="burstdetail" class="detail"></div>

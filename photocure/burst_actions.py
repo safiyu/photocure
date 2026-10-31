@@ -129,8 +129,15 @@ def clean_export_selection(cfg: CuratorConfig, ids: list[int], output_dir: str, 
             "scan_skipped": scan_skipped[:20]}
 
 
-def finalize_burst(db_path: Path | str, cfg: CuratorConfig, burst_id: int, *, operation: str = "move") -> dict:
-    """Finalize a single burst: move marked-for-delete frames to trash and finalize kept frames into the library."""
+def finalize_bursts(
+    db_path: Path | str,
+    cfg: CuratorConfig,
+    burst_ids: list[int] | None = None,
+    *,
+    stage: str | None = None,
+    operation: str = "move",
+) -> dict:
+    """Finalize bursts: move marked-for-delete frames to trash and finalize kept frames into the library."""
     from .library import require_library_root
     from .db.repository import PhotoRepository
     from .rules.decision_matrix import DecisionMatrix
@@ -143,26 +150,54 @@ def finalize_burst(db_path: Path | str, cfg: CuratorConfig, burst_id: int, *, op
     root = require_library_root(dbp, cfg)
 
     with get_session(dbp) as s:
-        bg = s.get(M.BurstGroup, burst_id)
-        if bg is None:
-            raise ActionError("burst not found", 404)
-        members = s.exec(
-            select(M.ImageRecord).where(
-                M.ImageRecord.burst_id == burst_id,
-                M.ImageRecord.scan_status != "missing",
-                M.ImageRecord.stage != M.STAGE_TRASH,
-            ).options(
-                selectinload(M.ImageRecord.quality),
-                selectinload(M.ImageRecord.faces),
-                selectinload(M.ImageRecord.semantic),
-            )
-        ).all()
+        if burst_ids is not None:
+            if len(burst_ids) == 1:
+                bg = s.get(M.BurstGroup, burst_ids[0])
+                if bg is None:
+                    raise ActionError("burst not found", 404)
+            bgs = s.exec(select(M.BurstGroup).where(col(M.BurstGroup.id).in_(burst_ids))).all()
+        else:
+            bgs = s.exec(select(M.BurstGroup)).all()
+
+        bg_by_id = {b.id: b for b in bgs}
+        if not bg_by_id:
+            return {
+                "ok": True,
+                "bursts": 0,
+                "trashed": 0,
+                "finalized": 0,
+                "transaction_id": "",
+                "pruned_bursts": 0,
+                "message": "no bursts found",
+            }
+
+        q = select(M.ImageRecord).where(
+            col(M.ImageRecord.burst_id).in_(list(bg_by_id.keys())),
+            M.ImageRecord.scan_status != "missing",
+            M.ImageRecord.stage != M.STAGE_TRASH,
+        ).options(
+            selectinload(M.ImageRecord.quality),
+            selectinload(M.ImageRecord.faces),
+            selectinload(M.ImageRecord.semantic),
+        )
+        if stage and stage != "all":
+            q = q.where(M.ImageRecord.stage == stage)
+
+        members = s.exec(q).all()
         if not members:
-            return {"ok": True, "burst_id": burst_id, "trashed": 0, "finalized": 0, "message": "no active members"}
+            return {
+                "ok": True,
+                "bursts": len(bg_by_id),
+                "trashed": 0,
+                "finalized": 0,
+                "transaction_id": "",
+                "pruned_bursts": 0,
+                "message": "no active members",
+            }
 
         matrix = DecisionMatrix(cfg)
         organizer = FolderOrganizer(cfg, organize_root=root)
-        organizer.set_bursts([bg])
+        organizer.set_bursts(list(bg_by_id.values()))
 
         actions: list[PlannedAction] = []
         missing_sources = []
@@ -178,6 +213,7 @@ def finalize_burst(db_path: Path | str, cfg: CuratorConfig, burst_id: int, *, op
             cat = _category_enum(cfg, r.manual_bucket) if r.manual_bucket else dec.category
             target = organizer.full_target(r, dec)
             op = "move" if r.delete_approved else operation
+            bg = bg_by_id.get(r.burst_id)
             actions.append(PlannedAction(
                 image_id=r.id,
                 source=src,
@@ -186,7 +222,7 @@ def finalize_burst(db_path: Path | str, cfg: CuratorConfig, burst_id: int, *, op
                 category=cat,
                 reason="burst finalized (marked for delete)" if r.delete_approved else "burst finalized",
                 is_alternate=r.is_alternate,
-                burst_name=bg.name if r.is_alternate else None,
+                burst_name=bg.name if (bg and r.is_alternate) else None,
             ))
 
     txn = ""
@@ -228,14 +264,39 @@ def finalize_burst(db_path: Path | str, cfg: CuratorConfig, burst_id: int, *, op
                 if rec and rec.stage == M.STAGE_TRASH:
                     e.prev_delete_approved = False
         repo.prune_bursts()
-        burst_pruned = s.get(M.BurstGroup, burst_id) is None
+        remaining = s.exec(select(M.BurstGroup).where(col(M.BurstGroup.id).in_(list(bg_by_id.keys())))).all()
+        pruned_count = len(bg_by_id) - len(remaining)
         s.commit()
 
     return {
         "ok": True,
-        "burst_id": burst_id,
+        "bursts": len(bg_by_id),
         "trashed": trashed_count,
         "finalized": finalized_count,
         "transaction_id": txn,
-        "pruned": burst_pruned,
+        "pruned_bursts": pruned_count,
     }
+
+
+def finalize_burst(db_path: Path | str, cfg: CuratorConfig, burst_id: int, *, operation: str = "move") -> dict:
+    """Finalize a single burst: move marked-for-delete frames to trash and finalize kept frames into the library."""
+    res = finalize_bursts(db_path, cfg, burst_ids=[burst_id], operation=operation)
+    return {
+        "ok": res["ok"],
+        "burst_id": burst_id,
+        "trashed": res["trashed"],
+        "finalized": res["finalized"],
+        "transaction_id": res["transaction_id"],
+        "pruned": res.get("pruned_bursts", 0) > 0,
+    }
+
+
+def finalize_all_bursts(
+    db_path: Path | str,
+    cfg: CuratorConfig,
+    *,
+    stage: str | None = None,
+    operation: str = "move",
+) -> dict:
+    """Finalize all bursts: move marked-for-delete frames to trash and finalize kept frames into the library."""
+    return finalize_bursts(db_path, cfg, burst_ids=None, stage=stage, operation=operation)

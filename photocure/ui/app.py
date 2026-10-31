@@ -1900,6 +1900,20 @@ def create_app(db_path: str | None = None) -> FastAPI:
         except LookupError as e:
             raise HTTPException(404, str(e))
 
+    @app.post("/api/bursts/finalize-all", dependencies=auth)
+    def finalize_all_bursts_endpoint(stage: StageFilter = Query("all")):
+        from ..burst_actions import ActionError, finalize_all_bursts
+        from ..library import LibraryRootMissing
+        try:
+            with exclusive():
+                return finalize_all_bursts(dbp, app.state.cfg, stage=stage)
+        except ActionError as e:
+            raise HTTPException(e.status, str(e))
+        except LibraryRootMissing as e:
+            raise HTTPException(400, "Choose a library folder in Settings first.")
+        except LookupError as e:
+            raise HTTPException(404, str(e))
+
     @app.get("/api/overview")
     def overview(stage: StageFilter = Query("all")):
         """Composition by effective category for one stage, plus the photo count of every stage."""
@@ -1994,19 +2008,29 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 M.ImageRecord.burst_id.is_not(None), stage_clause(stage),
                 M.ImageRecord.route_status.not_in(["trashed", "purged"]) if stage != "trash"
                 else M.ImageRecord.route_status != "purged").group_by(M.ImageRecord.burst_id)).all())
+            marked_counts = dict(s.exec(select(M.ImageRecord.burst_id, func.count(M.ImageRecord.id)).where(
+                M.ImageRecord.burst_id.is_not(None),
+                M.ImageRecord.delete_approved == True,
+                stage_clause(stage),
+                M.ImageRecord.route_status.not_in(["trashed", "purged"]) if stage != "trash"
+                else M.ImageRecord.route_status != "purged").group_by(M.ImageRecord.burst_id)).all())
+            total_marked = 0
             for b in repo.all_bursts():
                 best = repo.get_by_id(b.best_shot_id) if b.best_shot_id else None
                 cnt = int(counts.get(b.id, 0))
                 if cnt < (1 if stage == "trash" else 2):  # a lone frame is not a burst
                     continue
                 b_count = cnt
+                m_count = int(marked_counts.get(b.id, 0))
+                total_marked += m_count
                 out.append({
                     "id": b.id, "name": b.name, "image_count": b_count,
+                    "marked_delete_count": m_count,
                     "best_shot_id": b.best_shot_id,
                     "best_shot": best.filename if best else None,
                     "start_time": b.start_time.isoformat() if b.start_time else None,
                 })
-            return {"count": len(out), "items": out}
+            return {"count": len(out), "items": out, "total_marked_for_delete": total_marked}
 
     @app.get("/api/burst/{burst_id}")
     def burst_detail(burst_id: int, stage: StageFilter = Query("all")):

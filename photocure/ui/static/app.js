@@ -2793,36 +2793,62 @@
     const data = await api(`/api/bursts?stage=${encodeURIComponent(sc)}`);
     const list = $("#burstlist");
     const scroll = list.scrollTop;
-    if (!data.items.length) {
-      list.innerHTML = "";
-      $("#burstdetail").innerHTML = emptyHTML({
-        icon: "layers", title: "No burst groups yet",
-        text: "Bursts are shots taken seconds apart. Run grouping to find them.",
-        action: { label: "Group bursts now", attr: 'id="btn-group-bursts-now"' },
-      });
-      const btn = $("#btn-group-bursts-now");
-      if (btn) {
-        btn.onclick = async () => {
-          await runTask("Grouping bursts", async () => {
-            const res = await post("/api/cluster", { only_new: false });
-            if (res && res.burst_groups != null) {
-              libLog(`Grouping finished: ${fmtN(res.burst_groups)} burst groups`, "ok");
-              toast(`Found ${fmtN(res.burst_groups)} burst groups`, "ok");
-            }
-            await loadStats();
-            await renderBursts();
-            return res;
-          });
-        };
+    const toolbar = $("#bursts-toolbar");
+    const isTrash = sc === "trash";
+
+    if (!data.items.length || isTrash) {
+      if (toolbar) toolbar.style.display = "none";
+      if (!data.items.length) {
+        list.innerHTML = "";
+        $("#burstdetail").innerHTML = emptyHTML({
+          icon: "layers", title: "No burst groups yet",
+          text: "Bursts are shots taken seconds apart. Run grouping to find them.",
+          action: { label: "Group bursts now", attr: 'id="btn-group-bursts-now"' },
+        });
+        const btn = $("#btn-group-bursts-now");
+        if (btn) {
+          btn.onclick = async () => {
+            await runTask("Grouping bursts", async () => {
+              const res = await post("/api/cluster", { only_new: false });
+              if (res && res.burst_groups != null) {
+                libLog(`Grouping finished: ${fmtN(res.burst_groups)} burst groups`, "ok");
+                toast(`Found ${fmtN(res.burst_groups)} burst groups`, "ok");
+              }
+              await loadStats();
+              await renderBursts();
+              return res;
+            });
+          };
+        }
+        return;
       }
-      return;
     }
-    list.innerHTML = data.items.map((b) =>
-      `<button class="burstrow burst-item" type="button" data-burst="${num(b.id)}">
-        <span class="body"><div class="name">${esc(b.name)}</div>
+
+    if (toolbar) {
+      toolbar.style.display = "";
+      const sumEl = $("#bursts-summary");
+      if (sumEl) {
+        const marked = data.total_marked_for_delete || 0;
+        sumEl.textContent = marked > 0
+          ? `${fmtN(data.items.length)} bursts · ${fmtN(marked)} marked for delete`
+          : `${fmtN(data.items.length)} bursts`;
+      }
+      const bfa = $("#btn-finalize-all-bursts");
+      if (bfa) {
+        bfa.onclick = () => finalizeAllBursts(data);
+      }
+    }
+
+    list.innerHTML = data.items.map((b) => {
+      const markedBadge = b.marked_delete_count > 0
+        ? `<span class="tag-badge warn sm" style="margin-left:6px">${fmtN(b.marked_delete_count)} to trash</span>`
+        : "";
+      return `<button class="burstrow burst-item" type="button" data-burst="${num(b.id)}">
+        <span class="body"><div class="name">${esc(b.name)}${markedBadge}</div>
              <div class="sub">${fmtN(b.image_count)} photos, best: ${esc(b.best_shot || "none")}</div></span>
         <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
-      </button>`).join("");
+      </button>`;
+    }).join("");
     $$(".burstrow", list).forEach((row) => {
       const go = () => showBurst(num(row.dataset.burst));
       row.onclick = go;
@@ -4893,7 +4919,10 @@
     if (marked.length) addBtn(`Clear ${fmtN(marked.length)} delete mark${marked.length === 1 ? "" : "s"}`, () => markBurstDeletes(id, marked, false));
     if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
     if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
-    addBtn('<svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize burst</span>', () => finalizeBurst(id, data), true, "btn-finalize-burst");
+    if (state.stage !== "trash") {
+      addBtn('<svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize burst</span>', () => finalizeBurst(id, data), true, "btn-finalize-burst");
+      addBtn('<span>Finalize all</span>', () => finalizeAllBursts(), false, "btn-finalize-all-pill");
+    }
     $$("[data-makebest]", $("#burstdetail")).forEach((b) => {
       b.onclick = () => makeBestShot(id, num(b.dataset.makebest));
     });
@@ -4974,6 +5003,50 @@
       }
     } catch (e) {
       toast(e.message || "Could not finalize burst", "err");
+    } finally {
+      applyBusy(false);
+    }
+  }
+
+  async function finalizeAllBursts(cachedData) {
+    const sc = state.stage || "new";
+    const data = (cachedData && cachedData.items) ? cachedData : await api(`/api/bursts?stage=${encodeURIComponent(sc)}`);
+    const count = data.items ? data.items.length : 0;
+    if (!count) {
+      toast("No bursts to finalize", "warn");
+      return;
+    }
+    const totalMarked = data.total_marked_for_delete != null
+      ? data.total_marked_for_delete
+      : (data.items || []).reduce((acc, b) => acc + (b.marked_delete_count || 0), 0);
+    const totalFrames = (data.items || []).reduce((acc, b) => acc + (b.image_count || 0), 0);
+    const totalKept = totalFrames - totalMarked;
+
+    const promptMsg = totalMarked > 0
+      ? `Finalize all ${fmtN(count)} burst groups? ${fmtN(totalMarked)} frame${totalMarked === 1 ? "" : "s"} marked for delete will be moved to the trash, and ${fmtN(totalKept)} will be kept in the library.`
+      : `Finalize all ${fmtN(count)} burst groups? All ${fmtN(totalKept)} frame${totalKept === 1 ? "" : "s"} will be kept in the library.`;
+
+    const ok = await showConfirmDialog({
+      title: `Finalize all ${fmtN(count)} bursts?`,
+      message: promptMsg,
+      confirmText: "Finalize all",
+      variant: "primary",
+    });
+    if (!ok) return;
+
+    try {
+      applyBusy(true);
+      const res = await post(`/api/bursts/finalize-all?stage=${encodeURIComponent(sc)}`, {});
+      if (res && res.ok) {
+        const msg = res.trashed
+          ? `All bursts finalized: ${fmtN(res.trashed)} moved to trash, ${fmtN(res.finalized)} kept in library`
+          : `All bursts finalized: ${fmtN(res.finalized)} kept in library`;
+        toast(msg, "ok");
+        await Promise.all([loadStats(), refreshBackend(), loadTransactions()]);
+        await renderBursts();
+      }
+    } catch (e) {
+      toast(e.message || "Could not finalize bursts", "err");
     } finally {
       applyBusy(false);
     }
@@ -6408,6 +6481,10 @@
           await finalizeBurst(currentBurstId, state.burst);
         }
       };
+    }
+    const bfa = $("#btn-finalize-all-bursts");
+    if (bfa) {
+      bfa.onclick = () => finalizeAllBursts();
     }
     $("#bulk-clean").onclick = openCleanExport;
     $("#ce-scan").onclick = ceScan;
