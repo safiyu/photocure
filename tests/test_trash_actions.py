@@ -216,3 +216,9 @@ def test_api_finalize_endpoint(env):
     assert data["trashed"] == 1
     assert _row(env, ids[2])["stage"] == "trash"
 
+    # Test all section filters to guarantee valid SQL queries
+    for sec in ("utility", "junk", "uncertain", "duplicates", "people"):
+        r = env.client.post("/api/finalize", json={"stage": "new", "section": sec, "person_id": 1 if sec == "people" else None})
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+

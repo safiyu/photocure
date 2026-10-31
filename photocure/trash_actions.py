@@ -258,10 +258,10 @@ def finalize_deletes(dbp: Path, cfg: CuratorConfig, *,
             if category:
                 q = q.where(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category) == category)
             elif section == "utility":
-                q = q.where(col(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category)).in_(
+                q = q.where(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category).in_(
                     ["screenshot", "document", "slide", "utility"]))
             elif section == "junk":
-                q = q.where(col(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category)).in_(
+                q = q.where(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category).in_(
                     ["duplicate", "near_duplicate", "graphic", "accidental", "unreadable", "junk_blinks"]))
             elif section == "uncertain":
                 q = q.where(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category) == "uncertain")
@@ -269,7 +269,7 @@ def finalize_deletes(dbp: Path, cfg: CuratorConfig, *,
                 q = q.where(
                     (M.ImageRecord.is_duplicate == True)  # noqa: E712
                     | (M.ImageRecord.near_dup_of.is_not(None))
-                    | col(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category)).in_(
+                    | func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category).in_(
                         ["duplicate", "near_duplicate"]))
             if person_id is not None:
                 person_img_ids = select(M.FaceDetection.image_id).where(M.FaceDetection.person_id == person_id)
