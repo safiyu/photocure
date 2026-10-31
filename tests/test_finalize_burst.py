@@ -138,6 +138,24 @@ def test_finalize_burst_endpoint(burst_env):
     assert data["finalized"] == 2
 
 
+def test_overview_burst_count_matches_stage(burst_env):
+    # Before finalize: 1 burst in new, 0 in library
+    ov_new = burst_env.client.get("/api/overview?stage=new").json()
+    ov_lib = burst_env.client.get("/api/overview?stage=library").json()
+    assert ov_new["stats"]["burst_groups"] == 1
+    assert ov_lib["stats"]["burst_groups"] == 0
+
+    # Finalize burst (2 kept members stay as burst in library)
+    r = burst_env.client.post(f"/api/bursts/{burst_env.burst_id}/finalize")
+    assert r.status_code == 200
+
+    # After finalize: 0 bursts in new, 1 in library
+    ov_new = burst_env.client.get("/api/overview?stage=new").json()
+    ov_lib = burst_env.client.get("/api/overview?stage=library").json()
+    assert ov_new["stats"]["burst_groups"] == 0
+    assert ov_lib["stats"]["burst_groups"] == 1
+
+
 def test_finalize_burst_can_be_undone(burst_env):
     res = finalize_burst(burst_env.db, burst_env.app.state.cfg, burst_env.burst_id)
     txn = res["transaction_id"]

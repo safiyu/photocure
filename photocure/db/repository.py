@@ -521,32 +521,44 @@ class PhotoRepository:
         ).first()
 
     # -------------------------------------------------------------- stats
-    def stats(self) -> dict:
+    def stats(self, stage: str | None = None) -> dict:
         active = ImageRecord.scan_status != "missing"
-        total = self.s.exec(sselect(func.count()).select_from(ImageRecord).where(active)).one()
+        active_scope = [active]
+        if stage and stage != "all":
+            active_scope.append(ImageRecord.stage == stage)
+        total = self.s.exec(sselect(func.count()).select_from(ImageRecord).where(*active_scope)).one()
         pending = self.s.exec(
             sselect(func.count()).select_from(ImageRecord)
-            .where(active, ImageRecord.infer_status == "pending")
+            .where(*active_scope, ImageRecord.infer_status == "pending")
         ).one()
         dupes = self.s.exec(
             sselect(func.count()).select_from(ImageRecord)
-            .where(active, ImageRecord.is_duplicate == True)  # noqa: E712
+            .where(*active_scope, ImageRecord.is_duplicate == True)  # noqa: E712
         ).one()
         planned = self.s.exec(
             sselect(func.count()).select_from(ImageRecord)
-            .where(active, ImageRecord.route_status == "planned")
+            .where(*active_scope, ImageRecord.route_status == "planned")
         ).one()
-        # Read-only: a burst counts when two or more of its frames are still in the library.
+        # Read-only: a burst counts when two or more of its frames are in scope.
+        burst_where = [
+            ImageRecord.burst_id.is_not(None),
+            active,
+            col(ImageRecord.route_status).not_in(["trashed", "purged"]),
+        ]
+        if stage and stage != "all":
+            burst_where.append(ImageRecord.stage == stage)
         live_bursts = (
             sselect(ImageRecord.burst_id)
-            .where(ImageRecord.burst_id.is_not(None), active,
-                   col(ImageRecord.route_status).not_in(["trashed", "purged"]))
-            .group_by(ImageRecord.burst_id).having(func.count() >= 2).subquery()
+            .where(*burst_where)
+            .group_by(ImageRecord.burst_id).having(func.count() >= (1 if stage == "trash" else 2)).subquery()
         )
         bursts = self.s.exec(sselect(func.count()).select_from(live_bursts)).one()
+        people_where = [PersonCluster.face_count > 0, PersonCluster.stage != "trash"]
+        if stage and stage != "all":
+            people_where.append(PersonCluster.stage == stage)
         people = self.s.exec(
             sselect(func.count()).select_from(PersonCluster)
-            .where(PersonCluster.face_count > 0, PersonCluster.stage != "trash")
+            .where(*people_where)
         ).one()
         stage_rows = self.s.exec(
             sselect(ImageRecord.stage, func.count()).where(active).group_by(ImageRecord.stage)

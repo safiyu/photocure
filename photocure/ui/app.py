@@ -696,9 +696,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
     auth: list = []  # enforced app-wide by the guard middleware
 
     @contextmanager
-    def exclusive():
-        if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+    def exclusive(timeout: float = 3.0):
+        if not _BUSY.acquire(blocking=True, timeout=timeout):
+            cur = progress_mgr.get()
+            label = cur.get("label") or cur.get("title") or "background task"
+            raise HTTPException(409, f"Another task is already running ({label}). Please wait for it to finish.")
         try:
             yield
         finally:
@@ -1891,8 +1893,18 @@ def create_app(db_path: str | None = None) -> FastAPI:
         from ..burst_actions import ActionError, finalize_burst
         from ..library import LibraryRootMissing
         try:
-            with exclusive():
-                return finalize_burst(dbp, app.state.cfg, burst_id)
+            with exclusive(timeout=5.0):
+                progress_mgr.start("Finalize", f"Finalizing burst {burst_id}", 0, "Moving files...")
+                try:
+                    res = finalize_burst(dbp, app.state.cfg, burst_id)
+                    trashed = res.get("trashed", 0)
+                    finalized = res.get("finalized", 0)
+                    msg = f"Burst finalized: {trashed} to trash, {finalized} kept" if trashed else f"Burst finalized: {finalized} kept"
+                    progress_mgr.finish(msg)
+                    return res
+                except Exception as ex:
+                    progress_mgr.error(str(ex))
+                    raise
         except ActionError as e:
             raise HTTPException(e.status, str(e))
         except LibraryRootMissing as e:
@@ -1905,8 +1917,18 @@ def create_app(db_path: str | None = None) -> FastAPI:
         from ..burst_actions import ActionError, finalize_all_bursts
         from ..library import LibraryRootMissing
         try:
-            with exclusive():
-                return finalize_all_bursts(dbp, app.state.cfg, stage=stage)
+            with exclusive(timeout=5.0):
+                progress_mgr.start("Finalize Bursts", "Finalizing all bursts", 0, "Moving marked frames to trash and keeping best shots...")
+                try:
+                    res = finalize_all_bursts(dbp, app.state.cfg, stage=stage)
+                    trashed = res.get("trashed", 0)
+                    finalized = res.get("finalized", 0)
+                    msg = f"All bursts finalized: {trashed} to trash, {finalized} kept" if trashed else f"All bursts finalized: {finalized} kept"
+                    progress_mgr.finish(msg)
+                    return res
+                except Exception as ex:
+                    progress_mgr.error(str(ex))
+                    raise
         except ActionError as e:
             raise HTTPException(e.status, str(e))
         except LibraryRootMissing as e:
@@ -1923,7 +1945,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         with get_session(dbp) as s:
             rows = s.exec(select(eff, func.count()).where(scope_filter).group_by(eff)).all()
             by_cat = {(k or "unrouted"): int(n) for k, n in rows}
-            stats_ = PhotoRepository(s).stats()
+            stats_ = PhotoRepository(s).stats(stage=stage if stage != "all" else None)
             manual = s.exec(select(func.count()).select_from(I).where(
                 scope_filter, I.manual_bucket.is_not(None))).one()
         counts = stats_["stages"]
@@ -2878,7 +2900,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def undo(body: UndoReq):
         tid = body.transaction_id or latest_undoable()
         if not tid:
-            raise HTTPException(404, "no transactions found")
+            return JSONResponse({"ok": False, "error": "no transactions found"}, status_code=200)
         planner = make_planner(req_cfg())
         if not body.verify and not _accepts(planner.undo, "verify"):
             raise _not_impl("undo without verification")

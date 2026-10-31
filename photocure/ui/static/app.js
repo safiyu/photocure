@@ -2796,6 +2796,9 @@
     const toolbar = $("#bursts-toolbar");
     const isTrash = sc === "trash";
 
+    const badge = $('[data-count="bursts"]');
+    if (badge) badge.textContent = data.items && data.items.length ? fmtN(data.items.length) : "";
+
     if (!data.items.length || isTrash) {
       if (toolbar) toolbar.style.display = "none";
       if (!data.items.length) {
@@ -4896,11 +4899,12 @@
       }).join("") + `</section>`;
 
     const bar = $("#blinkbar");
-    const addBtn = (label, fn, isPrimary = false, idAttr = "") => {
+    const addBtn = (label, fn, isPrimary = false, idAttr = "", isBusy = false) => {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "pill" + (isPrimary ? " primary" : "");
       if (idAttr) b.id = idAttr;
+      if (isBusy) b.setAttribute("data-busy", "");
       b.innerHTML = label;
       b.onclick = fn;
       bar.appendChild(b);
@@ -4920,8 +4924,8 @@
     if (data.can_reject_blinks) addBtn("Reject all blinks", () => rejectBlinks(id, data.reject_count));
     if (data.rejected_blinks) addBtn(`Restore ${data.rejected_blinks} from Junk review`, () => restoreBlinks(id));
     if (state.stage !== "trash") {
-      addBtn('<svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize burst</span>', () => finalizeBurst(id, data), true, "btn-finalize-burst");
-      addBtn('<span>Finalize all</span>', () => finalizeAllBursts(), false, "btn-finalize-all-pill");
+      addBtn('<svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize burst</span>', () => finalizeBurst(id, data), true, "btn-finalize-burst", true);
+      addBtn('<span>Finalize all</span>', () => finalizeAllBursts(), false, "btn-finalize-all-pill", true);
     }
     $$("[data-makebest]", $("#burstdetail")).forEach((b) => {
       b.onclick = () => makeBestShot(id, num(b.dataset.makebest));
@@ -4974,6 +4978,10 @@
   }
 
   async function finalizeBurst(id, data) {
+    if (state.busy || state.taskRunning) {
+      toast("Another task is currently running. Please wait for it to complete.", "warn");
+      return;
+    }
     const burstData = data || state.burst;
     const members = (burstData && burstData.members) || [];
     const markedCount = members.filter((m) => m.delete_approved).length;
@@ -4990,8 +4998,8 @@
     });
     if (!ok) return;
 
-    try {
-      applyBusy(true);
+    await runTask("Finalizing burst", async () => {
+      setTimeout(pollProgress, 100);
       const res = await post(`/api/bursts/${num(id)}/finalize`, {});
       if (res && res.ok) {
         const msg = res.trashed
@@ -5001,14 +5009,15 @@
         await Promise.all([loadStats(), refreshBackend(), loadTransactions()]);
         await renderBursts();
       }
-    } catch (e) {
-      toast(e.message || "Could not finalize burst", "err");
-    } finally {
-      applyBusy(false);
-    }
+      return res;
+    });
   }
 
   async function finalizeAllBursts(cachedData) {
+    if (state.busy || state.taskRunning) {
+      toast("Another task is currently running. Please wait for it to complete.", "warn");
+      return;
+    }
     const sc = state.stage || "new";
     const data = (cachedData && cachedData.items) ? cachedData : await api(`/api/bursts?stage=${encodeURIComponent(sc)}`);
     const count = data.items ? data.items.length : 0;
@@ -5034,8 +5043,8 @@
     });
     if (!ok) return;
 
-    try {
-      applyBusy(true);
+    await runTask("Finalizing all bursts", async () => {
+      setTimeout(pollProgress, 100);
       const res = await post(`/api/bursts/finalize-all?stage=${encodeURIComponent(sc)}`, {});
       if (res && res.ok) {
         const msg = res.trashed
@@ -5045,11 +5054,8 @@
         await Promise.all([loadStats(), refreshBackend(), loadTransactions()]);
         await renderBursts();
       }
-    } catch (e) {
-      toast(e.message || "Could not finalize bursts", "err");
-    } finally {
-      applyBusy(false);
-    }
+      return res;
+    });
   }
 
   // ------------------------------------------------------------------ events

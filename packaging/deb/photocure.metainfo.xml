@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.5.4" type="stable" date="2026-10-31">
+      <description>
+        <p>Stage-aware burst counts across overview and sidebar, visual progress feedback and loader card during burst finalization, and graceful lock acquisition timeout.</p>
+      </description>
+    </release>
     <release version="1.5.3" type="stable" date="2026-10-31">
       <description>
         <p>Support Finalize All bursts directly from the top toolbar to move all marked-for-delete burst frames to trash and finalize all kept frames in one click.</p>

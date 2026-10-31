@@ -348,7 +348,7 @@
         <!-- BURSTS -->
         <section id="tab-bursts" class="panel">
           <div class="toolbar" id="bursts-toolbar">
-            <button id="btn-finalize-all-bursts" class="btn primary" type="button" title="Finalize all bursts: move frames marked for delete to trash and keep the rest in library">
+            <button id="btn-finalize-all-bursts" data-busy class="btn primary" type="button" title="Finalize all bursts: move frames marked for delete to trash and keep the rest in library">
               <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize all</span>
             </button>
             <span class="grow"></span>
@@ -726,7 +726,7 @@
     <select id="bulk-cat" class="lib-only" aria-label="Move selected to category"></select>
     <button class="btn sm ghost lib-only" id="bulk-junk" title="Move the selected photos to Junk review"><svg class="ic sm" aria-hidden="true"><use href="#i-alert"/></svg>Mark junk</button>
     <button class="btn sm danger burst-only" id="bulk-rest" title="Mark every frame you did not select for delete. The best shot is kept."><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete the other <span id="bulk-rest-n">0</span></button>
-    <button class="btn sm primary burst-only" id="bulk-finalize-burst" title="Finalize this burst and move marked frames to trash"><svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg>Finalize burst</button>
+    <button class="btn sm primary burst-only" data-busy id="bulk-finalize-burst" title="Finalize this burst and move marked frames to trash"><svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg>Finalize burst</button>
     <button class="btn sm danger lib-only" id="bulk-delete" title="Leave the selected photos out of the result"><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Mark for delete</button>
     <button class="btn sm ghost lib-only" id="bulk-clean" title="Make copies without location or other hidden details">Clean export</button>
     <button class="btn sm primary trash-only" id="bulk-restore" data-busy title="Put the selected photos back in the library, sorted by category">Restore</button>
