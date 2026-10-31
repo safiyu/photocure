@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="1.5.6" type="stable" date="2026-10-31">
+      <description>
+        <p>Add Finalize button to every section toolbar and bulk actions to move marked-for-delete photos directly to trash with progress tracking and undo support.</p>
+      </description>
+    </release>
     <release version="1.5.5" type="stable" date="2026-10-31">
       <description>
         <p>Fix prototype feedback bias in learning from corrections, add jewelry and cosmetics prompts to Product category, and protect non-matching photos from prototype hijacking.</p>

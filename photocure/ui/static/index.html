@@ -288,6 +288,9 @@
             <button id="btn-trash-empty" data-busy class="btn danger" title="Delete everything in the trash for good">Empty trash</button>
           </div>
           <div class="toolbar">
+            <button id="btn-finalize-categories" data-busy class="btn primary btn-finalize-section" data-section="categories" type="button" title="Finalize: move photos marked for delete to trash">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+            </button>
             <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
               <input id="q" type="search" placeholder="Search by file name or path" aria-label="Search photos"></div>
             <select id="catfilter" aria-label="Category"><option value="">All categories</option></select>
@@ -333,6 +336,9 @@
         <!-- SEARCH -->
         <section id="tab-search" class="panel">
           <form id="search-form" class="toolbar" role="search">
+            <button id="btn-finalize-search" data-busy class="btn primary btn-finalize-section" data-section="search" type="button" title="Finalize: move photos marked for delete to trash">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+            </button>
             <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
               <input id="searchq" type="search" maxlength="300" autocomplete="off"
                      placeholder="Describe a photo, like dog on the beach" aria-label="Describe the photo you are looking for"></div>
@@ -382,6 +388,9 @@
               <svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>
               <span>Save deletions (<span id="people-toolbar-save-count">0</span>)</span>
             </button>
+            <button id="btn-finalize-people" data-busy class="btn primary btn-finalize-section" data-section="people" type="button" title="Finalize: move photos marked for delete to trash">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+            </button>
             <button class="chip-btn" id="people-recluster-btn" type="button" title="Separate mixed-up people and recalculate clusters with strict facial identity matching">
               <svg class="ic" aria-hidden="true"><use href="#i-undo"/></svg>
               <span>Re-cluster faces</span>
@@ -398,6 +407,9 @@
         <!-- DUPLICATES -->
         <section id="tab-duplicates" class="panel">
           <div class="toolbar">
+            <button id="btn-finalize-duplicates" data-busy class="btn primary btn-finalize-section" data-section="duplicates" type="button" title="Finalize: move duplicates marked for delete to trash">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+            </button>
             <select id="dup-kind" aria-label="Type of duplicate">
               <option value="">All duplicates</option>
               <option value="exact">Identical files</option>
@@ -417,6 +429,9 @@
         <section id="tab-utility" class="panel">
           <p class="dup-intro">Receipts, notes, screenshots, labels, signs and packaging live here, apart from your photos and from Junk. Nothing in this tab is treated as clutter.</p>
           <div class="toolbar">
+            <button id="btn-finalize-utility" data-busy class="btn primary btn-finalize-section" data-section="utility" type="button" title="Finalize: move photos marked for delete to trash">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+            </button>
             <div class="kind-chips" role="group" aria-label="Kind of reference photo">
               <button type="button" class="chip-btn" data-ukind="" aria-pressed="true">All</button>
               <button type="button" class="chip-btn" data-ukind="screenshot" aria-pressed="false">Screenshots</button>
@@ -435,6 +450,9 @@
         <!-- JUNK -->
         <section id="tab-junk" class="panel">
           <div class="toolbar">
+            <button id="btn-finalize-junk" data-busy class="btn primary btn-finalize-section" data-section="junk" type="button" title="Finalize: move junk marked for delete to trash">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+            </button>
             <select id="junkfilter" aria-label="Junk type">
               <option value="">All junk</option>
               <option value="duplicate">Duplicates</option>
@@ -455,6 +473,9 @@
         <section id="tab-uncertain" class="panel">
           <div class="banner-host"></div>
           <div class="toolbar">
+            <button id="btn-finalize-uncertain" data-busy class="btn primary btn-finalize-section" data-section="uncertain" type="button" title="Finalize: move photos marked for delete to trash">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+            </button>
             <div class="search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
               <input id="q-uncertain" type="search" placeholder="Search by file name or path" aria-label="Search finalize photos"></div>
             <select id="filter-uncertain-status" aria-label="Filter status">
@@ -475,6 +496,9 @@
         <!-- HIGHLIGHTS -->
         <section id="tab-highlights" class="panel">
           <div class="toolbar">
+            <button id="btn-finalize-highlights" data-busy class="btn primary btn-finalize-section" data-section="highlights" type="button" title="Finalize: move photos marked for delete to trash">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+            </button>
             <select id="hl-view" aria-label="Show">
               <option value="all">All photos, best first</option>
               <option value="events">Best of each event</option>
@@ -518,6 +542,9 @@
         <!-- EVENTS -->
         <section id="tab-events" class="panel">
           <div class="toolbar">
+            <button id="btn-finalize-events" data-busy class="btn primary btn-finalize-section" data-section="events" type="button" title="Finalize: move photos marked for delete to trash">
+              <svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Finalize</span>
+            </button>
             <label class="inline-num">Gap between events <input id="ev-gap" type="number" step="0.5" value="2"> hours</label>
             <label class="inline-num">Distance <input id="ev-km" type="number" step="0.5" value="1"> km</label>
             <button id="btn-events" class="btn primary" data-busy>Find events</button>
@@ -727,6 +754,7 @@
     <button class="btn sm ghost lib-only" id="bulk-junk" title="Move the selected photos to Junk review"><svg class="ic sm" aria-hidden="true"><use href="#i-alert"/></svg>Mark junk</button>
     <button class="btn sm danger burst-only" id="bulk-rest" title="Mark every frame you did not select for delete. The best shot is kept."><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Delete the other <span id="bulk-rest-n">0</span></button>
     <button class="btn sm primary burst-only" data-busy id="bulk-finalize-burst" title="Finalize this burst and move marked frames to trash"><svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg>Finalize burst</button>
+    <button class="btn sm primary lib-only" data-busy id="bulk-finalize" title="Finalize: move marked or selected photos to trash"><svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg>Finalize</button>
     <button class="btn sm danger lib-only" id="bulk-delete" title="Leave the selected photos out of the result"><svg class="ic sm" aria-hidden="true"><use href="#i-trash"/></svg>Mark for delete</button>
     <button class="btn sm ghost lib-only" id="bulk-clean" title="Make copies without location or other hidden details">Clean export</button>
     <button class="btn sm primary trash-only" id="bulk-restore" data-busy title="Put the selected photos back in the library, sorted by category">Restore</button>

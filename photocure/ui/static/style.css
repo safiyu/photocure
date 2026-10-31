@@ -1837,6 +1837,7 @@ body.has-picks .tools, body.has-picks .hover-actions {
 #trash-toolbar { display: none; align-items: center; gap: 10px; margin: 0 0 14px; }
 body[data-stage="trash"] #trash-toolbar { display: flex; }
 body[data-stage="trash"] .card .btn-lock, body[data-stage="trash"] .card .btn-similar { display: none; }
+body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-finalize-all-bursts, body[data-stage="trash"] #bulk-finalize { display: none !important; }
 .toast-action {
   margin-left: 4px; padding: 2px 6px; border: 0; border-radius: 6px; background: none; color: var(--primary);
   font: inherit; font-weight: 700; cursor: pointer;

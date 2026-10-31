@@ -163,6 +163,15 @@ class RenameReq(BaseModel):
     name: str
 
 
+class FinalizeReq(BaseModel):
+    ids: list[int] | None = None
+    stage: StageFilter = "new"
+    section: str | None = None
+    category: str | None = None
+    person_id: int | None = None
+
+
+
 def infer_progress_detail(done: int, total: int) -> str:
     """Photos handled in the current phase; the pipeline counts two steps per photo."""
     photos = total // 2
@@ -1935,6 +1944,34 @@ def create_app(db_path: str | None = None) -> FastAPI:
             raise HTTPException(400, "Choose a library folder in Settings first.")
         except LookupError as e:
             raise HTTPException(404, str(e))
+
+    @app.post("/api/finalize", dependencies=auth)
+    def finalize_endpoint(body: FinalizeReq = FinalizeReq()):
+        from ..library import LibraryRootMissing
+        from ..trash_actions import finalize_deletes
+        try:
+            with exclusive(timeout=5.0):
+                progress_mgr.start("Finalize", "Finalizing marked photos", 0, "Moving to trash...")
+                try:
+                    res = finalize_deletes(
+                        dbp, app.state.cfg,
+                        ids=body.ids,
+                        stage=body.stage,
+                        section=body.section,
+                        category=body.category,
+                        person_id=body.person_id,
+                    )
+                    trashed = res.get("trashed", 0)
+                    msg = f"Moved {trashed} photo{'s' if trashed != 1 else ''} to trash" if trashed else "No photos were marked for delete"
+                    progress_mgr.finish(msg)
+                    return res
+                except Exception as ex:
+                    progress_mgr.error(str(ex))
+                    raise
+        except LibraryRootMissing:
+            raise HTTPException(400, "Choose a library folder in Settings first.")
+        except Exception as e:
+            raise HTTPException(409, f"could not finalize: {getattr(e, 'detail', str(e))}") from None
 
     @app.get("/api/overview")
     def overview(stage: StageFilter = Query("all")):

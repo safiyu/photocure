@@ -5058,6 +5058,65 @@
     });
   }
 
+  async function finalizeSection(section, opts = {}) {
+    if (state.busy || state.taskRunning) {
+      toast("Another task is currently running. Please wait for it to complete.", "warn");
+      return;
+    }
+    const sc = state.stage || "new";
+    const sec = section || state.tab || "categories";
+    const cat = (sec === "categories" && $("#catfilter")) ? $("#catfilter").value : (opts.category || "");
+    const personId = opts.personId || state.currentPersonId || null;
+    const ids = (opts.ids && opts.ids.length) ? opts.ids.map(num) : null;
+
+    let title = "Finalize marked photos";
+    let message = "Move all photos marked for delete in this section to trash?";
+    if (ids && ids.length) {
+      message = `Move marked/selected photo(s) (${fmtN(ids.length)}) to trash?`;
+    } else if (cat) {
+      message = `Move all photos marked for delete in category "${cat}" to trash?`;
+    }
+
+    const ok = await showConfirmDialog({
+      title: title,
+      message: message,
+      confirmText: "Finalize to trash",
+      variant: "primary",
+    });
+    if (!ok) return;
+
+    await runTask("Finalizing to trash", async () => {
+      setTimeout(pollProgress, 100);
+      const res = await post("/api/finalize", {
+        stage: sc,
+        section: sec,
+        category: cat || null,
+        person_id: personId,
+        ids: ids,
+      });
+      if (res && res.ok) {
+        const count = res.trashed || 0;
+        const msg = count
+          ? `${fmtN(count)} photo${count === 1 ? "" : "s"} moved to trash.`
+          : "No photos were marked for delete in this section.";
+        toast(msg, count ? "ok" : "info");
+        if (ids && ids.length) clearPicks();
+        await Promise.all([loadStats(), refreshBackend(), loadTransactions()]);
+        if (state.tab === "categories") await renderGrid();
+        else if (state.tab === "people") await renderPeople();
+        else if (state.tab === "duplicates") await renderDuplicates();
+        else if (state.tab === "utility") await renderUtility();
+        else if (state.tab === "junk") await renderJunk();
+        else if (state.tab === "uncertain") await renderUncertain();
+        else if (state.tab === "bursts") await renderBursts();
+        else if (state.tab === "highlights") await renderHighlights();
+        else if (state.tab === "events") await renderEvents();
+        else if (state.tab === "search") await renderSearch();
+      }
+      return res;
+    });
+  }
+
   // ------------------------------------------------------------------ events
   function clusterRow(c, on) {
     const title = c.label || "Event " + num(c.id);
@@ -6491,6 +6550,19 @@
     const bfa = $("#btn-finalize-all-bursts");
     if (bfa) {
       bfa.onclick = () => finalizeAllBursts();
+    }
+    $$(".btn-finalize-section").forEach((btn) => {
+      btn.onclick = () => finalizeSection(btn.dataset.section);
+    });
+    const bulkFin = $("#bulk-finalize");
+    if (bulkFin) {
+      bulkFin.onclick = () => {
+        if (!state.picks.size) {
+          toast("No photos selected", "warn");
+          return;
+        }
+        finalizeSection(state.tab, { ids: Array.from(state.picks) });
+      };
     }
     $("#bulk-clean").onclick = openCleanExport;
     $("#ce-scan").onclick = ceScan;

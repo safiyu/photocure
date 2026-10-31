@@ -5,7 +5,7 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from sqlmodel import select
+from sqlmodel import col, func, select
 
 from .config import CuratorConfig
 from .db import models as M
@@ -218,3 +218,127 @@ def empty_trash(dbp: Path, cfg: CuratorConfig, *, cancel_check: Callable | None 
             except OSError:
                 pass
     return out
+
+
+def finalize_deletes(dbp: Path, cfg: CuratorConfig, *,
+                     ids: list[int] | None = None,
+                     stage: str | None = None,
+                     section: str | None = None,
+                     category: str | None = None,
+                     person_id: int | None = None,
+                     root: Path | None = None) -> dict:
+    """Move photos marked for delete (or specific selected ids) to the trash.
+
+    Creates an ActionLedger transaction so the move is completely reversible via Undo.
+    """
+    from .people_actions import detach_faces
+    from .rules.decision_matrix import DecisionMatrix
+    from .rules.organizer import FolderOrganizer
+
+    root = Path(root).resolve() if root else require_library_root(dbp, cfg)
+    with get_session(dbp) as s:
+        q = select(M.ImageRecord).where(
+            M.ImageRecord.scan_status != "missing",
+            M.ImageRecord.stage != STAGE_TRASH,
+            col(M.ImageRecord.route_status).not_in(["purged", "trashed"]),
+        )
+        if ids is not None and len(ids) > 0:
+            has_marked = any(s.exec(select(M.ImageRecord.id).where(
+                col(M.ImageRecord.id).in_(list(ids)),
+                M.ImageRecord.delete_approved == True,  # noqa: E712
+            )).all())
+            if has_marked:
+                q = q.where(col(M.ImageRecord.id).in_(list(ids)), M.ImageRecord.delete_approved == True)  # noqa: E712
+            else:
+                q = q.where(col(M.ImageRecord.id).in_(list(ids)))
+        else:
+            q = q.where(M.ImageRecord.delete_approved == True)  # noqa: E712
+            if stage and stage != "all":
+                q = q.where(M.ImageRecord.stage == stage)
+            if category:
+                q = q.where(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category) == category)
+            elif section == "utility":
+                q = q.where(col(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category)).in_(
+                    ["screenshot", "document", "slide", "utility"]))
+            elif section == "junk":
+                q = q.where(col(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category)).in_(
+                    ["duplicate", "near_duplicate", "graphic", "accidental", "unreadable", "junk_blinks"]))
+            elif section == "uncertain":
+                q = q.where(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category) == "uncertain")
+            elif section == "duplicates":
+                q = q.where(
+                    (M.ImageRecord.is_duplicate == True)  # noqa: E712
+                    | (M.ImageRecord.near_dup_of.is_not(None))
+                    | col(func.coalesce(M.ImageRecord.manual_bucket, M.ImageRecord.category)).in_(
+                        ["duplicate", "near_duplicate"]))
+            if person_id is not None:
+                person_img_ids = select(M.FaceDetection.image_id).where(M.FaceDetection.person_id == person_id)
+                q = q.where(col(M.ImageRecord.id).in_(person_img_ids))
+
+        records = list(s.exec(q).all())
+        if not records:
+            return {"ok": True, "trashed": 0, "transaction_id": ""}
+
+        matrix = DecisionMatrix(cfg)
+        organizer = FolderOrganizer(cfg, organize_root=root)
+        actions: list[PlannedAction] = []
+        missing_sources = []
+        for r in records:
+            src = Path(r.path)
+            if not src.exists() and r.target_path and Path(r.target_path).exists():
+                src = Path(r.target_path)
+            if not src.exists():
+                missing_sources.append(r)
+                continue
+            dec = matrix.evaluate_record(r)
+            cat = _category_enum(cfg, r.manual_bucket) if r.manual_bucket else dec.category
+            target = organizer.full_target(r, dec)
+            actions.append(PlannedAction(
+                image_id=r.id,
+                source=src,
+                target=target,
+                operation="move",
+                category=cat,
+                reason="finalized (marked for delete)",
+            ))
+
+    txn = ""
+    trashed_count = 0
+    if actions:
+        engine = ActionEngine(cfg, db_path=dbp)
+        rep = engine.execute(actions, organize_root=root, trash=True)
+        if rep.failures:
+            raise OSError(f"failed to move photos to trash: {rep.errors[0]}")
+        txn = rep.transaction_id
+        for a in actions:
+            dest = Path(rep.resolved_targets.get(a.image_id, a.target))
+            _move_sidecar(a.source, dest)
+
+    with get_session(dbp) as s:
+        for r_miss in missing_sources:
+            rec = s.get(M.ImageRecord, r_miss.id)
+            if rec:
+                rec.stage = STAGE_TRASH
+                rec.route_status = "trashed"
+                rec.scan_status = "missing"
+                rec.delete_approved = False
+                detach_faces(s, rec.id)
+                trashed_count += 1
+        for a in actions:
+            rec = s.get(M.ImageRecord, a.image_id)
+            if rec:
+                rec.stage = STAGE_TRASH
+                rec.route_status = "trashed"
+                rec.delete_approved = False
+                detach_faces(s, a.image_id)
+                trashed_count += 1
+        if txn:
+            for e in s.exec(select(M.ActionLedger).where(M.ActionLedger.transaction_id == txn)).all():
+                rec = s.get(M.ImageRecord, e.image_id)
+                if rec and rec.stage == STAGE_TRASH:
+                    e.prev_delete_approved = False
+        PhotoRepository(s).prune_bursts()
+        s.commit()
+
+    return {"ok": True, "trashed": trashed_count, "transaction_id": txn}
+

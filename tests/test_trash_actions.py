@@ -187,3 +187,32 @@ def test_trash_endpoints_run_as_jobs(trashed):
     library_actions.trash_image(env.db, _cfg(env), ids[1])
     r = env.client.post("/api/trash/empty", json={})
     assert wait_job(env.client, r.json()["job_id"])["result"]["deleted"] == 1
+
+
+def test_finalize_deletes_moves_marked_to_trash(env):
+    ids = _ids(env)
+    # Mark two photos for delete in stage 'new'
+    _mark_delete(env, ids[0])
+    _mark_delete(env, ids[1])
+    assert _row(env, ids[0])["stage"] == "new"
+    assert _row(env, ids[1])["stage"] == "new"
+
+    out = trash_actions.finalize_deletes(env.db, _cfg(env), stage="new")
+    assert out["ok"] is True
+    assert out["trashed"] == 2
+    assert out["transaction_id"] != ""
+    assert _row(env, ids[0])["stage"] == "trash"
+    assert _row(env, ids[1])["stage"] == "trash"
+    assert _row(env, ids[2])["stage"] == "new"
+
+
+def test_api_finalize_endpoint(env):
+    ids = _ids(env)
+    _mark_delete(env, ids[2])
+    res = env.client.post("/api/finalize", json={"stage": "new", "section": "categories"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert data["trashed"] == 1
+    assert _row(env, ids[2])["stage"] == "trash"
+
