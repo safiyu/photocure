@@ -1411,6 +1411,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
         with get_session(dbp) as s:
             return {"ok": True, "item": _load_items(s, [image_id], app.state.cfg)[0]}
 
+    @app.get("/api/images/{image_id}")
+    def get_image(image_id: int):
+        with get_session(dbp) as s:
+            items = _load_items(s, [image_id], app.state.cfg)
+            if not items:
+                raise HTTPException(404, "image not found")
+            return {"ok": True, "item": items[0]}
+
     @app.post("/api/images/{image_id}/rating", dependencies=auth)
     def rate_image(image_id: int, body: RatingReq):
         return _set_rating(image_id, body.rating or None, body.overwrite)
@@ -1564,6 +1572,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             return {
                 "image_id": image_id, "filename": rec.filename, "width": rec.width,
                 "height": rec.height, "orientation": rec.orientation,
+                "burst_id": rec.burst_id,
+                "delete_approved": bool(rec.delete_approved),
                 "taken_at": rec.taken_at.isoformat() if rec.taken_at else None,
                 "items": [{
                     "id": f.id, "confidence": round(f.confidence, 3),
@@ -1673,11 +1683,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
             recs = sorted(all_recs,
                           key=lambda r: (r.taken_at is not None, r.taken_at),
                           reverse=True)
+            items_by_id = {item["id"]: item for item in _load_items(s, [r.id for r in recs], app.state.cfg)}
             photos = []
             for r in recs:
                 face = best.get(r.id)
                 fp = _fingerprint(r)
+                it = items_by_id.get(r.id, {})
                 photos.append({
+                    **it,
                     "id": r.id,
                     "filename": r.filename,
                     "taken_at": r.taken_at.isoformat() if r.taken_at else None,

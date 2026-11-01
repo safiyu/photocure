@@ -741,10 +741,47 @@
   function resetVisibleGrids() {
     allGrids().forEach((g) => { if (g.el.offsetParent !== null) g.reset(); else g.stale = true; });
   }
+  const _pendingImageFetches = new Map();
+  async function fetchImageDetails(id) {
+    if (!id) return null;
+    if (_pendingImageFetches.has(id)) return _pendingImageFetches.get(id);
+    const p = (async () => {
+      try {
+        const r = await api(`/api/images/${id}`);
+        if (r && r.item) {
+          state.byId[id] = r.item;
+          return r.item;
+        }
+      } catch (e) {
+        console.warn(`Failed to fetch image details for #${id}:`, e);
+      } finally {
+        _pendingImageFetches.delete(id);
+      }
+      return null;
+    })();
+    _pendingImageFetches.set(id, p);
+    return p;
+  }
+
   function itemUpdated(it) {
     state.byId[it.id] = it;
     const wasCurrent = lb.open && lbIdAt(lb.i) === it.id;
     allGrids().forEach((g) => g.rerender(it));
+    const ppoThumb = $(`#person-photos-overlay .ppo-thumb[data-image-id="${it.id}"]`);
+    if (ppoThumb) {
+      ppoThumb.classList.toggle("is-del", !!it.delete_approved);
+      let badge = ppoThumb.querySelector(".ppo-badge-del");
+      if (it.delete_approved) {
+        if (!badge) {
+          badge = document.createElement("span");
+          badge.className = "ppo-badge-del";
+          badge.textContent = "Marked for delete";
+          ppoThumb.appendChild(badge);
+        }
+      } else if (badge) {
+        badge.remove();
+      }
+    }
     if (!lb.open) return;
     if (lbIdAt(lb.i) === it.id) { lbRender(); return; }
     if (!wasCurrent) return;
@@ -2456,7 +2493,17 @@
 
   function lbRender() {
     const id = lbIdAt(lb.i);
-    const it = state.byId[id] || { id, filename: "Photo #" + id, _basic: true };
+    let it = state.byId[id];
+    if (!it || it._basic || it.category === undefined) {
+      if (!it) it = { id, filename: "Photo #" + id, _basic: true };
+      if (id != null) {
+        fetchImageDetails(id).then((fullItem) => {
+          if (fullItem && lb.open && lbIdAt(lb.i) === id) {
+            lbRender();
+          }
+        });
+      }
+    }
     const img = $("#lb-img");
     const my = ++lb.token;
     img.alt = it.filename || "";
@@ -2497,11 +2544,27 @@
     $("#lb-lock").disabled = !full;
     $("#lb-clear").disabled = !full || !it.manual_bucket;
     $("#lb-lock span").textContent = it.locked ? "Unlock" : "Lock";
+    const facesBtn = $("#lb-faces");
+    if (facesBtn) {
+      const faceCount = num(it.face_count);
+      if (faceCount > 0) {
+        facesBtn.hidden = false;
+        const facesSpan = facesBtn.querySelector("span");
+        if (facesSpan) facesSpan.textContent = `Faces (${faceCount})`;
+      } else {
+        facesBtn.hidden = true;
+      }
+    }
     const ap = $("#lb-approve");
-    ap.disabled = !full;
+    ap.disabled = id == null;
     ap.setAttribute("aria-pressed", String(!!it.delete_approved));
-    ap.textContent = state.stage === "trash" ? "Delete permanently"
+    ap.classList.toggle("danger", !!it.delete_approved);
+    ap.classList.toggle("secondary", !it.delete_approved);
+    const apSpan = ap.querySelector("span");
+    const apText = state.stage === "trash" ? "Delete permanently"
       : it.delete_approved ? "Marked for delete (undo)" : "Mark for delete";
+    if (apSpan) apSpan.textContent = apText;
+    else ap.textContent = apText;
     $("#lb-prev").disabled = lb.i === 0;
     $("#lb-next").disabled = lb.i >= lbCount() - 1;
     $("#lb-count").textContent = `${fmtN(lb.i + 1)} of ${fmtN(lbCount())}`;
@@ -2581,6 +2644,12 @@
       } catch (err) { toast(err.message, "err"); }
     };
     $("#lb-lock").onclick = () => toggleLock(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
+    $("#lb-faces").onclick = () => {
+      const id = lbIdAt(lb.i);
+      if (id == null) return;
+      const it = state.byId[id];
+      openBiometricProjection(it ? it.burst_id : null, id);
+    };
     $("#lb-approve").onclick = () => (state.stage === "trash" ? purgePhotos([lbIdAt(lb.i)]) : toggleApproveDelete(lbIdAt(lb.i))).catch((e) => toast(e.message, "err"));
     $$("#lb-rate .star").forEach((b) => {
       b.onclick = () => {
@@ -2797,6 +2866,7 @@
     if (k === "x") { await toggleReject(id); return true; }
     if (k === "f") { await toggleFavorite(id); return true; }
     if (k === "l") { await toggleLock(id); return true; }
+    if (k === "d" || k === "delete") { await toggleApproveDelete(id); return true; }
     return false;
   }
 
@@ -3899,6 +3969,9 @@
       const sc = state.stage || "new";
       const data = await api(`/api/people/${personId}/photos?stage=${encodeURIComponent(sc)}`);
       const { person, photos } = data;
+      for (const p of photos) {
+        state.byId[p.id] = { ...(state.byId[p.id] || {}), ...p, _basic: false };
+      }
 
       // Header
       const displayName = person.name || "Unnamed";
@@ -3925,11 +3998,12 @@
 
       // Photo grid — display photos
       ppoGrid().innerHTML = photos.map((p, i) => `
-        <div class="ppo-thumb" data-image-id="${num(p.id)}"
+        <div class="ppo-thumb${p.delete_approved ? ' is-del' : ''}" data-image-id="${num(p.id)}"
              style="--i:${i}" tabindex="0" role="button"
              aria-label="Open ${esc(p.filename)}">
           <img class="ppo-thumb-img" src="${p.thumb_url}" alt="${esc(p.filename)}" loading="lazy">
           ${p.face_url ? `<img class="ppo-thumb-face" src="${p.face_url}" alt="Detected face" loading="lazy">` : ""}
+          ${p.delete_approved ? '<span class="ppo-badge-del">Marked for delete</span>' : ''}
           <div class="ppo-thumb-info">
             <span class="ppo-thumb-filename">${esc(p.filename)}</span>
             ${p.taken_at ? `<span class="ppo-thumb-date">${new Date(p.taken_at).toLocaleDateString()}</span>` : ""}
@@ -4229,7 +4303,8 @@
       activeOverlayStandaloneMember = activeOverlayMembers.length ? null : {
         id: imageId, filename: faceData.filename, width: faceData.width, height: faceData.height,
         orientation: faceData.orientation, taken_at: faceData.taken_at,
-        is_best_shot: false, delete_approved: false,
+        is_best_shot: false,
+        delete_approved: !!((state.byId[imageId] && state.byId[imageId].delete_approved) || (faceData && faceData.delete_approved)),
       };
       const curMember = activeOverlayMembers.find((m) => m.id === imageId)
         || activeOverlayMembers[0] || activeOverlayStandaloneMember;
@@ -4670,17 +4745,17 @@
           <div class="bio-actions-bar">
             <span style="font-size:12px; color:var(--blue-200, #bfdbfe); opacity:0.85; font-weight:500;">Same subject per column</span>
           </div>
-          ` : activeOverlayBurstId ? `
-          <!-- Frame Actions (burst only: a standalone photo has no best-shot/delete concept here) -->
+          ` : (activeOverlayBurstId || curMember) ? `
+          <!-- Frame Actions: burst or standalone -->
           <div class="bio-actions-bar">
-            ${curMember.is_best_shot
+            ${activeOverlayBurstId ? (curMember.is_best_shot
               ? `<button type="button" class="bio-action-btn best-active" disabled title="This is the best shot">★ Best shot</button>`
-              : `<button type="button" class="bio-action-btn best" onclick="makeOverlayBestShot(${curMember.id})" title="Set this frame as best shot">★ Set best</button>`}
+              : `<button type="button" class="bio-action-btn best" onclick="makeOverlayBestShot(${curMember.id})" title="Set this frame as best shot">★ Set best</button>`) : ''}
             <button
               type="button"
               class="bio-action-btn delete${curMember.delete_approved ? ' on' : ''}"
               onclick="toggleOverlayMarkDelete(${curMember.id}, ${curMember.is_best_shot ? 'true' : 'false'}, ${curMember.delete_approved ? 'true' : 'false'})"
-              title="${curMember.is_best_shot ? 'Marking best shot for delete' : 'Mark this frame for delete'}"
+              title="${curMember.is_best_shot ? 'Marking best shot for delete' : 'Mark for delete'}"
             >
               ${curMember.delete_approved ? 'Marked (undo)' : 'Mark delete'}
             </button>
@@ -4890,17 +4965,24 @@
   }
 
   async function toggleOverlayMarkDelete(imageId, isBest, currentlyApproved) {
-    if (!activeOverlayBurstId) return;
-    const approve = !currentlyApproved;
-    if (approve && isBest) {
-      const ok = await showConfirmDialog({
-        title: "Mark the best shot for delete?",
-        message: "This is the current best shot of the burst. If you still want to delete it, consider promoting another frame to best first.",
-        confirmText: "Mark delete", variant: "warning" });
-      if (!ok) return;
+    if (activeOverlayBurstId) {
+      const approve = !currentlyApproved;
+      if (approve && isBest) {
+        const ok = await showConfirmDialog({
+          title: "Mark the best shot for delete?",
+          message: "This is the current best shot of the burst. If you still want to delete it, consider promoting another frame to best first.",
+          confirmText: "Mark delete", variant: "warning" });
+        if (!ok) return;
+      }
+      await markBurstDeletes(activeOverlayBurstId, [imageId], approve);
+      await openBiometricProjection(activeOverlayBurstId, imageId);
+    } else {
+      await toggleApproveDelete(imageId);
+      if (activeOverlayStandaloneMember) {
+        activeOverlayStandaloneMember.delete_approved = !!(state.byId[imageId] && state.byId[imageId].delete_approved);
+      }
+      await openBiometricProjection(null, imageId);
     }
-    await markBurstDeletes(activeOverlayBurstId, [imageId], approve);
-    await openBiometricProjection(activeOverlayBurstId, imageId);
   }
 
   async function reassignFace(faceId, opts) {
@@ -5120,8 +5202,22 @@
   async function markBurstDeletes(burstId, ids, approved) {
     try {
       await post("/api/deletes/approve", { ids, approved });
+      for (const id of ids) {
+        if (state.byId[id]) state.byId[id].delete_approved = approved;
+        for (const g of state.grids) {
+          if (g.vg && g.vg.hasId(id)) g.vg.patchItem(id, { delete_approved: approved });
+        }
+      }
+      if (lb.open) lbRender();
       const undo = approved ? { label: "Undo", fn: async () => {
         await post("/api/deletes/approve", { ids, approved: false });
+        for (const id of ids) {
+          if (state.byId[id]) state.byId[id].delete_approved = false;
+          for (const g of state.grids) {
+            if (g.vg && g.vg.hasId(id)) g.vg.patchItem(id, { delete_approved: false });
+          }
+        }
+        if (lb.open) lbRender();
         await showBurst(burstId);
       } } : undefined;
       toast(approved
