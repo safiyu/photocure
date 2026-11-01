@@ -55,6 +55,20 @@ def get_oriented_image_stream(db_path: Path | str, image_id: int) -> tuple[bytes
         orientation = rec.orientation or 1
         ext = (rec.extension or Path(source_path).suffix).lower()
 
+    if ext == ".png":
+        try:
+            with Image.open(source_path) as im:
+                if im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info):
+                    rgba = im.convert("RGBA")
+                    if orientation and orientation != 1:
+                        from .quality.image_loader import apply_exif_orientation
+                        rgba = apply_exif_orientation(rgba, orientation)
+                    buf = io.BytesIO()
+                    rgba.save(buf, format="PNG")
+                    return buf.getvalue(), "image/png"
+        except Exception:
+            pass
+
     loaded = load_image(source_path, max_side=None, orientation=orientation)
     bgr = loaded.bgr
 
@@ -114,15 +128,40 @@ def save_edited_image(db_path: Path | str, cfg: CuratorConfig, image_id: int, im
             raise ActionError(f"original file is missing on disk: {rec.path}", 404)
         orig_path = Path(orig_str)
 
-        # Output extension determination
+        # Output extension determination & validation
         if format:
-            out_ext = f".{format.lower().lstrip('.')}"
-            if out_ext == ".jpeg":
-                out_ext = ".jpg"
+            fmt_clean = f".{format.lower().lstrip('.')}"
+            if fmt_clean == ".jpeg":
+                fmt_clean = ".jpg"
+            if fmt_clean not in (".jpg", ".png", ".webp"):
+                raise ActionError(f"Unsupported storage format '{format}'. Supported formats: jpg, png, webp", 400)
+            out_ext = fmt_clean
         else:
             out_ext = orig_path.suffix.lower()
+            if out_ext == ".jpeg":
+                out_ext = ".jpg"
             if out_ext in RAW_EXTS or out_ext in HEIF_EXTS:
                 out_ext = ".jpg"
+
+        orig_ext = (rec.extension or orig_path.suffix).lower()
+        if mode == "overwrite":
+            if orig_ext in RAW_EXTS or orig_ext in HEIF_EXTS or orig_path.suffix.lower() in RAW_EXTS or orig_path.suffix.lower() in HEIF_EXTS:
+                raise ActionError("Cannot overwrite RAW or HEIF photos directly. Please use 'Save as copy'.", 400)
+            target_ext = orig_ext if orig_ext != ".jpeg" else ".jpg"
+            if out_ext != target_ext:
+                try:
+                    with Image.open(io.BytesIO(image_bytes)) as pil_img:
+                        buf = io.BytesIO()
+                        if target_ext in (".jpg", ".jpeg"):
+                            pil_img.convert("RGB").save(buf, format="JPEG", quality=95)
+                        elif target_ext == ".webp":
+                            pil_img.save(buf, format="WEBP", quality=95)
+                        elif target_ext == ".png":
+                            pil_img.save(buf, format="PNG")
+                        image_bytes = buf.getvalue()
+                        w, h = pil_img.size
+                except Exception as e:
+                    log.warning("Could not convert image to match original container %s: %s", target_ext, e)
 
         if mode == "copy":
             stem = orig_path.stem

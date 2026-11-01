@@ -103,10 +103,14 @@
         if (!res.ok) throw new Error("HTTP " + res.status);
         const blob = await res.blob();
         const bmp = await createImageBitmap(blob).catch(async () => {
-          const img = await loadImage(URL.createObjectURL(blob));
-          return img;
+          const u = URL.createObjectURL(blob);
+          try {
+            return await loadImage(u);
+          } finally {
+            URL.revokeObjectURL(u);
+          }
         });
-        return { m, src: bmp, bmp: !("close" in bmp) };
+        return { m, src: bmp, bmp: typeof bmp.close === "function" };
       } catch (e) { return { m, src: null, bmp: false, error: e }; }
     }));
     const bad = loaded.filter((l) => !l.src);
@@ -176,12 +180,12 @@
       return Math.min(MAX_PX, Math.max(640, mx));
     }
 
-    function drawCell(i, r) {
+    function drawCell(selIdx, r) {
       if (!r) return;
-      const item = loaded[i];
+      const item = loaded[selIdx];
       if (!item || !item.src) return;
       const img = item.src;
-      const t = state.transforms[i] || IDENTITY;
+      const t = state.transforms[selIdx] || IDENTITY;
       const rectRatio = r.w / r.h;
       const imgRatio = img.width / img.height;
       let drawW, drawH, drawX, drawY;
@@ -226,7 +230,7 @@
         return;
       }
       const rects = (LAYOUTS[state.layout] || LAYOUTS["2-split-v"])(size, size);
-      state.selected.forEach((selIdx, i) => drawCell(i, rects[i]));
+      state.selected.forEach((selIdx, i) => drawCell(selIdx, rects[i]));
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = Math.max(2, Math.round(size / 300));
       for (const r of rects.slice(0, n)) ctx.strokeRect(r.x, r.y, r.w, r.h);
@@ -330,13 +334,15 @@
       if (i < 0) return;
       ev.preventDefault();
       canvas.setPointerCapture(ev.pointerId);
-      drag = { i, x: ev.clientX, y: ev.clientY, t: { ...state.transforms[i] } };
+      const selIdx = state.selected[i];
+      drag = { i, selIdx, x: ev.clientX, y: ev.clientY, t: { ...(state.transforms[selIdx] || IDENTITY) } };
     });
     canvas.addEventListener("pointermove", (ev) => {
       if (!drag) return;
       const rect = canvas.getBoundingClientRect();
       const size = targetSize();
-      const t = state.transforms[drag.i];
+      const t = state.transforms[drag.selIdx];
+      if (!t) return;
       t.panX = clampPan(drag.t.panX - (ev.clientX - drag.x) * (size / rect.width) / size, t.zoom);
       t.panY = clampPan(drag.t.panY - (ev.clientY - drag.y) * (size / rect.height) / size, t.zoom);
       render();
@@ -348,7 +354,9 @@
       const i = cellAt(ev);
       if (i < 0) return;
       ev.preventDefault();
-      const t = state.transforms[i];
+      const selIdx = state.selected[i];
+      const t = state.transforms[selIdx];
+      if (!t) return;
       t.zoom = clampZoom(t.zoom * (ev.deltaY < 0 ? 1.12 : 1 / 1.12));
       render();
     }, { passive: false });

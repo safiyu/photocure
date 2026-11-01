@@ -182,17 +182,19 @@
     const n = w * h;
     const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
     const step = Math.max(1, Math.floor(n / 400000));
+    let samples = 0;
     for (let i = 0; i < n; i += step) {
       const p = i * 4;
       hist[0][d[p]]++; hist[1][d[p + 1]]++; hist[2][d[p + 2]]++;
+      samples++;
     }
     const pctl = (hst, t) => {
       let acc = 0;
       for (let v = 0; v < 256; v++) { acc += hst[v]; if (acc >= t) return v; }
       return 255;
     };
-    const lo = [pctl(hist[0], n * 0.01), pctl(hist[1], n * 0.01), pctl(hist[2], n * 0.01)];
-    const hi = [pctl(hist[0], n * 0.99), pctl(hist[1], n * 0.99), pctl(hist[2], n * 0.99)];
+    const lo = [pctl(hist[0], samples * 0.01), pctl(hist[1], samples * 0.01), pctl(hist[2], samples * 0.01)];
+    const hi = [pctl(hist[0], samples * 0.99), pctl(hist[1], samples * 0.99), pctl(hist[2], samples * 0.99)];
     // Math.max(1, …) keeps flat / solid-color images from dividing by zero.
     const scale = [0, 1, 2].map((c) => 255 / Math.max(1, hi[c] - lo[c]));
     for (let i = 0; i < d.length; i += 4) {
@@ -659,12 +661,21 @@
       const sk = S.sticker;
       if (!sk || S.tool !== "stickers") return null;
       const m = stickerMetrics(sk);
+      let lx = p.x - m.cx;
+      let ly = p.y - m.cy;
+      if (sk.rot) {
+        const rad = -sk.rot * Math.PI / 180;
+        const cos = Math.cos(rad), sin = Math.sin(rad);
+        const rx = lx * cos - ly * sin;
+        const ry = lx * sin + ly * cos;
+        lx = rx; ly = ry;
+      }
       const rad = Math.max(14, workC.width / 40);
-      const d1 = Math.hypot(p.x - (m.cx + m.w / 2), p.y - (m.cy - m.h / 2));
+      const d1 = Math.hypot(lx - m.w / 2, ly - (-m.h / 2));
       if (d1 < rad) return "resize";
-      const d2 = Math.hypot(p.x - m.cx, p.y - (m.cy - m.h / 2 - m.w / 5));
+      const d2 = Math.hypot(lx, ly - (-m.h / 2 - m.w / 5));
       if (d2 < rad) return "rotate";
-      if (p.x > m.cx - m.w / 2 && p.x < m.cx + m.w / 2 && p.y > m.cy - m.h / 2 && p.y < m.cy + m.h / 2) return "move";
+      if (lx > -m.w / 2 && lx < m.w / 2 && ly > -m.h / 2 && ly < m.h / 2) return "move";
       return null;
     }
     function cropHandle(p) {
@@ -735,8 +746,17 @@
         renderOverlay();
       } else if (S.tool === "stickers" && S.sticker) {
         const h = hitStickerHandle(p);
-        if (h) S._drag = { kind: h };
-        else S.sticker = null, renderOverlay();
+        const m = stickerMetrics(S.sticker);
+        if (h === "resize") {
+          S._drag = { kind: "resize", initialDist: Math.hypot(p.x - m.cx, p.y - m.cy), initialW: S.sticker.w };
+        } else if (h === "rotate") {
+          S._drag = { kind: "rotate", initialAngle: Math.atan2(p.y - m.cy, p.x - m.cx), initialRot: S.sticker.rot || 0 };
+        } else if (h === "move") {
+          S._drag = { kind: "move", ox: p.x - m.cx, oy: p.y - m.cy };
+        } else {
+          S.sticker = null;
+          renderOverlay();
+        }
       }
     }
     function onPointerMove(ev) {
@@ -762,18 +782,18 @@
           resizeCrop(p, d.h);
           applyAspect();
         } else if (d.kind === "move" && S.sticker) {
-          const m = stickerMetrics(S.sticker);
-          const dx = (p.x - m.cx) / workC.width, dy = (p.y - m.cy) / workC.height;
-          S.sticker.x = clamp(S.sticker.x + dx, 0.02, 0.98);
-          S.sticker.y = clamp(S.sticker.y + dy, 0.02, 0.98);
+          S.sticker.x = clamp((p.x - d.ox) / workC.width, 0.02, 0.98);
+          S.sticker.y = clamp((p.y - d.oy) / workC.height, 0.02, 0.98);
           bakeSticker(); syncDisp(); renderOverlay();
         } else if (d.kind === "resize" && S.sticker) {
           const m = stickerMetrics(S.sticker);
-          S.sticker.w = clamp(Math.hypot(p.x - m.cx, p.y - m.cy) / workC.width, 0.02, 1.3);
+          const curDist = Math.hypot(p.x - m.cx, p.y - m.cy);
+          S.sticker.w = clamp(d.initialW * (curDist / Math.max(1, d.initialDist)), 0.02, 1.3);
           bakeSticker(); syncDisp(); renderOverlay();
         } else if (d.kind === "rotate" && S.sticker) {
           const m = stickerMetrics(S.sticker);
-          S.sticker.rot = Math.atan2(p.y - m.cy, p.x - m.cx) * 180 / Math.PI + 90;
+          const curAngle = Math.atan2(p.y - m.cy, p.x - m.cx);
+          S.sticker.rot = (d.initialRot + (curAngle - d.initialAngle) * 180 / Math.PI) % 360;
           bakeSticker(); syncDisp(); renderOverlay();
         }
         return;
@@ -909,14 +929,13 @@
         r90.append(
           pBtn("⟲ 90°", "", () => rotate90(-90), "Rotate counter-clockwise"),
           pBtn("90° ⟳", "", () => rotate90(90), "Rotate clockwise"),
-          pBtn("Flip ↔", "", () => { S.pendingFlip = S.pendingFlip === "h" ? null : "h"; applyPreview(); }, "Flip horizontal"),
-          pBtn("Flip ↕", "", () => { S.pendingFlip = S.pendingFlip === "v" ? null : "v"; applyPreview(); }, "Flip vertical"),
+          pBtn("Flip ↔", "", () => { bakeFlip("h"); toast("Flipped horizontally", "ok"); }, "Flip horizontal"),
+          pBtn("Flip ↕", "", () => { bakeFlip("v"); toast("Flipped vertically", "ok"); }, "Flip vertical"),
         );
         add(r90);
         add(pSlider("Fine rotate", -45, 45, 0,
           (v) => { S.pendingRotate = v; applyPreview(); },
           (v) => {
-            if (S.pendingFlip) { bakeFlip(S.pendingFlip); S.pendingFlip = null; }
             if (v) rotateBy(v);
             else applyPreview();
             S.pendingRotate = 0;
@@ -925,11 +944,32 @@
       }
 
       else if (T === "adjust") {
-        add(pSlider("Brightness", 50, 150, 100, (v) => { S.brightness = v; applyPreview(); }, () => { bakeFilter(); commit(); }, (v) => v + "%"));
-        add(pSlider("Contrast", 50, 150, 100, (v) => { S.contrast = v; applyPreview(); }, () => { bakeFilter(); commit(); }, (v) => v + "%"));
-        add(pSlider("Saturation", 0, 200, 100, (v) => { S.saturation = v; applyPreview(); }, () => { bakeFilter(); commit(); }, (v) => v + "%"));
-        add(pEl("div", "pcur-btns", "").appendChild(pBtn("Reset", "ghost", () => { S.brightness = S.contrast = S.saturation = 100; applyPreview(); })));
-        add(pEl("p", "pcur-hint", "Changes preview live and bake when you release a slider."));
+        const sB = pSlider("Brightness", 50, 150, S.brightness, (v) => { S.brightness = v; applyPreview(); }, null, (v) => v + "%");
+        const sC = pSlider("Contrast", 50, 150, S.contrast, (v) => { S.contrast = v; applyPreview(); }, null, (v) => v + "%");
+        const sS = pSlider("Saturation", 0, 200, S.saturation, (v) => { S.saturation = v; applyPreview(); }, null, (v) => v + "%");
+        add(sB); add(sC); add(sS);
+        const resetSliders = () => {
+          S.brightness = S.contrast = S.saturation = 100;
+          applyPreview();
+          for (const box of [sB, sC, sS]) {
+            const inp = box.querySelector("input");
+            const val = box.querySelector(".pcur-val");
+            if (inp) inp.value = "100";
+            if (val) val.textContent = "100%";
+          }
+        };
+        const apply = pBtn(icon("check") + "<span>Apply adjustments</span>", "primary", async () => {
+          if (S.brightness === 100 && S.contrast === 100 && S.saturation === 100) return;
+          bakeFilter();
+          await commit();
+          resetSliders();
+          toast("Adjustments applied", "ok");
+        });
+        const reset = pBtn("Reset", "ghost", resetSliders);
+        const btnBox = pEl("div", "pcur-btns", "");
+        btnBox.append(apply, reset);
+        add(btnBox);
+        add(pEl("p", "pcur-hint", "Adjust sliders preview live. Click 'Apply adjustments' to bake into the photo."));
       }
 
       else if (T === "filters") {
@@ -969,10 +1009,31 @@
       }
 
       else if (T === "blur") {
-        add(pSlider("Blur", 0, 40, 0, (v) => { S.blur = v; applyPreview(); }, () => { bakeFilter(); if (S.lastBlur) { S.lastBlur = 0; commit(); } }, (v) => v + "px"));
-        add(pSlider("Sharpen", 0, 100, 0, (v) => { S.sharpenPending = v / 100; }, (v) => { bakeFilter(); if (v) commit(); }, (v) => v + "%"));
-        add(pEl("p", "pcur-hint", "Blur previews with the GPU and bakes on release. Sharpen runs a convolution on release."));
-        panelBody.querySelectorAll("input[type=range]")[0].addEventListener("change", () => { S.lastBlur = S.blur; });
+        const sBlur = pSlider("Blur", 0, 40, S.blur, (v) => { S.blur = v; applyPreview(); }, null, (v) => v + "px");
+        const sSharp = pSlider("Sharpen", 0, 100, Math.round((S.sharpenPending || 0) * 100), (v) => { S.sharpenPending = v / 100; }, null, (v) => v + "%");
+        add(sBlur); add(sSharp);
+        const resetBlur = () => {
+          S.blur = 0; S.sharpenPending = 0;
+          applyPreview();
+          const inps = [sBlur.querySelector("input"), sSharp.querySelector("input")];
+          const vals = [sBlur.querySelector(".pcur-val"), sSharp.querySelector(".pcur-val")];
+          if (inps[0]) inps[0].value = "0";
+          if (vals[0]) vals[0].textContent = "0px";
+          if (inps[1]) inps[1].value = "0";
+          if (vals[1]) vals[1].textContent = "0%";
+        };
+        const apply = pBtn(icon("check") + "<span>Apply blur / sharpen</span>", "primary", async () => {
+          if (S.blur <= 0 && (!S.sharpenPending || S.sharpenPending <= 0)) return;
+          bakeFilter();
+          await commit();
+          resetBlur();
+          toast("Blur / sharpen applied", "ok");
+        });
+        const reset = pBtn("Reset", "ghost", resetBlur);
+        const btnBox = pEl("div", "pcur-btns", "");
+        btnBox.append(apply, reset);
+        add(btnBox);
+        add(pEl("p", "pcur-hint", "Blur previews with the GPU. Click 'Apply blur / sharpen' to bake into the photo."));
       }
 
       else if (T === "redeye") {
@@ -1410,14 +1471,30 @@
       const sel = m.querySelector(".pcur-sel");
       const q = m.querySelector(".pcur-q");
       const qv = m.querySelector(".pcur-val");
+      const copyBtn = dlg.querySelector('[data-act="copy"]');
+      const overwriteBtn = dlg.querySelector('[data-act="overwrite"]');
       q.addEventListener("input", () => { qv.textContent = q.value + "%"; });
+      const updateFormatUi = () => {
+        const isPdf = sel.value === "pdf";
+        copyBtn.disabled = isPdf;
+        overwriteBtn.disabled = isPdf;
+        copyBtn.title = isPdf ? "PDF can only be downloaded" : "";
+        overwriteBtn.title = isPdf ? "PDF can only be downloaded" : "";
+      };
+      sel.addEventListener("change", updateFormatUi);
+      updateFormatUi();
+
       const closeM = () => m.remove();
+      m.addEventListener("close-save", closeM);
       m.addEventListener("click", (e) => { if (e.target === m) closeM(); });
-      const onEsc = (e) => { if (e.key === "Escape") { e.stopPropagation(); closeM(); } };
-      document.addEventListener("keydown", onEsc, true);
+
       const doSave = async (mode) => {
+        const type = sel.value;
+        if (type === "pdf") {
+          toast("PDF can only be downloaded, not saved to the photo library.", "err");
+          return;
+        }
         try {
-          const type = sel.value;
           const quality = Number(q.value) / 100;
           const blob = await exportBlob(type, quality);
           const fd = new FormData();
@@ -1427,15 +1504,14 @@
           const res = await fetch(`/api/images/${id}/edit-save`, { method: "POST", body: fd });
           if (!res.ok) throw new Error(((await res.json().catch(() => ({}))).detail) || "HTTP " + res.status);
           const j = await res.json();
-          document.removeEventListener("keydown", onEsc, true);
           closeM();
           toast(mode === "copy" ? "Saved as a new photo" : "Original updated", "ok");
           if (onSaved) onSaved(j);
         } catch (e) { toast("Save failed: " + e.message, "err"); }
       };
-      dlg.querySelector('[data-act="copy"]').onclick = () => doSave("copy");
-      dlg.querySelector('[data-act="overwrite"]').onclick = () => doSave("overwrite");
-      dlg.querySelector('[data-act="download"]').onclick = () => { download(sel.value, Number(q.value) / 100); document.removeEventListener("keydown", onEsc, true); closeM(); };
+      copyBtn.onclick = () => doSave("copy");
+      overwriteBtn.onclick = () => doSave("overwrite");
+      dlg.querySelector('[data-act="download"]').onclick = () => { download(sel.value, Number(q.value) / 100); closeM(); };
     }
 
     // ---- compare (hold to view the unedited original) ----
@@ -1465,7 +1541,12 @@
     function onKey(ev) {
       if (closed) return;
       if (ev.key === "Escape") {
-        if (rootEl.querySelector(".pcur-saveback")) { ev.stopPropagation(); return; }
+        const sb = rootEl.querySelector(".pcur-saveback");
+        if (sb) {
+          ev.preventDefault(); ev.stopPropagation();
+          sb.dispatchEvent(new CustomEvent("close-save"));
+          return;
+        }
         ev.preventDefault(); ev.stopPropagation();
         close();
         return;

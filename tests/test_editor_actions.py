@@ -192,3 +192,52 @@ def test_api_full_and_edit_save(env):
     )
     assert ocr_r.status_code == 200
     assert "text" in ocr_r.json()
+
+
+def test_png_alpha_preservation(env):
+    # Create RGBA PNG with semi-transparent pixels
+    png_path = env.lib / "transparent.png"
+    im = Image.new("RGBA", (50, 50), (255, 0, 0, 128))
+    im.save(png_path, format="PNG")
+    env.client.post("/api/scan", json={"path": str(env.lib)})
+
+    with get_session(env.db) as s:
+        rec = s.query(M.ImageRecord).filter_by(filename="transparent.png").first()
+        iid = rec.id
+
+    data, mime = get_oriented_image_stream(env.db, iid)
+    assert mime == "image/png"
+    loaded_im = Image.open(io.BytesIO(data))
+    assert loaded_im.mode == "RGBA"
+    # Ensure alpha is preserved (not flattened to 255)
+    assert loaded_im.getpixel((10, 10))[3] == 128
+
+
+def test_save_format_validation_and_raw_overwrite_guard(env):
+    items = env.client.get("/api/images?limit=1").json()["items"]
+    iid = items[0]["id"]
+
+    buf = io.BytesIO()
+    Image.new("RGB", (50, 50), (255, 255, 255)).save(buf, format="JPEG")
+    b = buf.getvalue()
+
+    # Reject unsupported format (e.g. pdf)
+    from photocure.editor_actions import ActionError
+    with pytest.raises(ActionError, match="Unsupported storage format"):
+        save_edited_image(env.db, env.app.state.cfg, iid, b, mode="copy", format="pdf")
+
+    # Reject overwrite on RAW or HEIF
+    with get_session(env.db) as s:
+        rec = s.get(M.ImageRecord, iid)
+        old_ext = rec.extension
+        rec.extension = ".cr2"
+        s.commit()
+
+    with pytest.raises(ActionError, match="Cannot overwrite RAW or HEIF"):
+        save_edited_image(env.db, env.app.state.cfg, iid, b, mode="overwrite")
+
+    # Restore
+    with get_session(env.db) as s:
+        rec = s.get(M.ImageRecord, iid)
+        rec.extension = old_ext
+        s.commit()
