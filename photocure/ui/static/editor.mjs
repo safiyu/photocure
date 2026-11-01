@@ -427,6 +427,15 @@
       if (S.blur > 0) f.push(`blur(${(S.blur / 10).toFixed(2)}px)`);
       return f.length ? f.join(" ") : "none";
     }
+    let cachedOvRect = null;
+    function getOvRect() {
+      if (!cachedOvRect) cachedOvRect = ovC.getBoundingClientRect();
+      return cachedOvRect;
+    }
+    function invalidateOvRect() {
+      cachedOvRect = null;
+    }
+
     function syncDisp() {
       if (dispC.width !== workC.width || dispC.height !== workC.height) {
         dispC.width = workC.width; dispC.height = workC.height;
@@ -440,15 +449,14 @@
       wrap.style.filter = liveFilter();
       const z = S.zoom * S.fit;
       const r = stage.getBoundingClientRect();
-      const panelW = panel ? (panel.offsetWidth || 0) : 0;
-      const availW = Math.max(1, r.width - panelW);
-      const ox = (availW - workC.width * z) / 2;
+      const ox = (r.width - workC.width * z) / 2;
       const oy = (r.height - workC.height * z) / 2;
       let t = `translate(${(ox + S.panX).toFixed(2)}px,${(oy + S.panY).toFixed(2)}px) scale(${z.toFixed(4)})`;
       if (S.pendingFlip === "h") t += " scaleX(-1)";
       if (S.pendingFlip === "v") t += " scaleY(-1)";
       if (S.pendingRotate) t += ` rotate(${S.pendingRotate}deg)`;
       wrap.style.transform = t;
+      invalidateOvRect();
     }
     function resetAdjustPreview() {
       S.brightness = 100; S.contrast = 100; S.saturation = 100;
@@ -497,7 +505,7 @@
     titleEl.title = baseName;
     const undoBtn = mkBtn(icon("undo") + "<span>Undo</span>", "pcur-hist");
     const redoBtn = mkBtn("<span>Redo</span>" + icon("right"), "pcur-hist");
-    const compareBtn = mkBtn("Compare", ""); compareBtn.title = "Hold to compare with the original";
+    const compareBtn = mkBtn("Compare", "btn sm ghost"); compareBtn.title = "Hold to compare with the original";
     const dlBtn = mkBtn(icon("down") + "<span>Download</span>", "btn sm secondary");
     const saveBtn = mkBtn(icon("check") + "<span>Save</span>", "btn sm primary");
     const closeBtn = mkBtn(icon("x"), "pcur-x");
@@ -535,7 +543,11 @@
     panelBody.className = "pcur-panelbody";
     panel.appendChild(panelBody);
 
-    rootEl.append(topbar, stage, toolbar, panel);
+    const mid = document.createElement("div");
+    mid.className = "pcur-mid";
+    mid.append(stage, panel);
+
+    rootEl.append(topbar, mid, toolbar);
 
     function grow() { const n = document.createElement("span"); n.className = "grow"; return n; }
     function mkBtn(html, cls) {
@@ -549,28 +561,37 @@
     // ---- geometry: fit scale + single transform on the wrapper ----
     function relayout() {
       const r = stage.getBoundingClientRect();
-      const panelW = panel ? (panel.offsetWidth || 0) : 0;
-      const availW = Math.max(1, r.width - panelW);
-      if (availW > 4 && r.height > 4)
-        S.fit = Math.min(availW / workC.width, r.height / workC.height) * 0.94;
+      if (r.width > 4 && r.height > 4)
+        S.fit = Math.min(r.width / workC.width, r.height / workC.height) * 0.94;
       wrap.style.width = workC.width + "px";
       wrap.style.height = workC.height + "px";
-      dispC.width = workC.width; dispC.height = workC.height;
-      ovC.width = workC.width; ovC.height = workC.height;
+      const sizeChanged = dispC.width !== workC.width || dispC.height !== workC.height;
+      if (sizeChanged) {
+        dispC.width = workC.width; dispC.height = workC.height;
+      }
+      if (ovC.width !== workC.width || ovC.height !== workC.height) {
+        ovC.width = workC.width; ovC.height = workC.height;
+      }
       dispC.style.width = ovC.style.width = "100%";
       dispC.style.height = ovC.style.height = "100%";
-      applyPreview();
+      if (sizeChanged) {
+        syncDisp();
+      } else {
+        applyPreview();
+      }
+      renderOverlay();
+      invalidateOvRect();
     }
     // Strict screen -> canvas mapping (accounts for fit, zoom, pan, preview transform).
     function screenToCanvas(clientX, clientY) {
-      const r = ovC.getBoundingClientRect();
+      const r = getOvRect();
       return {
         x: (clientX - r.left) / Math.max(1, r.width) * workC.width,
         y: (clientY - r.top) / Math.max(1, r.height) * workC.height,
       };
     }
     function canvasToScreen(cx, cy) {
-      const r = ovC.getBoundingClientRect();
+      const r = getOvRect();
       return { x: r.left + cx / workC.width * r.width, y: r.top + cy / workC.height * r.height };
     }
 
@@ -644,14 +665,55 @@
       if (S.tool === "crop" && S.crop) {
         const c = S.crop;
         x.save();
+        // 1. Dim outside
         x.fillStyle = "rgba(0,0,0,.55)";
         x.beginPath();
         x.rect(0, 0, Wc, Hc);
         x.rect(c.x, c.y, c.w, c.h);
         x.fill("evenodd");
-        x.strokeStyle = "#fff";
-        x.lineWidth = Math.max(1, Wc / 600);
+
+        // 2. Rule of thirds grid
+        const scale = S.fit * S.zoom;
+        x.strokeStyle = "rgba(255,255,255,.32)";
+        x.lineWidth = Math.max(1, 1 / Math.max(0.01, scale));
+        x.beginPath();
+        x.moveTo(c.x + c.w / 3, c.y); x.lineTo(c.x + c.w / 3, c.y + c.h);
+        x.moveTo(c.x + (2 * c.w) / 3, c.y); x.lineTo(c.x + (2 * c.w) / 3, c.y + c.h);
+        x.moveTo(c.x, c.y + c.h / 3); x.lineTo(c.x + c.w, c.y + c.h / 3);
+        x.moveTo(c.x, c.y + (2 * c.h) / 3); x.lineTo(c.x + c.w, c.y + (2 * c.h) / 3);
+        x.stroke();
+
+        // 3. Main bounding rectangle
+        x.strokeStyle = "#ffffff";
+        x.lineWidth = Math.max(1.5, 1.5 / Math.max(0.01, scale));
         x.strokeRect(c.x, c.y, c.w, c.h);
+
+        // 4. Bold corner brackets
+        const cornerLen = Math.min(c.w / 3, c.h / 3, Math.max(16, 24 / Math.max(0.01, scale)));
+        const handleThick = Math.max(3, 4.5 / Math.max(0.01, scale));
+        x.strokeStyle = "#ffffff";
+        x.lineWidth = handleThick;
+        x.lineCap = "square";
+        // NW
+        x.beginPath(); x.moveTo(c.x, c.y + cornerLen); x.lineTo(c.x, c.y); x.lineTo(c.x + cornerLen, c.y); x.stroke();
+        // NE
+        x.beginPath(); x.moveTo(c.x + c.w - cornerLen, c.y); x.lineTo(c.x + c.w, c.y); x.lineTo(c.x + c.w, c.y + cornerLen); x.stroke();
+        // SW
+        x.beginPath(); x.moveTo(c.x, c.y + c.h - cornerLen); x.lineTo(c.x, c.y + c.h); x.lineTo(c.x + cornerLen, c.y + c.h); x.stroke();
+        // SE
+        x.beginPath(); x.moveTo(c.x + c.w - cornerLen, c.y + c.h); x.lineTo(c.x + c.w, c.y + c.h); x.lineTo(c.x + c.w, c.y + c.h - cornerLen); x.stroke();
+
+        // 5. Edge middle handle bars
+        const barHalf = Math.min(c.w / 4, c.h / 4, Math.max(10, 16 / Math.max(0.01, scale)));
+        // Top
+        x.beginPath(); x.moveTo(c.x + c.w / 2 - barHalf, c.y); x.lineTo(c.x + c.w / 2 + barHalf, c.y); x.stroke();
+        // Bottom
+        x.beginPath(); x.moveTo(c.x + c.w / 2 - barHalf, c.y + c.h); x.lineTo(c.x + c.w / 2 + barHalf, c.y + c.h); x.stroke();
+        // Left
+        x.beginPath(); x.moveTo(c.x, c.y + c.h / 2 - barHalf); x.lineTo(c.x, c.y + c.h / 2 + barHalf); x.stroke();
+        // Right
+        x.beginPath(); x.moveTo(c.x + c.w, c.y + c.h / 2 - barHalf); x.lineTo(c.x + c.w, c.y + c.h / 2 + barHalf); x.stroke();
+
         x.restore();
       }
       if (S._live) strokePath(x, S._live, Wc, Hc);
@@ -688,28 +750,72 @@
     function cropHandle(p) {
       const c = S.crop;
       if (!c) return null;
-      const t = Math.max(12, workC.width / 50);
-      const pts = {
-        nw: [c.x, c.y], ne: [c.x + c.w, c.y], sw: [c.x, c.y + c.h], se: [c.x + c.w, c.y + c.h],
-        n: [c.x + c.w / 2, c.y], s: [c.x + c.w / 2, c.y + c.h],
-        e: [c.x + c.w, c.y + c.h / 2], w: [c.x, c.y + c.h / 2],
-      };
-      for (const k in pts)
-        if (Math.abs(p.x - pts[k][0]) < t && Math.abs(p.y - pts[k][1]) < t) return k;
-      if (p.x > c.x && p.x < c.x + c.w && p.y > c.y && p.y < c.y + c.h) return "inside";
+      const scale = S.fit * S.zoom;
+      const t = Math.max(18, 32 / Math.max(0.01, scale));
+      const right = c.x + c.w;
+      const bottom = c.y + c.h;
+
+      // 1. Corners (priority over edges)
+      if (Math.hypot(p.x - c.x, p.y - c.y) < t) return "nw";
+      if (Math.hypot(p.x - right, p.y - c.y) < t) return "ne";
+      if (Math.hypot(p.x - c.x, p.y - bottom) < t) return "sw";
+      if (Math.hypot(p.x - right, p.y - bottom) < t) return "se";
+
+      // 2. Full edges
+      if (p.x >= c.x - t && p.x <= right + t) {
+        if (Math.abs(p.y - c.y) < t) return "n";
+        if (Math.abs(p.y - bottom) < t) return "s";
+      }
+      if (p.y >= c.y - t && p.y <= bottom + t) {
+        if (Math.abs(p.x - c.x) < t) return "w";
+        if (Math.abs(p.x - right) < t) return "e";
+      }
+
+      // 3. Inside
+      if (p.x >= c.x && p.x <= right && p.y >= c.y && p.y <= bottom) return "inside";
       return null;
     }
     function resizeCrop(p, h) {
       const c = S.crop;
+      const ar = S.cropAspect;
       const right = c.x + c.w, bottom = c.y + c.h;
-      if (h === "e") c.w = clamp(p.x - c.x, 8, workC.width - c.x);
-      if (h === "w") { c.x = clamp(p.x, 0, right - 8); c.w = right - c.x; }
-      if (h === "s") c.h = clamp(p.y - c.y, 8, workC.height - c.y);
-      if (h === "n") { c.y = clamp(p.y, 0, bottom - 8); c.h = bottom - c.y; }
-      if (h === "nw") { c.x = clamp(p.x, 0, right - 8); c.y = clamp(p.y, 0, bottom - 8); c.w = right - c.x; c.h = bottom - c.y; }
-      if (h === "ne") { c.w = clamp(p.x - c.x, 8, workC.width - c.x); c.y = clamp(p.y, 0, bottom - 8); c.h = bottom - c.y; }
-      if (h === "sw") { c.x = clamp(p.x, 0, right - 8); c.w = right - c.x; c.h = clamp(p.y - c.y, 8, workC.height - c.y); }
-      if (h === "se") { c.w = clamp(p.x - c.x, 8, workC.width - c.x); c.h = clamp(p.y - c.y, 8, workC.height - c.y); }
+      const minSz = 20;
+
+      if (!ar) {
+        if (h === "e") c.w = clamp(p.x - c.x, minSz, workC.width - c.x);
+        else if (h === "w") { c.x = clamp(p.x, 0, right - minSz); c.w = right - c.x; }
+        else if (h === "s") c.h = clamp(p.y - c.y, minSz, workC.height - c.y);
+        else if (h === "n") { c.y = clamp(p.y, 0, bottom - minSz); c.h = bottom - c.y; }
+        else if (h === "se") { c.w = clamp(p.x - c.x, minSz, workC.width - c.x); c.h = clamp(p.y - c.y, minSz, workC.height - c.y); }
+        else if (h === "sw") { c.x = clamp(p.x, 0, right - minSz); c.w = right - c.x; c.h = clamp(p.y - c.y, minSz, workC.height - c.y); }
+        else if (h === "ne") { c.w = clamp(p.x - c.x, minSz, workC.width - c.x); c.y = clamp(p.y, 0, bottom - minSz); c.h = bottom - c.y; }
+        else if (h === "nw") { c.x = clamp(p.x, 0, right - minSz); c.y = clamp(p.y, 0, bottom - minSz); c.w = right - c.x; c.h = bottom - c.y; }
+        return;
+      }
+
+      // Aspect ratio locked
+      if (h === "se" || h === "e" || h === "s") {
+        let w = clamp(p.x - c.x, minSz, workC.width - c.x);
+        let hLen = w / ar;
+        if (c.y + hLen > workC.height) { hLen = workC.height - c.y; w = hLen * ar; }
+        if (c.x + w > workC.width) { w = workC.width - c.x; hLen = w / ar; }
+        c.w = Math.max(minSz, w); c.h = Math.max(minSz, hLen);
+      } else if (h === "sw" || h === "w") {
+        let w = clamp(right - p.x, minSz, right);
+        let hLen = w / ar;
+        if (c.y + hLen > workC.height) { hLen = workC.height - c.y; w = hLen * ar; }
+        c.x = right - w; c.w = w; c.h = hLen;
+      } else if (h === "ne" || h === "n") {
+        let w = clamp(p.x - c.x, minSz, workC.width - c.x);
+        let hLen = w / ar;
+        if (bottom - hLen < 0) { hLen = bottom; w = hLen * ar; }
+        c.y = bottom - hLen; c.w = w; c.h = hLen;
+      } else if (h === "nw") {
+        let w = clamp(right - p.x, minSz, right);
+        let hLen = w / ar;
+        if (bottom - hLen < 0) { hLen = bottom; w = hLen * ar; }
+        c.x = right - w; c.y = bottom - hLen; c.w = w; c.h = hLen;
+      }
     }
     function applyAspect() {
       const c = S.crop;
@@ -728,6 +834,7 @@
     function onPointerDown(ev) {
       if (closed) return;
       ev.preventDefault();
+      invalidateOvRect();
       if (S._space || ev.button === 2 || ev.button === 1) {
         S._drag = { kind: "pan", sx: ev.clientX, sy: ev.clientY, px: S.panX, py: S.panY };
         stage.style.cursor = "grabbing";
@@ -737,11 +844,19 @@
       const p = screenToCanvas(ev.clientX, ev.clientY);
       if (S.tool === "crop") {
         const h = cropHandle(p);
-        if (h === "inside") S._drag = { kind: "cropmove", ox: p.x - S.crop.x, oy: p.y - S.crop.y };
-        else if (h) S._drag = { kind: "crophandle", h };
-        else {
-          S.crop = { x: p.x, y: p.y, w: 0, h: 0, sx: p.x, sy: p.y };
-          S._drag = { kind: "cropnew" };
+        if (h === "inside") {
+          S._drag = { kind: "cropmove", ox: p.x - S.crop.x, oy: p.y - S.crop.y };
+          stage.style.cursor = "move";
+        } else if (h) {
+          S._drag = { kind: "crophandle", h };
+          if (h === "nw" || h === "se") stage.style.cursor = "nwse-resize";
+          else if (h === "ne" || h === "sw") stage.style.cursor = "nesw-resize";
+          else if (h === "n" || h === "s") stage.style.cursor = "ns-resize";
+          else if (h === "e" || h === "w") stage.style.cursor = "ew-resize";
+        } else {
+          const prevCrop = S.crop ? { ...S.crop } : null;
+          S._drag = { kind: "cropnew", sx: p.x, sy: p.y, prevCrop, started: false };
+          stage.style.cursor = "crosshair";
         }
         renderOverlay();
       } else if (S.tool === "redeye") {
@@ -766,46 +881,74 @@
         }
       }
     }
+
+    let hoverRaf = null;
+    function updateHoverCursor(clientX, clientY) {
+      if (hoverRaf) return;
+      hoverRaf = requestAnimationFrame(() => {
+        hoverRaf = null;
+        if (closed || S._drag || S.tool !== "crop" || !S.crop) return;
+        const p = screenToCanvas(clientX, clientY);
+        const h = cropHandle(p);
+        let cur = "crosshair";
+        if (h === "nw" || h === "se") cur = "nwse-resize";
+        else if (h === "ne" || h === "sw") cur = "nesw-resize";
+        else if (h === "n" || h === "s") cur = "ns-resize";
+        else if (h === "e" || h === "w") cur = "ew-resize";
+        else if (h === "inside") cur = "move";
+        if (stage.style.cursor !== cur) stage.style.cursor = cur;
+      });
+    }
+
     function onPointerMove(ev) {
       if (closed) return;
       const d = S._drag;
-      if (d && d.kind === "pan") {
+      if (!d) {
+        if (S.tool === "crop" && S.crop) updateHoverCursor(ev.clientX, ev.clientY);
+        return;
+      }
+      if (d.kind === "pan") {
         S.panX = d.px + (ev.clientX - d.sx);
         S.panY = d.py + (ev.clientY - d.sy);
         applyPreview();
         return;
       }
-      if (d) {
-        const p = screenToCanvas(ev.clientX, ev.clientY);
-        if (d.kind === "cropnew") {
-          const c = S.crop;
-          c.x = Math.min(c.sx, p.x); c.y = Math.min(c.sy, p.y);
-          c.w = Math.abs(p.x - c.sx); c.h = Math.abs(p.y - c.sy);
-          applyAspect();
-        } else if (d.kind === "cropmove") {
-          S.crop.x = clamp(p.x - d.ox, 0, workC.width - S.crop.w);
-          S.crop.y = clamp(p.y - d.oy, 0, workC.height - S.crop.h);
-        } else if (d.kind === "crophandle") {
-          resizeCrop(p, d.h);
-          applyAspect();
-        } else if (d.kind === "move" && S.sticker) {
-          S.sticker.x = clamp((p.x - d.ox) / workC.width, 0.02, 0.98);
-          S.sticker.y = clamp((p.y - d.oy) / workC.height, 0.02, 0.98);
-          bakeSticker(); syncDisp(); renderOverlay();
-        } else if (d.kind === "resize" && S.sticker) {
-          const m = stickerMetrics(S.sticker);
-          const curDist = Math.hypot(p.x - m.cx, p.y - m.cy);
-          S.sticker.w = clamp(d.initialW * (curDist / Math.max(1, d.initialDist)), 0.02, 1.3);
-          bakeSticker(); syncDisp(); renderOverlay();
-        } else if (d.kind === "rotate" && S.sticker) {
-          const m = stickerMetrics(S.sticker);
-          const curAngle = Math.atan2(p.y - m.cy, p.x - m.cx);
-          S.sticker.rot = (d.initialRot + (curAngle - d.initialAngle) * 180 / Math.PI) % 360;
-          bakeSticker(); syncDisp(); renderOverlay();
+      const p = screenToCanvas(ev.clientX, ev.clientY);
+      if (d.kind === "cropnew") {
+        const scale = S.fit * S.zoom;
+        const dist = Math.hypot(p.x - d.sx, p.y - d.sy) * scale;
+        if (!d.started) {
+          if (dist < 15) return;
+          d.started = true;
+          S.crop = { x: Math.min(d.sx, p.x), y: Math.min(d.sy, p.y), w: Math.abs(p.x - d.sx), h: Math.abs(p.y - d.sy), sx: d.sx, sy: d.sy };
         }
-        return;
-      }
-      if (S._live) {
+        const c = S.crop;
+        c.x = Math.min(d.sx, p.x); c.y = Math.min(d.sy, p.y);
+        c.w = Math.abs(p.x - d.sx); c.h = Math.abs(p.y - d.sy);
+        if (S.cropAspect) applyAspect();
+        renderOverlay();
+      } else if (d.kind === "cropmove") {
+        S.crop.x = clamp(p.x - d.ox, 0, workC.width - S.crop.w);
+        S.crop.y = clamp(p.y - d.oy, 0, workC.height - S.crop.h);
+        renderOverlay();
+      } else if (d.kind === "crophandle") {
+        resizeCrop(p, d.h);
+        renderOverlay();
+      } else if (d.kind === "move" && S.sticker) {
+        S.sticker.x = clamp((p.x - d.ox) / workC.width, 0.02, 0.98);
+        S.sticker.y = clamp((p.y - d.oy) / workC.height, 0.02, 0.98);
+        bakeSticker(); syncDisp(); renderOverlay();
+      } else if (d.kind === "resize" && S.sticker) {
+        const m = stickerMetrics(S.sticker);
+        const curDist = Math.hypot(p.x - m.cx, p.y - m.cy);
+        S.sticker.w = clamp(d.initialW * (curDist / Math.max(1, d.initialDist)), 0.02, 1.3);
+        bakeSticker(); syncDisp(); renderOverlay();
+      } else if (d.kind === "rotate" && S.sticker) {
+        const m = stickerMetrics(S.sticker);
+        const curAngle = Math.atan2(p.y - m.cy, p.x - m.cx);
+        S.sticker.rot = (d.initialRot + (curAngle - d.initialAngle) * 180 / Math.PI) % 360;
+        bakeSticker(); syncDisp(); renderOverlay();
+      } else if (S._live) {
         const p = screenToCanvas(ev.clientX, ev.clientY);
         S._live.pts.push(norm(p));
         renderOverlay();
@@ -815,7 +958,24 @@
       if (closed) return;
       const d = S._drag;
       S._drag = null;
-      stage.style.cursor = "";
+      if (d && d.kind === "cropnew") {
+        if (!d.started || !S.crop || S.crop.w < 20 || S.crop.h < 20) {
+          if (d.prevCrop) {
+            S.crop = d.prevCrop;
+          } else {
+            const marginX = Math.round(workC.width * 0.05);
+            const marginY = Math.round(workC.height * 0.05);
+            S.crop = { x: marginX, y: marginY, w: workC.width - 2 * marginX, h: workC.height - 2 * marginY };
+            if (S.cropAspect) applyAspect();
+          }
+          renderOverlay();
+        }
+      }
+      if (S.tool === "crop") {
+        stage.style.cursor = "crosshair";
+      } else {
+        stage.style.cursor = "";
+      }
       if (S._live) {
         const st = S._live;
         S._live = null;
@@ -840,7 +1000,14 @@
     function selectTool(tid) {
       S.tool = tid;
       resetAdjustPreview();
-      if (tid !== "crop") S.crop = null;
+      if (tid !== "crop") {
+        S.crop = null;
+      } else if (!S.crop) {
+        const marginX = Math.round(workC.width * 0.05);
+        const marginY = Math.round(workC.height * 0.05);
+        S.crop = { x: marginX, y: marginY, w: workC.width - 2 * marginX, h: workC.height - 2 * marginY };
+        if (S.cropAspect) applyAspect();
+      }
       $$(".pcur-tool", toolbar).forEach((b) => b.classList.toggle("active", b.dataset.tool === tid));
       buildPanel();
       renderOverlay();
@@ -910,26 +1077,47 @@
       const T = S.tool;
 
       if (T === "crop") {
+        S.cropAspectKey = S.cropAspectKey || "free";
         add(chipRow([["free", "Free"], ["1:1", "1:1"], ["4:3", "4:3"], ["16:9", "16:9"], ["3:2", "3:2"], ["9:16", "9:16"]],
-          S.cropAspect || "free", (v) => { S.cropAspect = v === "free" ? null : Number(v.split(":")[0]) / Number(v.split(":")[1]); if (S.crop) { applyAspect(); renderOverlay(); } }));
-        add(pEl("p", "pcur-hint", "Drag on the photo to choose the crop area. Drag the corners to resize it, the middle to move it."));
+          S.cropAspectKey, (v) => {
+            S.cropAspectKey = v;
+            S.cropAspect = v === "free" ? null : Number(v.split(":")[0]) / Number(v.split(":")[1]);
+            if (!S.crop) {
+              const marginX = Math.round(workC.width * 0.05);
+              const marginY = Math.round(workC.height * 0.05);
+              S.crop = { x: marginX, y: marginY, w: workC.width - 2 * marginX, h: workC.height - 2 * marginY };
+            }
+            applyAspect();
+            renderOverlay();
+          }));
+        add(pEl("p", "pcur-hint", "Drag the corner brackets or edge bars to resize. Drag inside the box to move it."));
         const apply = pBtn(icon("check") + "<span>Apply crop</span>", "primary", async () => {
           const c = S.crop;
-          if (!c || c.w < 2 || c.h < 2) { toast("Draw a crop area first", "err"); return; }
+          if (!c || c.w < 2 || c.h < 2) { toast("Adjust the crop area first", "err"); return; }
           const nc = makeCanvas(c.w, c.h);
           ctx2d(nc).drawImage(workC, c.x, c.y, c.w, c.h, 0, 0, c.w, c.h);
           let nw = nc.width, nh = nc.height;
           if (Math.max(nw, nh) > MAX_PX) { const f = MAX_PX / Math.max(nw, nh); nw = Math.round(nw * f); nh = Math.round(nh * f); }
           workC.width = nw; workC.height = nh;
           ctx2d(workC).drawImage(nc, 0, 0, nw, nh);
-          S.crop = null;
+          const marginX = Math.round(nw * 0.05);
+          const marginY = Math.round(nh * 0.05);
+          S.crop = { x: marginX, y: marginY, w: nw - 2 * marginX, h: nh - 2 * marginY };
+          if (S.cropAspect) applyAspect();
           relayout();
           await commit();
           toast("Crop applied", "ok");
         });
-        const reset = pBtn("Reset", "ghost", () => { S.crop = null; renderOverlay(); });
-        add(pEl("div", "pcur-btns", ""));
-        panelBody.lastChild.append(apply, reset);
+        const reset = pBtn("Reset", "ghost", () => {
+          const marginX = Math.round(workC.width * 0.05);
+          const marginY = Math.round(workC.height * 0.05);
+          S.crop = { x: marginX, y: marginY, w: workC.width - 2 * marginX, h: workC.height - 2 * marginY };
+          if (S.cropAspect) applyAspect();
+          renderOverlay();
+        });
+        const btnBox = pEl("div", "pcur-btns", "");
+        btnBox.append(apply, reset);
+        add(btnBox);
       }
 
       else if (T === "transform") {
@@ -1399,6 +1587,7 @@
       workC.width = tmp.width; workC.height = tmp.height;
       ctx2d(workC).drawImage(tmp, 0, 0);
       S.sticker = null;
+      syncDisp();
       relayout();
       commit();
     }
@@ -1412,6 +1601,7 @@
       workC.width = tmp.width; workC.height = tmp.height;
       ctx2d(workC).drawImage(tmp, 0, 0);
       S.sticker = null;
+      syncDisp();
       relayout();
       commit();
     }
@@ -1430,6 +1620,7 @@
       workC.width = cw; workC.height = ch;
       ctx2d(workC).drawImage(tmp, 0, 0, cw, ch);
       S.sticker = null;
+      syncDisp();
       relayout();
       commit();
     }
@@ -1582,7 +1773,10 @@
     document.body.appendChild(rootEl);
     document.body.style.overflow = "hidden";
     stage.addEventListener("pointerdown", onPointerDown);
-    window.addEventListener("pointermove", onPointerMove, true);
+    stage.addEventListener("pointerleave", () => {
+      if (!S._drag) stage.style.cursor = "";
+    });
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
     window.addEventListener("pointerup", onPointerUp, true);
     stage.addEventListener("wheel", onWheel, { passive: false });
     stage.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -1640,7 +1834,7 @@
       closed = true;
       state.active = false;
       if (ro) ro.disconnect();
-      window.removeEventListener("pointermove", onPointerMove, true);
+      window.removeEventListener("pointermove", onPointerMove, { passive: true });
       window.removeEventListener("pointerup", onPointerUp, true);
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("keyup", onKeyUp, true);
