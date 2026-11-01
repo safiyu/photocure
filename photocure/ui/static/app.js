@@ -5203,18 +5203,18 @@
     try {
       await post("/api/deletes/approve", { ids, approved });
       for (const id of ids) {
-        if (state.byId[id]) state.byId[id].delete_approved = approved;
-        for (const g of state.grids) {
-          if (g.vg && g.vg.hasId(id)) g.vg.patchItem(id, { delete_approved: approved });
+        if (state.byId[id]) {
+          state.byId[id].delete_approved = approved;
+          allGrids().forEach((g) => g.rerender(state.byId[id]));
         }
       }
       if (lb.open) lbRender();
       const undo = approved ? { label: "Undo", fn: async () => {
         await post("/api/deletes/approve", { ids, approved: false });
         for (const id of ids) {
-          if (state.byId[id]) state.byId[id].delete_approved = false;
-          for (const g of state.grids) {
-            if (g.vg && g.vg.hasId(id)) g.vg.patchItem(id, { delete_approved: false });
+          if (state.byId[id]) {
+            state.byId[id].delete_approved = false;
+            allGrids().forEach((g) => g.rerender(state.byId[id]));
           }
         }
         if (lb.open) lbRender();
