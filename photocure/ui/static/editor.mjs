@@ -440,7 +440,9 @@
       wrap.style.filter = liveFilter();
       const z = S.zoom * S.fit;
       const r = stage.getBoundingClientRect();
-      const ox = (r.width - workC.width * z) / 2;
+      const panelW = panel ? (panel.offsetWidth || 0) : 0;
+      const availW = Math.max(1, r.width - panelW);
+      const ox = (availW - workC.width * z) / 2;
       const oy = (r.height - workC.height * z) / 2;
       let t = `translate(${(ox + S.panX).toFixed(2)}px,${(oy + S.panY).toFixed(2)}px) scale(${z.toFixed(4)})`;
       if (S.pendingFlip === "h") t += " scaleX(-1)";
@@ -547,11 +549,16 @@
     // ---- geometry: fit scale + single transform on the wrapper ----
     function relayout() {
       const r = stage.getBoundingClientRect();
-      if (r.width > 4 && r.height > 4)
-        S.fit = Math.min(r.width / workC.width, r.height / workC.height) * 0.94;
-      dispC.style.width = ovC.style.width = workC.width + "px";
-      dispC.style.height = ovC.style.height = workC.height + "px";
+      const panelW = panel ? (panel.offsetWidth || 0) : 0;
+      const availW = Math.max(1, r.width - panelW);
+      if (availW > 4 && r.height > 4)
+        S.fit = Math.min(availW / workC.width, r.height / workC.height) * 0.94;
+      wrap.style.width = workC.width + "px";
+      wrap.style.height = workC.height + "px";
+      dispC.width = workC.width; dispC.height = workC.height;
       ovC.width = workC.width; ovC.height = workC.height;
+      dispC.style.width = ovC.style.width = "100%";
+      dispC.style.height = ovC.style.height = "100%";
       applyPreview();
     }
     // Strict screen -> canvas mapping (accounts for fit, zoom, pan, preview transform).
@@ -837,6 +844,7 @@
       $$(".pcur-tool", toolbar).forEach((b) => b.classList.toggle("active", b.dataset.tool === tid));
       buildPanel();
       renderOverlay();
+      relayout();
     }
     function historyBtns() {
       undoBtn.disabled = S.hi <= 0;
@@ -1609,6 +1617,12 @@
     })();
     const prevFocus = document.activeElement;
 
+    let ro = null;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(() => relayout());
+      ro.observe(stage);
+    }
+
     relayout();
     syncDisp();
     selectTool("crop");
@@ -1616,11 +1630,16 @@
     await commit();
     state.active = true;
     closeBtn.focus();
+    requestAnimationFrame(() => {
+      relayout();
+      syncDisp();
+    });
 
     async function close() {
       if (closed) return;
       closed = true;
       state.active = false;
+      if (ro) ro.disconnect();
       window.removeEventListener("pointermove", onPointerMove, true);
       window.removeEventListener("pointerup", onPointerUp, true);
       window.removeEventListener("keydown", onKey, true);

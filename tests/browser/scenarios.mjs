@@ -1039,6 +1039,8 @@ try {
     check(await page.eval("document.querySelectorAll('.pcur-ed .pcur-tool').length") === 13, "the toolbar does not list all 13 tools");
     check(await page.eval("window.PCUR_EDITOR.histLen") === 1, "the opening state is not recorded in the history");
     check(await page.eval("!!document.querySelector('.pcur-ed canvas.pcur-disp')"), "no display canvas in the stage");
+    check(await page.eval("document.querySelector('.pcur-wrap').getBoundingClientRect().width > 50"), "the editor photo wrapper has zero width");
+    check(await page.eval("document.querySelector('.pcur-wrap').getBoundingClientRect().height > 50"), "the editor photo wrapper has zero height");
     await press("Escape");
     await page.waitFor("!window.PCUR_EDITOR.active", 10000, "the editor closes");
     check(await page.eval("!!document.querySelector('#grid')"), "the library is still there after closing");
