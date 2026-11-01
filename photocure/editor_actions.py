@@ -306,8 +306,8 @@ def remove_background(image_bytes: bytes) -> bytes:
     try:
         import rembg
         return rembg.remove(image_bytes)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("rembg background removal failed or uninstalled (%s); falling back to GrabCut", exc)
 
     # 2. Fallback to OpenCV cv2.grabCut with morphological refinement
     arr = np.frombuffer(image_bytes, np.uint8)
@@ -334,7 +334,7 @@ def remove_background(image_bytes: bytes) -> bytes:
     margin_y = max(1, int(gh * 0.05))
     rect = (margin_x, margin_y, max(1, gw - 2 * margin_x), max(1, gh - 2 * margin_y))
 
-    cv2.grabCut(gc_bgr, mask, rect, bgdModel, fgdModel, 3, cv2.GC_INIT_WITH_RECT)
+    cv2.grabCut(gc_bgr, mask, rect, bgdModel, fgdModel, 5, cv2.GC_INIT_WITH_RECT)
     gc_bin = np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
 
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))

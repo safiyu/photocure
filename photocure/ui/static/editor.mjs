@@ -449,12 +449,17 @@
       wrap.style.filter = liveFilter();
       const z = S.zoom * S.fit;
       const r = stage.getBoundingClientRect();
-      const ox = (r.width - workC.width * z) / 2;
-      const oy = (r.height - workC.height * z) / 2;
-      let t = `translate(${(ox + S.panX).toFixed(2)}px,${(oy + S.panY).toFixed(2)}px) scale(${z.toFixed(4)})`;
-      if (S.pendingFlip === "h") t += " scaleX(-1)";
-      if (S.pendingFlip === "v") t += " scaleY(-1)";
-      if (S.pendingRotate) t += ` rotate(${S.pendingRotate}deg)`;
+      const cx = r.width / 2 + S.panX;
+      const cy = r.height / 2 + S.panY;
+      const flipX = S.pendingFlip === "h" ? -1 : 1;
+      const flipY = S.pendingFlip === "v" ? -1 : 1;
+      const rot = S.pendingRotate || 0;
+
+      let t = `translate(${cx.toFixed(2)}px,${cy.toFixed(2)}px)`;
+      if (rot) t += ` rotate(${rot}deg)`;
+      t += ` scale(${(flipX * z).toFixed(4)},${(flipY * z).toFixed(4)})`;
+      t += ` translate(${(-workC.width / 2).toFixed(2)}px,${(-workC.height / 2).toFixed(2)}px)`;
+
       wrap.style.transform = t;
       invalidateOvRect();
     }
@@ -1129,13 +1134,23 @@
           pBtn("Flip ↕", "", () => { bakeFlip("v"); toast("Flipped vertically", "ok"); }, "Flip vertical"),
         );
         add(r90);
-        add(pSlider("Fine rotate", -45, 45, 0,
+        let sFine = null;
+        sFine = pSlider("Fine rotate", -45, 45, 0,
           (v) => { S.pendingRotate = v; applyPreview(); },
-          (v) => {
-            if (v) rotateBy(v);
-            else applyPreview();
+          async (v) => {
             S.pendingRotate = 0;
-          }, (v) => Math.round(v) + "°"));
+            if (v) {
+              rotateBy(v);
+              const inp = sFine && sFine.querySelector("input");
+              const val = sFine && sFine.querySelector(".pcur-val");
+              if (inp) inp.value = "0";
+              if (val) val.textContent = "0°";
+              toast(`Rotated ${Math.round(v)}°`, "ok");
+            } else {
+              applyPreview();
+            }
+          }, (v) => Math.round(v) + "°");
+        add(sFine);
         add(pEl("p", "pcur-hint", "90° and flips bake instantly. Fine rotation previews live and bakes when you release the slider."));
       }
 
@@ -1238,7 +1253,7 @@
       }
 
       else if (T === "bg") {
-        const opts = { outline: true, despeckle: true, trim: false };
+        const opts = { outline: false, despeckle: true, trim: false };
         const cbox = (key, label) => {
           const l = pEl("label", "pcur-chk");
           const i = document.createElement("input");
@@ -1247,7 +1262,7 @@
           l.append(i, pEl("span", "", esc(label)));
           return l;
         };
-        add(cbox("outline", "White outline (cartoonize)"));
+        add(cbox("outline", "White sticker outline"));
         add(cbox("despeckle", "Clean edges (despeckle)"));
         add(cbox("trim", "Trim to the subject"));
         const b = pBtn("Remove background", "primary", async () => {
@@ -1274,6 +1289,7 @@
             workC.width = outC.width; workC.height = outC.height;
             ctx2d(workC).drawImage(outC, 0, 0);
             S.needsAlpha = true;
+            syncDisp();
             relayout();
             await commit();
             toast("Background removed", "ok");

@@ -28,6 +28,7 @@ dependencies = [
     "pyyaml>=6",
     "lxml>=5.0",
     "reverse_geocoder>=1.5.1",
+    "rembg[cpu]>=2.0",
 ]
 
 [project.optional-dependencies]
