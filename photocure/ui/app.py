@@ -152,6 +152,7 @@ class ClusterReq(BaseModel):
     window_seconds: int = 30
     similarity_threshold: float = 0.88
     only_new: bool = False
+    stage: Literal["new", "trash", "library", "all"] = "new"
 
 
 class EventClusterReq(BaseModel):
@@ -433,14 +434,17 @@ def _by_ids(s, ids, stmt_fn=None, chunk: int = 500) -> list:
     return rows
 
 
-def _burst_neighbourhood(s, new_ids, window_s: float) -> tuple[list, list]:
+def _burst_neighbourhood(s, new_ids, window_s: float, stage: str = "new") -> tuple[list, list]:
     """Records and burst groups that clustering the given new photos can change.
 
     Each new photo's time is widened by the burst window; bursts touching those
     intervals are pulled in with their own span widened too, until none more join.
     """
     I, B = M.ImageRecord, M.BurstGroup
-    new = _by_ids(s, new_ids)
+    stage_pred = stage_clause(stage)
+    new = _by_ids(s, new_ids, lambda st: st.where(stage_pred))
+    if not new:
+        return [], []
     wd = timedelta(seconds=window_s)
     unplaced = (I.taken_at.is_(None)) | I.taken_at_source.in_(("mtime", "unknown"))
 
@@ -453,7 +457,7 @@ def _burst_neighbourhood(s, new_ids, window_s: float) -> tuple[list, list]:
     bursts: dict[int, M.BurstGroup] = {}
     if any(_untimed(r) for r in new):
         # Photos without a capture time are grouped on look alone, against all of their kind.
-        for r in s.exec(select(I).where(unplaced)).all():
+        for r in s.exec(select(I).where(unplaced, stage_pred)).all():
             records[r.id] = r
             if r.burst_id is not None and r.burst_id not in bursts:
                 b = s.get(B, r.burst_id)
@@ -470,7 +474,7 @@ def _burst_neighbourhood(s, new_ids, window_s: float) -> tuple[list, list]:
         spans = [tuple(m) for m in merged]
         grew = False
         for lo, hi in spans:
-            for r in s.exec(select(I).where(I.taken_at >= lo, I.taken_at <= hi)).all():
+            for r in s.exec(select(I).where(I.taken_at >= lo, I.taken_at <= hi, stage_pred)).all():
                 records[r.id] = r
                 if r.burst_id is not None and r.burst_id not in bursts:
                     b = s.get(B, r.burst_id)
@@ -483,7 +487,7 @@ def _burst_neighbourhood(s, new_ids, window_s: float) -> tuple[list, list]:
         if not grew:
             break
     for bid in bursts:
-        for r in s.exec(select(I).where(I.burst_id == bid)).all():
+        for r in s.exec(select(I).where(I.burst_id == bid, stage_pred)).all():
             records[r.id] = r
     return list(records.values()), list(bursts.values())
 
@@ -2332,7 +2336,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 "errors": res.errors, "duration_s": round(res.duration_s, 2)}
 
     def do_infer(c: CuratorConfig, body: InferReq, finish: bool = True) -> dict:
-        progress_mgr.start("AI Inference", "Running quality + faces + CLIP semantics...",
+        task_label = "Library" if body.stage == "library" else "Trash" if body.stage == "trash" else "AI Inference"
+        progress_mgr.start(task_label, "Running quality + faces + CLIP semantics...",
                            0, "Initializing AI models...")
         from ..inference.pipeline import InferencePipeline
         if body.batch_size:
@@ -2356,7 +2361,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
             raise
         app.state.last_analyzed_ids = set(getattr(res, "processed_ids", ()))
         if finish:
-            progress_mgr.finish(f"Inference complete: {res.processed} processed, "
+            prefix = f"{task_label} analysis" if body.stage in ("library", "trash") else "Inference"
+            progress_mgr.finish(f"{prefix} complete: {res.processed} processed, "
                                 f"{res.faces_total} faces in {res.duration_s:.1f}s")
         return {"ok": True, "processed": res.processed, "faces_total": res.faces_total,
                 "missing": res.missing,
@@ -2371,21 +2377,36 @@ def create_app(db_path: str | None = None) -> FastAPI:
         epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
         c.burst.window_seconds = body.window_seconds
         c.burst.similarity_threshold = body.similarity_threshold
-        progress_mgr.start("Clustering", "Burst detection and best-shot selection...", 1,
+        task_label = "Library" if body.stage == "library" else "Trash" if body.stage == "trash" else "Clustering"
+        progress_mgr.start(task_label, "Burst detection and best-shot selection...", 1,
                            "Analyzing timestamps and visual similarity...")
         try:
             with get_session(dbp) as s:
                 repo = PhotoRepository(s)
                 new_ids = getattr(app.state, "last_analyzed_ids", None)
                 all_b = repo.all_bursts()
+                stage_pred = stage_clause(body.stage)
+                if body.stage == "all":
+                    stage_bids = {b.id for b in all_b}
+                else:
+                    stage_bids = set(s.exec(select(M.ImageRecord.burst_id).where(
+                        stage_pred, M.ImageRecord.burst_id.is_not(None)
+                    ).distinct()).all())
+
                 if body.only_new and new_ids and all_b:
                     # Retakes hours apart are grouped too, so the neighbourhood is that wide.
                     reach = max(float(c.burst.window_seconds),
                                 float(getattr(c.burst, "near_window_seconds", 0) or 0),
                                 float(getattr(c.burst, "far_window_seconds", 0) or 0))
-                    records, bursts = _burst_neighbourhood(s, new_ids, reach)
+                    records, bursts = _burst_neighbourhood(s, new_ids, reach, stage=body.stage)
+                    if not records:
+                        return {"ok": True, "burst_groups": len(stage_bids), "clusters": 0}
                 else:
-                    records, bursts = repo.all_images(), all_b
+                    if body.stage == "all":
+                        records, bursts = repo.all_images(), all_b
+                    else:
+                        records = s.exec(select(M.ImageRecord).where(stage_pred)).all()
+                        bursts = [b for b in all_b if b.id in stage_bids]
                 old_best = {b.best_shot_id for b in bursts if b.best_shot_id}
                 for r in records:
                     r.burst_id = None
@@ -2426,15 +2447,23 @@ def create_app(db_path: str | None = None) -> FastAPI:
                         m.is_alternate = (m.id != best_id)
                     n += 1
                     seq += 1
+                s.commit()
+                if body.stage == "all":
+                    total_b = len(repo.all_bursts())
+                else:
+                    new_stage_bids = set(s.exec(select(M.ImageRecord.burst_id).where(
+                        stage_pred, M.ImageRecord.burst_id.is_not(None)
+                    ).distinct()).all())
+                    total_b = len(new_stage_bids)
+                if finish:
+                    progress_mgr.finish(f"Burst clustering complete: {n} burst groups identified")
+                return {"ok": True, "burst_groups": total_b, "clusters": n}
         except InterruptedError:
             progress_mgr.stop("Clustering stopped by user")
             return {"ok": False, "stopped": True, "message": "Clustering stopped by user"}
         except Exception as e:
             progress_mgr.error(str(e))
             raise
-        if finish:
-            progress_mgr.finish(f"Clustering complete: {n} burst groups detected")
-        return {"ok": True, "burst_groups": n}
 
     @app.post("/api/scan", dependencies=auth)
     def scan_folder(body: ScanReq):
@@ -2471,7 +2500,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
                                    "Comparing every photo with its neighbours...")
                 cluster_res = do_cluster(
                     c, ClusterReq(window_seconds=c.burst.window_seconds,
-                                  similarity_threshold=c.burst.similarity_threshold), finish=False)
+                                  similarity_threshold=c.burst.similarity_threshold,
+                                  stage="library"), finish=False)
                 if progress_mgr.is_stopped() or (isinstance(cluster_res, dict) and cluster_res.get("stopped")):
                     progress_mgr.stop("Library analysis stopped by user")
                     return {"ok": False, "stopped": True, "message": "Library analysis stopped by user"}

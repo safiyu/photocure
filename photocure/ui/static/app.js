@@ -3040,7 +3040,7 @@
         if (btn) {
           btn.onclick = async () => {
             await runTask("Grouping bursts", async () => {
-              const res = await post("/api/cluster", { only_new: false });
+              const res = await post("/api/cluster", { only_new: false, stage: state.stage || "new" });
               if (res && res.burst_groups != null) {
                 libLog(`Grouping finished: ${fmtN(res.burst_groups)} burst groups`, "ok");
                 toast(`Found ${fmtN(res.burst_groups)} burst groups`, "ok");
@@ -6162,52 +6162,54 @@
       if (b) b.disabled = num(stageCounts.trash) === 0;  // nothing to empty or return
     });
 
-    const total = ov.total, pending = num(s.pending_inference), bursts = num(s.burst_groups);
-    let stored = null;
-    try {
-      stored = localStorage.getItem("pcur-grouped-total");
-      if (!total) localStorage.removeItem("pcur-grouped-total");
-    } catch (e) { /* storage unavailable */ }
-    const flow = flowStates(total, pending, bursts, stored);
-    state.inferred = flow.inferred;
-    const step = (id, cls, text) => {
-      const li = $("#step-" + id);
-      if (!li) return;
-      li.classList.toggle("done", cls === "done");
-      li.classList.toggle("active", cls === "active");
-      li.classList.toggle("locked", cls === "locked");
-      $("#state-" + id).textContent = text;
-      const pipeLabel = $("#pipe-label-" + id);
-      if (pipeLabel) pipeLabel.textContent = text;
-    };
-    step("scan", flow.scan, total > 0 ? `${fmtN(total)} indexed` : "Not started");
-    step("infer", flow.infer, pending > 0 ? `${fmtN(pending)} waiting`
-      : flow.next === "infer" ? "Needs grouping" : total > 0 ? "Done" : "Needs step 1");
+    if ((state.stage || "new") === "new") {
+      const total = ov.total, pending = num(s.pending_inference), bursts = num(s.burst_groups);
+      let stored = null;
+      try {
+        stored = localStorage.getItem("pcur-grouped-total");
+        if (!total) localStorage.removeItem("pcur-grouped-total");
+      } catch (e) { /* storage unavailable */ }
+      const flow = flowStates(total, pending, bursts, stored);
+      state.inferred = flow.inferred;
+      const step = (id, cls, text) => {
+        const li = $("#step-" + id);
+        if (!li) return;
+        li.classList.toggle("done", cls === "done");
+        li.classList.toggle("active", cls === "active");
+        li.classList.toggle("locked", cls === "locked");
+        $("#state-" + id).textContent = text;
+        const pipeLabel = $("#pipe-label-" + id);
+        if (pipeLabel) pipeLabel.textContent = text;
+      };
+      step("scan", flow.scan, total > 0 ? `${fmtN(total)} indexed` : "Not started");
+      step("infer", flow.infer, pending > 0 ? `${fmtN(pending)} waiting`
+        : flow.next === "infer" ? "Needs grouping" : total > 0 ? "Done" : "Needs step 1");
 
-    // Per-card hint text (beside each button)
-    const scanHint = $("#scan-hint");
-    if (scanHint) scanHint.textContent = total > 0 ? "Already-indexed photos are skipped." : "Choose a folder, then press Scan.";
-    const inferHint = $("#infer-hint");
-    if (inferHint) {
-      inferHint.textContent = pending > 0
-        ? `${fmtN(pending)} photo${pending === 1 ? "" : "s"} ready to analyze.`
-        : flow.next === "infer" ? "Ready when you are."
-        : total > 0 ? "Nothing waiting to analyze." : "Run Scan first.";
+      // Per-card hint text (beside each button)
+      const scanHint = $("#scan-hint");
+      if (scanHint) scanHint.textContent = total > 0 ? "Already-indexed photos are skipped." : "Choose a folder, then press Scan.";
+      const inferHint = $("#infer-hint");
+      if (inferHint) {
+        inferHint.textContent = pending > 0
+          ? `${fmtN(pending)} photo${pending === 1 ? "" : "s"} ready to analyze.`
+          : flow.next === "infer" ? "Ready when you are."
+          : total > 0 ? "Nothing waiting to analyze." : "Run Scan first.";
+      }
+
+      // Analysis stages pill row
+      const INFER_STAGES = ["Faces", "Sharpness", "Exposure", "Labels", "Bursts", "Categories"];
+      const stagesEl = $("#infer-stages");
+      if (stagesEl) {
+        const allDone = flow.infer === "done";
+        const running = pending > 0;
+        stagesEl.innerHTML = INFER_STAGES.map((s) =>
+          `<span class="stage-pill${allDone ? " done" : running ? " cur" : ""}">${allDone ? "✓ " : ""}${s}</span>`
+        ).join("");
+      }
+
+      const hint = $("#dock-hint");
+      if (hint) hint.textContent = nextHint(flow, total);
     }
-
-    // Analysis stages pill row
-    const INFER_STAGES = ["Faces", "Sharpness", "Exposure", "Labels", "Bursts", "Categories"];
-    const stagesEl = $("#infer-stages");
-    if (stagesEl) {
-      const allDone = flow.infer === "done";
-      const running = pending > 0;
-      stagesEl.innerHTML = INFER_STAGES.map((s) =>
-        `<span class="stage-pill${allDone ? " done" : running ? " cur" : ""}">${allDone ? "✓ " : ""}${s}</span>`
-      ).join("");
-    }
-
-    const hint = $("#dock-hint");
-    if (hint) hint.textContent = nextHint(flow, total);
   }
 
   let statsSeq = 0;
@@ -6921,7 +6923,7 @@
         const ov = state.overview || {};
         const hasBursts = num(ov.stats && ov.stats.burst_groups) > 0;
         if (!inferred.new_ids_count && hasBursts) return { inferred, grouped: null };
-        const grouped = await post("/api/cluster", { only_new: !!inferred.new_ids_count });
+        const grouped = await post("/api/cluster", { only_new: !!inferred.new_ids_count, stage: "new" });
         if (grouped && grouped.stopped) return grouped;
         return { inferred, grouped };
       });
@@ -6944,7 +6946,7 @@
     if (clusterBtn) {
       clusterBtn.onclick = async () => {
         const r = await runTask("Grouping bursts", async () => {
-          const res = await post("/api/cluster", { only_new: false });
+          const res = await post("/api/cluster", { only_new: false, stage: "new" });
           if (res && res.stopped) return res;
           return res;
         });

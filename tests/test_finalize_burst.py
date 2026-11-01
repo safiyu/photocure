@@ -328,3 +328,87 @@ def test_finalize_all_bursts_can_be_undone(multi_burst_env):
             rec = s.get(M.ImageRecord, rid)
             assert rec.stage == M.STAGE_NEW
 
+
+def test_cluster_stage_isolation(burst_env, tmp_path):
+    import numpy as np
+    from photocure.db.repository import quantize_embedding
+
+    rng = np.random.default_rng(42)
+    vec = [float(x) for x in (rng.normal(size=512) / np.linalg.norm(rng.normal(size=512)))]
+    emb = quantize_embedding(vec)
+
+    # Give the 2 kept photos in library exif timestamps and identical embeddings
+    with get_session(burst_env.db) as s:
+        recs = s.exec(select(M.ImageRecord).order_by(M.ImageRecord.id)).all()
+        for i, r in enumerate(recs):
+            r.taken_at = datetime(2024, 1, 1, 10, 0, i, tzinfo=timezone.utc)
+            r.taken_at_source = "exif:dtoriginal"
+            if not r.semantic:
+                s.add(M.SemanticScore(image_id=r.id, embedding=emb))
+            else:
+                r.semantic.embedding = emb
+        s.commit()
+
+    # 1. Finalize the initial burst so it is in library
+    r = burst_env.client.post(f"/api/bursts/{burst_env.burst_id}/finalize")
+    assert r.status_code == 200
+    ov_lib = burst_env.client.get("/api/overview?stage=library").json()
+    assert ov_lib["stats"]["burst_groups"] == 1
+
+    # 2. Add two new photos to new stage and form a new burst in new
+    new_dir = tmp_path / "new_photos"
+    new_dir.mkdir()
+    for i in (10, 11):
+        make_image(new_dir / f"new_{i}.jpg", rng_seed=i)
+    assert burst_env.client.post("/api/scan", json={"path": str(new_dir)}).status_code == 200
+    assert burst_env.client.post("/api/infer", json={"device": "cpu"}).status_code == 200
+
+    with get_session(burst_env.db) as s:
+        new_recs = s.exec(select(M.ImageRecord).where(M.ImageRecord.stage == "new").order_by(M.ImageRecord.id)).all()
+        assert len(new_recs) == 2
+        for i, nr in enumerate(new_recs):
+            nr.taken_at = datetime(2024, 2, 2, 10, 0, i, tzinfo=timezone.utc)
+            nr.taken_at_source = "exif:dtoriginal"
+            if not nr.semantic:
+                s.add(M.SemanticScore(image_id=nr.id, embedding=emb))
+            else:
+                nr.semantic.embedding = emb
+        bg_new = M.BurstGroup(name="Burst_20240202_0001", image_count=2, best_shot_id=new_recs[0].id)
+        s.add(bg_new)
+        s.flush()
+        new_recs[0].burst_id = bg_new.id
+        new_recs[0].is_best_shot = True
+        new_recs[1].burst_id = bg_new.id
+        new_recs[1].is_alternate = True
+        s.commit()
+        new_bid = bg_new.id
+
+    # Verify both stages have 1 burst group
+    assert burst_env.client.get("/api/overview?stage=new").json()["stats"]["burst_groups"] == 1
+    assert burst_env.client.get("/api/overview?stage=library").json()["stats"]["burst_groups"] == 1
+
+    # 3. Cluster on stage=library only
+    res = burst_env.client.post("/api/cluster", json={"stage": "library"}).json()
+    assert res["ok"] is True
+
+    # The burst in stage=new must still be completely intact!
+    with get_session(burst_env.db) as s:
+        new_burst = s.get(M.BurstGroup, new_bid)
+        assert new_burst is not None
+        recs_in_new = s.exec(select(M.ImageRecord).where(M.ImageRecord.burst_id == new_bid)).all()
+        assert len(recs_in_new) == 2
+        for r in recs_in_new:
+            assert r.stage == "new"
+
+    assert burst_env.client.get("/api/overview?stage=new").json()["stats"]["burst_groups"] == 1
+    assert burst_env.client.get("/api/overview?stage=library").json()["stats"]["burst_groups"] == 1
+
+    # 4. Cluster on stage=new only
+    res = burst_env.client.post("/api/cluster", json={"stage": "new"}).json()
+    assert res["ok"] is True
+
+    # The burst in stage=library must still be intact!
+    assert burst_env.client.get("/api/overview?stage=library").json()["stats"]["burst_groups"] == 1
+    assert burst_env.client.get("/api/overview?stage=new").json()["stats"]["burst_groups"] == 1
+
+
