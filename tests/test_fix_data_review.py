@@ -88,7 +88,9 @@ def test_resolve_group_clears_keeper_delete_approval(tmp_path):
     w = build_world(tmp_path, n=2)
     with get_session(w.db) as s:
         for i in w.ids:
-            s.get(ImageRecord, i).delete_approved = True
+            r = s.get(ImageRecord, i)
+            r.delete_approved = True
+            r.sha256 = "a" * 64  # make the two rows an exact pair
         resolve_group(s, keep_id=w.ids[0], discard_ids=[w.ids[1]], kind="exact")
     assert get_img(w, w.ids[0]).delete_approved is False
 

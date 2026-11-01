@@ -82,7 +82,7 @@ def _wait(c, job_id, timeout=10):
     raise AssertionError("job did not finish")
 
 
-def test_learn_job_is_done_even_if_stop_pressed(app, monkeypatch):
+def test_learn_job_is_done_even_if_stop_pressed(app, monkeypatch, tmp_path):
     from photocure.services import Planner
 
     def slow_learn(self):
@@ -91,6 +91,7 @@ def test_learn_job_is_done_even_if_stop_pressed(app, monkeypatch):
 
     monkeypatch.setattr(Planner, "learn_from_corrections", slow_learn, raising=False)
     c = TestClient(app, headers={"X-PCUR-Token": app.state.token, "Origin": "http://testserver"})
+    c.post("/api/settings", json={"library_root": str(tmp_path / "out")})
     job_id = c.post("/api/learn").json()["job_id"]
     c.post("/api/stop")
     j = _wait(c, job_id)

@@ -144,8 +144,9 @@ class ScanReq(RunOverrides):
 
 class InferReq(RunOverrides):
     batch_size: int = 32
-    # "new" analyses unfinished photos; "trash" and "library" redo the photos already there.
-    stage: Literal["new", "trash", "library"] = "new"
+    # "new" analyses unfinished photos; "trash" redoes the trashed ones. The library
+    # is re-analysed by the dedicated /api/library/reanalyse endpoint, not here.
+    stage: Literal["new", "trash"] = "new"
 
 
 class ClusterReq(BaseModel):
@@ -1558,6 +1559,123 @@ def create_app(db_path: str | None = None) -> FastAPI:
         tmp.write_bytes(data)
         os.replace(tmp, cache)
         return Response(data, media_type="image/webp", headers=headers)
+
+    @app.get("/api/images/{image_id}/full")
+    def image_full(image_id: int):
+        from ..editor_actions import ActionError, get_oriented_image_stream
+        try:
+            data, mime = get_oriented_image_stream(dbp, image_id)
+        except ActionError as e:
+            raise HTTPException(e.status, str(e))
+        except FileNotFoundError as e:
+            raise HTTPException(404, str(e))
+        except Exception as e:
+            raise HTTPException(500, f"Failed to retrieve image: {e}")
+        return Response(content=data, media_type=mime, headers={"Cache-Control": "no-cache"})
+
+    @app.post("/api/images/{image_id}/edit-save", dependencies=auth)
+    async def edit_save(image_id: int, request: Request):
+        import base64
+        from ..editor_actions import ActionError, save_edited_image
+        content_type = request.headers.get("content-type", "")
+        if content_type.startswith("multipart/form-data"):
+            form = await request.form()
+            file_item = form.get("file")
+            if not file_item:
+                raise HTTPException(400, "Missing 'file' in form data")
+            image_bytes = await file_item.read()
+            mode = form.get("mode", "copy")
+            fmt = form.get("format", None)
+        else:
+            try:
+                body = await request.json()
+            except Exception:
+                raise HTTPException(400, "Invalid JSON body")
+            data_str = body.get("image", "")
+            if "," in data_str:
+                data_str = data_str.split(",", 1)[1]
+            try:
+                image_bytes = base64.b64decode(data_str)
+            except Exception:
+                raise HTTPException(400, "Invalid base64 image data")
+            mode = body.get("mode", "copy")
+            fmt = body.get("format", None)
+
+        try:
+            res = save_edited_image(dbp, app.state.cfg, image_id, image_bytes, mode=mode, format=fmt)
+            return res
+        except ActionError as e:
+            raise HTTPException(e.status, str(e))
+        except FileNotFoundError as e:
+            raise HTTPException(404, str(e))
+        except Exception as e:
+            logging.getLogger("photocure.ui").exception("edit-save failed")
+            raise HTTPException(500, f"Save failed: {e}")
+
+    @app.post("/api/editor/remove-bg", dependencies=auth)
+    async def editor_remove_bg(request: Request):
+        import base64
+        from ..editor_actions import ActionError, remove_background
+        content_type = request.headers.get("content-type", "")
+        if content_type.startswith("multipart/form-data"):
+            form = await request.form()
+            file_item = form.get("file")
+            if not file_item:
+                raise HTTPException(400, "Missing 'file' in form data")
+            image_bytes = await file_item.read()
+        else:
+            try:
+                body = await request.json()
+            except Exception:
+                raise HTTPException(400, "Invalid JSON body")
+            data_str = body.get("image", "")
+            if "," in data_str:
+                data_str = data_str.split(",", 1)[1]
+            try:
+                image_bytes = base64.b64decode(data_str)
+            except Exception:
+                raise HTTPException(400, "Invalid base64 image data")
+
+        try:
+            png_bytes = remove_background(image_bytes)
+            b64_out = base64.b64encode(png_bytes).decode("ascii")
+            return {"ok": True, "image": f"data:image/png;base64,{b64_out}"}
+        except ActionError as e:
+            raise HTTPException(e.status, str(e))
+        except Exception as e:
+            logging.getLogger("photocure.ui").exception("remove-bg failed")
+            raise HTTPException(500, f"Background removal failed: {e}")
+
+    @app.post("/api/editor/ocr", dependencies=auth)
+    async def editor_ocr(request: Request):
+        import base64
+        from ..editor_actions import extract_text
+        content_type = request.headers.get("content-type", "")
+        if content_type.startswith("multipart/form-data"):
+            form = await request.form()
+            file_item = form.get("file")
+            if not file_item:
+                raise HTTPException(400, "Missing 'file' in form data")
+            image_bytes = await file_item.read()
+        else:
+            try:
+                body = await request.json()
+            except Exception:
+                raise HTTPException(400, "Invalid JSON body")
+            data_str = body.get("image", "")
+            if "," in data_str:
+                data_str = data_str.split(",", 1)[1]
+            try:
+                image_bytes = base64.b64decode(data_str)
+            except Exception:
+                raise HTTPException(400, "Invalid base64 image data")
+
+        try:
+            text = extract_text(image_bytes)
+            return {"ok": True, "text": text}
+        except Exception as e:
+            logging.getLogger("photocure.ui").exception("ocr failed")
+            raise HTTPException(500, f"OCR failed: {e}")
 
     @app.get("/api/images/{image_id}/faces")
     def image_faces(image_id: int):

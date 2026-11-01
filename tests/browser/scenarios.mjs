@@ -1030,6 +1030,103 @@ try {
     }
   });
 
+  await scenario("the photo editor opens from a card, shows all 13 tools, and closes with Escape", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); true");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
+    const id = Number(await page.eval("document.querySelector('#grid .vg-window .card').dataset.id"));
+    await page.eval(`document.querySelector('#grid .card[data-id="${id}"] [data-edit]').click(); true`);
+    await page.waitFor("window.PCUR_EDITOR && PCUR_EDITOR.active", 20000, "editor opens");
+    check(await page.eval("document.querySelectorAll('.pcur-ed .pcur-tool').length") === 13, "the toolbar does not list all 13 tools");
+    check(await page.eval("window.PCUR_EDITOR.histLen") === 1, "the opening state is not recorded in the history");
+    check(await page.eval("!!document.querySelector('.pcur-ed canvas.pcur-disp')"), "no display canvas in the stage");
+    await press("Escape");
+    await page.waitFor("!window.PCUR_EDITOR.active", 10000, "the editor closes");
+    check(await page.eval("!!document.querySelector('#grid')"), "the library is still there after closing");
+  });
+
+  await scenario("remaster and sharpen stay finite on solid black and white fills", async () => {
+    const bad = await page.eval(`(() => {
+      const sample = (fill) => {
+        const c = document.createElement('canvas'); c.width = c.height = 128;
+        const x = c.getContext('2d');
+        x.fillStyle = fill; x.fillRect(0, 0, 128, 128);
+        window.PCUR_EDITOR.remaster(x, 128, 128);
+        const d = x.getImageData(0, 0, 128, 128).data;
+        for (let i = 0; i < d.length; i += 4) {
+          const v = d[i];
+          if (!Number.isFinite(v) || v < 0 || v > 255) return { bad: true, fill, at: i, v };
+        }
+        return null;
+      };
+      const r1 = sample("#000000"); if (r1) return r1;
+      const r2 = sample("#ffffff"); if (r2) return r2;
+      const c = document.createElement('canvas'); c.width = c.height = 64;
+      const x = c.getContext('2d'); x.fillStyle = "#808080"; x.fillRect(0, 0, 64, 64);
+      window.PCUR_EDITOR.sharpen(x, 64, 64, 0.5);
+      return null;
+    })()`);
+    check(bad === null, "a non-finite or out-of-range pixel after remaster/sharpen: " + JSON.stringify(bad));
+  });
+
+  await scenario("the editor caps undo at ten states and Save as copy adds a new library photo", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); true");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
+    const id = Number(await page.eval("document.querySelector('#grid .vg-window .card').dataset.id"));
+    const item = (await api(`/api/images/${id}`)).item;
+    const stem = (item.filename || "").replace(/\.[a-z0-9]+$/i, "");
+    await page.eval(`document.querySelector('#grid .card[data-id="${id}"] [data-edit]').click(); true`);
+    await page.waitFor("window.PCUR_EDITOR.active", 20000, "editor opens");
+    await page.eval("document.querySelector('.pcur-tool[data-tool=\"filters\"]').click(); true");
+    await page.waitFor("!!document.querySelector('.pcur-filters .pcur-fil')", 8000, "filter grid renders");
+    const setFilter = (i) => page.eval(`(() => { const f = document.querySelectorAll('.pcur-filters .pcur-fil'); f[${i}].click(); return f[${i}].classList.contains('on'); })()`);
+    const applyBtn = () => page.eval("document.querySelector('.pcur-filters').closest('.pcur-panelbody').querySelector('button.btn.primary').click(); true");
+    // The opening state is history #1; each Apply commits one more. Nine applies reach the cap of ten.
+    for (let i = 0; i < 9; i++) {
+      await setFilter(1 + (i % 2));
+      await applyBtn();
+      await page.waitFor("window.PCUR_EDITOR.histLen === " + (i + 2), 15000, `state ${i + 2} recorded`);
+    }
+    // Push past the cap: the length must never climb above ten.
+    for (let i = 0; i < 3; i++) {
+      await setFilter(1 + (i % 2));
+      await applyBtn();
+      await page.frames(4);
+      check((await page.eval("window.PCUR_EDITOR.histLen")) <= 10, `history exceeded ten states on commit ${i + 1}`);
+    }
+    check((await page.eval("window.PCUR_EDITOR.histLen")) === 10, "history did not cap at exactly ten");
+    await press("z", 2);
+    await page.frames(4);
+    check((await page.eval("window.PCUR_EDITOR.histLen")) === 10, "undo changed the number of recorded states");
+    check(await page.eval("!document.querySelector('.pcur-ed .pcur-hist[disabled]')"), "undo should still be offered at the cap");
+    await press("y", 2);
+    await page.frames(4);
+    check(await page.eval("window.PCUR_EDITOR.active"), "the editor closed during undo/redo");
+    // Save as a copy: a new photo named {stem}_edited appears in the library.
+    const before = (await api(`/api/images?q=${encodeURIComponent(stem)}_edited&limit=5`)).total;
+    await page.eval("document.querySelector('.pcur-ed .pcur-top .btn.primary').click(); true");
+    await page.waitFor("!!document.querySelector('.pcur-saveback')", 8000, "save dialog opens");
+    await page.eval("document.querySelector('.pcur-savedlg [data-act=\"copy\"]').click(); true");
+    await page.waitFor(`fetch('/api/images?q=${encodeURIComponent(stem + "_edited")}&limit=5').then((r) => r.json()).then((j) => j.total === ${before + 1})`, 30000, "the edited copy is in the library");
+    await page.waitFor("!document.querySelector('.pcur-saveback')", 8000, "save dialog closes");
+    await press("Escape");
+    await page.waitFor("!window.PCUR_EDITOR.active", 10000, "editor closes after saving");
+  });
+
+  await scenario("the burst collage saves a new photo to the library", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"bursts\"]').click(); true");
+    await page.waitFor("document.querySelectorAll('#burstdetail .card').length === 4", 10000, "burst photos");
+    check(await page.eval("!!document.querySelector('#btn-make-collage')"), "no Make collage button in the burst bar");
+    const before = (await api("/api/images?limit=1")).total;
+    await page.eval("document.querySelector('#btn-make-collage').click(); true");
+    await page.waitFor("window.PCUR_COLLAGE && PCUR_COLLAGE.active", 20000, "the collage builder opens");
+    check(await page.eval("document.querySelectorAll('.pcur-cg-frame.on').length") >= 2, "no preselected frames");
+    await page.waitFor("document.querySelectorAll('.pcur-cg-frames .pcur-cg-frame').length === 4", 15000, "all frames listed");
+    check(await page.eval("document.querySelectorAll('.pcur-cg-layouts .chip').length >= 3"), "too few layouts offered");
+    await page.eval("document.querySelector('.pcur-cg [data-save]').click(); true");
+    await page.waitFor(`fetch('/api/images?limit=1').then((r) => r.json()).then((j) => j.total === ${before + 1})`, 60000, "the collage is in the library");
+    await page.waitFor("!window.PCUR_COLLAGE.active", 20000, "the builder closes after saving");
+  });
+
   await scenario("the page raised no script errors", async () => {
     check(page.errors.length === 0, "script errors: " + page.errors.join(" | ").slice(0, 400));
   });

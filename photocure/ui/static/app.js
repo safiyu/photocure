@@ -631,7 +631,15 @@
         title: "Inspect faces",
         "aria-label": "Inspect faces",
         tabindex: -1,
-      }, el("span", { class: "btn-ic", html: icon("face", "sm") }), el("span", { class: "btn-lbl", text: "Faces" })) : null
+      }, el("span", { class: "btn-ic", html: icon("face", "sm") }), el("span", { class: "btn-lbl", text: "Faces" })) : null,
+      el("button", {
+        type: "button",
+        class: "btn btn-edit",
+        "data-edit": id,
+        title: "Open in the photo editor (e)",
+        "aria-label": "Edit " + (it.filename || "") + " in the photo editor",
+        tabindex: -1,
+      }, el("span", { class: "btn-ic", html: icon("pen", "sm") }), el("span", { class: "btn-lbl", text: "Edit" }))
     );
 
     return el("figure", { class: cls, "data-id": id, tabindex: -1, role: "gridcell" }, thumb, cap, actions);
@@ -2275,7 +2283,7 @@
     delegatesBound = true;
     document.addEventListener("click", async (ev) => {
       const t = ev.target.closest && ev.target.closest(
-        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-purge],[data-similar],[data-faces],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-analyze-now],.thumb");
+        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-purge],[data-similar],[data-faces],[data-edit],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-analyze-now],.thumb");
       if (!t) return;
       try {
         if (t.dataset.pick) await togglePick(num(t.dataset.pick), ev.shiftKey);
@@ -2293,6 +2301,8 @@
           await showSimilar(num(t.dataset.similar));
         } else if (t.dataset.faces) {
           await openBiometricProjection(t.dataset.burst ? num(t.dataset.burst) : null, num(t.dataset.faces));
+        } else if (t.dataset.edit) {
+          await openPhotoEditorFor(num(t.dataset.edit));
         } else if (t.dataset.more) {
           const g = grids[t.dataset.more];
           if (g) await g.loadMore();
@@ -2480,6 +2490,34 @@
     }
   }
 
+  async function openPhotoEditorFor(id) {
+    id = num(id);
+    if (!window.PCUR_EDITOR) { toast("The photo editor did not load", "err"); return; }
+    if (window.PCUR_EDITOR.active) return;
+    const it = state.byId[id] || await fetchImageDetails(id);
+    if (!it) { toast("Could not load that photo", "err"); return; }
+    if (lb.open) await closeLightbox();
+    await window.PCUR_EDITOR.openPhotoEditor(id, {
+      filename: it.filename,
+      onSaved: (res) => {
+        if (res && res.mode === "overwrite") {
+          const cur = state.byId[id] || { id };
+          Object.assign(cur, {
+            filename: res.filename || cur.filename,
+            width: res.width || cur.width,
+            height: res.height || cur.height,
+            fp: (cur.fp || 0) + 1,
+          });
+          state.byId[id] = cur;
+          itemUpdated(cur);
+        } else {
+          resetVisibleGrids();
+        }
+        toast("Saved " + (res && res.filename ? res.filename : "the edit"), "ok");
+      },
+    });
+  }
+
   async function lbStep(d) {
     const n = lb.i + d;
     if (n < 0 || n >= lbCount()) return;
@@ -2542,6 +2580,7 @@
     sel.value = eff(it) || "";
     sel.disabled = !full;
     $("#lb-lock").disabled = !full;
+    $("#lb-edit").disabled = !full;
     $("#lb-clear").disabled = !full || !it.manual_bucket;
     $("#lb-lock span").textContent = it.locked ? "Unlock" : "Lock";
     const facesBtn = $("#lb-faces");
@@ -2662,6 +2701,7 @@
     $("#lb-fav").onclick = () => toggleFavorite(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
     $("#lb-reject").onclick = () => toggleReject(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
     $("#lb-similar").onclick = () => { const id = lbIdAt(lb.i); closeLightbox(); showSimilar(id); };
+    $("#lb-edit").onclick = () => openPhotoEditorFor(lbIdAt(lb.i)).catch((e) => toast(e.message, "err"));
     $("#lb-clear").onclick = async () => {
       const id = lbIdAt(lb.i);
       try { const prev = await reassign(id, null); state.undo.push({ id, prev }); toast("Back to the AI choice", "ok"); }
@@ -2873,6 +2913,8 @@
   async function onKey(ev) {
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     if (SELF_MANAGED.some(open)) return;
+    if (window.PCUR_EDITOR && window.PCUR_EDITOR.active) return;  // the editor owns the keyboard
+    if (window.PCUR_COLLAGE && window.PCUR_COLLAGE.active) return;  // the collage builder owns the keyboard
     const tag = (ev.target.tagName || "").toLowerCase();
     const typing = tag === "input" || tag === "select" || tag === "textarea";
 
@@ -2898,6 +2940,7 @@
       if (lb.open) {
         if (k === "arrowleft") await lbStep(-1);
         else if (k === "arrowright") await lbStep(1);
+        else if (k === "e") { await openPhotoEditorFor(lbIdAt(lb.i)); return; }
         else if (!(await shortcut(k, lbIdAt(lb.i), false))) return;
         ev.preventDefault();
         return;
@@ -5167,6 +5210,15 @@
     }
     if (data.face_matrix && data.face_matrix.subjects && data.face_matrix.subjects.length > 0) {
       addBtn(inspectGroup, '<svg class="ic sm" aria-hidden="true"><use href="#i-face"/></svg><span>Compare all faces (Matrix)</span>', () => openBiometricProjection(id, data.members[0].id, "matrix"), "secondary", "btn-compare-faces-matrix");
+    }
+    if (data.members.length >= 2) {
+      const bestId = (group && group.best_id) || (data.members.find((m) => m.is_best_shot) || {}).id || data.members[0].id;
+      addBtn(inspectGroup, '<svg class="ic sm" aria-hidden="true"><use href="#i-grid"/></svg><span>Make collage</span>', () => {
+        if (!window.PCUR_COLLAGE) { toast("The collage builder did not load", "err"); return; }
+        window.PCUR_COLLAGE.openBurstCollage(data.members, bestId, {
+          onSaved: (res) => { toast("Collage saved: " + (res && res.filename ? res.filename : ""), "ok"); resetVisibleGrids(); },
+        });
+      }, "secondary", "btn-make-collage");
     }
     const others = data.members.filter((m) => !m.is_best_shot);
     const unmarked = others.filter((m) => !m.delete_approved).map((m) => m.id);
