@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="2.0.2" type="stable" date="2026-11-02">
+      <description>
+        <p>Photocure release 2.0.2: Make rapidocr an optional extra to safeguard headless OpenCV on headless servers and CI.</p>
+      </description>
+    </release>
     <release version="2.0.1" type="stable" date="2026-11-02">
       <description>
         <p>Photocure release 2.0.1: BiRefNet MIT bg removal, 3-stage AI remaster, RapidOCR, editor fixes.</p>

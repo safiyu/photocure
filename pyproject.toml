@@ -29,10 +29,15 @@ dependencies = [
     "lxml>=5.0",
     "reverse_geocoder>=1.5.1",
     "rembg[cpu]>=2.0",
-    "rapidocr-onnxruntime>=1.3",
 ]
 
 [project.optional-dependencies]
+# Scene & document OCR via PaddleOCR v4 ONNX (Apache-2.0). Optional extra: Photocure
+# falls back gracefully to host pytesseract when not installed, and keeping it optional
+# prevents rapidocr-onnxruntime from dragging in GUI opencv on headless systems.
+ocr = [
+    "rapidocr-onnxruntime>=1.3",
+]
 # AI model for recognising photos. Works on Apple Silicon (MPS), NVIDIA and plain CPU.
 ml = [
     "torch>=2.1",
