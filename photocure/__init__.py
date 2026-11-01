@@ -3,4 +3,4 @@
 Offline, GPU-accelerated, transactionally reversible photo library curation engine.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.0.1"

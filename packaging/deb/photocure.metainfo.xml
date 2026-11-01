@@ -38,6 +38,16 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="2.0.1" type="stable" date="2026-11-02">
+      <description>
+        <p>Photocure release 2.0.1: BiRefNet MIT bg removal, 3-stage AI remaster, RapidOCR, editor fixes.</p>
+      </description>
+    </release>
+    <release version="2.0.0" type="stable" date="2026-11-01">
+      <description>
+        <p>Photocure release 2.0.0: Ranthal photo editor suite and burst collage builder.</p>
+      </description>
+    </release>
     <release version="1.5.12" type="stable" date="2026-11-01">
       <description>
         <p>Photocure release 1.5.12.</p>
