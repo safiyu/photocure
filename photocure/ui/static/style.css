@@ -4615,10 +4615,12 @@ button.pcur-hist, button.pcur-tool, button.chip, button.pcur-fil, button.pcur-st
 .pcur-cg-back { position: absolute; inset: 0; background: var(--scrim); backdrop-filter: blur(4px); }
 .pcur-cg-dlg {
   position: relative; width: min(1060px, 100%); height: min(760px, calc(100vh - 36px));
-  display: grid; grid-template-rows: auto 1fr auto; background: var(--sheet);
+  max-height: calc(100vh - 36px);
+  display: flex; flex-direction: column; background: var(--sheet);
   border-radius: var(--r-lg); box-shadow: var(--shadow); overflow: hidden;
 }
 .pcur-cg-top {
+  flex-shrink: 0;
   display: flex; align-items: center; gap: 12px; padding: 12px 16px;
   border-bottom: 1px solid var(--line);
 }
@@ -4626,10 +4628,14 @@ button.pcur-hist, button.pcur-tool, button.chip, button.pcur-fil, button.pcur-st
 .pcur-cg-count { font-size: 12.5px; color: var(--faint); }
 .pcur-cg-top .pcur-x { margin-left: auto; }
 
-.pcur-cg-body { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: 0; }
+.pcur-cg-body {
+  flex: 1 1 0; min-height: 0;
+  display: grid; grid-template-columns: 270px minmax(0, 1fr);
+  overflow: hidden;
+}
 .pcur-cg-side {
   border-right: 1px solid var(--line); padding: 14px; overflow-y: auto;
-  display: grid; gap: 10px; align-content: start;
+  display: grid; gap: 10px; align-content: start; min-height: 0;
 }
 .pcur-cg-sec { font-size: 12.5px; font-weight: 700; color: var(--mut); margin-top: 4px; }
 .pcur-cg-sub { font-weight: 500; color: var(--faint); }
@@ -4652,20 +4658,25 @@ button.pcur-hist, button.pcur-tool, button.chip, button.pcur-fil, button.pcur-st
 .pcur-cg-layouts .chip.on, .pcur-cg-sizes .chip.on { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
 
 .pcur-cg-stage {
-  position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; padding: 18px;
+  position: relative; min-width: 0; min-height: 0; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; padding: 18px;
   background: repeating-conic-gradient(var(--well) 0% 25%, var(--sheet) 0% 50%) 0 0 / 22px 22px;
 }
 .pcur-cg-stage canvas {
   max-width: 100%; max-height: 100%; width: auto; height: auto;
+  object-fit: contain; display: block;
   box-shadow: var(--shadow); border-radius: 4px; cursor: grab; touch-action: none;
 }
 .pcur-cg-hint {
   position: absolute; left: 18px; bottom: 12px; font-size: 11.5px; color: var(--faint);
   background: color-mix(in srgb, var(--sheet) 82%, transparent); padding: 4px 10px; border-radius: 999px;
+  pointer-events: none;
 }
 .pcur-cg-foot {
+  flex-shrink: 0;
   display: flex; align-items: center; justify-content: flex-end; gap: 10px;
   padding: 12px 16px; border-top: 1px solid var(--line);
+  background: var(--sheet); z-index: 2;
 }
 .pcur-cg-foot .btn { display: inline-flex; align-items: center; gap: 6px; }
 .pcur-cg-foot .btn.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
