@@ -300,14 +300,32 @@ def save_edited_image(db_path: Path | str, cfg: CuratorConfig, image_id: int, im
     }
 
 
-def remove_background(image_bytes: bytes) -> bytes:
-    """Remove background from image bytes using rembg or OpenCV GrabCut fallback."""
-    # 1. Try rembg / AI models if installed
-    try:
-        import rembg
-        return rembg.remove(image_bytes)
-    except Exception as exc:
-        log.warning("rembg background removal failed or uninstalled (%s); falling back to GrabCut", exc)
+_REMBG_SESSIONS: dict[str, object] = {}
+_SR_SESSION: object | None = None
+_RAPIDOCR_ENGINE: object | None = None
+
+
+def _get_rembg_session(model_name: str = "birefnet-general"):
+    """Load and cache an MIT / Apache-2.0 rembg session (never uses non-commercial bria-rmbg)."""
+    import rembg
+    allowed = ("birefnet-general", "isnet-general-use", "u2net", "u2netp")
+    if model_name not in allowed:
+        model_name = "birefnet-general"
+    if model_name not in _REMBG_SESSIONS:
+        _REMBG_SESSIONS[model_name] = rembg.new_session(model_name)
+    return _REMBG_SESSIONS[model_name]
+
+
+def remove_background(image_bytes: bytes, model_name: str = "birefnet-general") -> bytes:
+    """Remove background from image bytes using BiRefNet (MIT) / U2-Net (Apache-2.0) or OpenCV GrabCut fallback."""
+    # 1. Try rembg with strictly permissive MIT / Apache-2.0 models (BiRefNet -> U2-Net)
+    for candidate in (model_name, "u2net"):
+        try:
+            import rembg
+            session = _get_rembg_session(candidate)
+            return rembg.remove(image_bytes, session=session)
+        except Exception as exc:
+            log.warning("rembg (%s) failed or uninstalled (%s)", candidate, exc)
 
     # 2. Fallback to OpenCV cv2.grabCut with morphological refinement
     arr = np.frombuffer(image_bytes, np.uint8)
@@ -353,8 +371,242 @@ def remove_background(image_bytes: bytes) -> bytes:
     return out_buf.tobytes()
 
 
+def _get_sr_session():
+    """Load and cache the bundled ESPCN super-resolution ONNX model (Apache-2.0)."""
+    global _SR_SESSION
+    if _SR_SESSION is not None:
+        return _SR_SESSION
+    sr_path = Path(__file__).resolve().parent / "models" / "super_resolution_espcn.onnx"
+    if not sr_path.is_file():
+        return None
+    try:
+        import onnxruntime as ort
+        ort.set_default_logger_severity(3)
+        _SR_SESSION = ort.InferenceSession(str(sr_path), providers=["CPUExecutionProvider"])
+        return _SR_SESSION
+    except Exception as exc:
+        log.warning("Failed to initialize ONNX super-resolution session: %s", exc)
+        return None
+
+
+def _run_espcn_y(sess, y_float: np.ndarray, target_w: int, target_h: int) -> np.ndarray:
+    """Run tiled 224x224 -> 672x672 ESPCN ONNX super-resolution with raised-cosine blending."""
+    h, w = y_float.shape
+    tile = 224
+    stride = 192
+    pad_h = max(0, tile - h) if h < tile else (stride - (h - tile) % stride) % stride
+    pad_w = max(0, tile - w) if w < tile else (stride - (w - tile) % stride) % stride
+    padded = np.pad(y_float, ((0, pad_h), (0, pad_w)), mode="reflect")
+    ph, pw = padded.shape
+
+    wy = np.hanning(tile * 3).astype(np.float32)
+    wy = np.maximum(wy, 0.05)
+    win = wy[:, None] * wy[None, :]
+
+    coords = []
+    tiles = []
+    for y0 in range(0, ph - tile + 1, stride):
+        for x0 in range(0, pw - tile + 1, stride):
+            coords.append((y0, x0))
+            tiles.append(padded[y0:y0 + tile, x0:x0 + tile])
+
+    batch = np.stack(tiles, axis=0)[:, None, :, :].astype(np.float32)
+    outs = []
+    for i in range(0, len(batch), 32):
+        outs.append(sess.run(None, {"input": batch[i:i + 32]})[0][:, 0, :, :])
+    sr_tiles = np.concatenate(outs, axis=0)
+
+    out_y = np.zeros((ph * 3, pw * 3), dtype=np.float32)
+    weight = np.zeros((ph * 3, pw * 3), dtype=np.float32)
+    for (y0, x0), st in zip(coords, sr_tiles):
+        sy, sx = y0 * 3, x0 * 3
+        out_y[sy:sy + tile * 3, sx:sx + tile * 3] += st * win
+        weight[sy:sy + tile * 3, sx:sx + tile * 3] += win
+
+    out_y /= np.maximum(weight, 1e-6)
+    out_y = np.clip(out_y[:h * 3, :w * 3], 0.0, 1.0)
+    return cv2.resize(out_y, (target_w, target_h), interpolation=cv2.INTER_AREA)
+
+
+def remaster_image(
+    image_bytes: bytes,
+    denoise: bool = True,
+    low_light: bool = True,
+    upscale: bool = True,
+) -> tuple[bytes, int, int]:
+    """Run the 3-stage AI & Vision Remaster chain:
+    1. Chroma + Luminance edge-preserving denoising (removes sensor & high-ISO grain).
+    2. Low-Light & Exposure Correction (Zero-DCE quadratic illumination curve + CLAHE + vibrance).
+    3. AI Super-Resolution & Detail Restoration (ESPCN ONNX neural super-resolution).
+    """
+    arr = np.frombuffer(image_bytes, np.uint8)
+    bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise ActionError("Could not decode image for remastering", 400)
+
+    h, w = bgr.shape[:2]
+
+    # ---- Stage 1: Chroma & Luminance Denoising ----
+    if denoise:
+        lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+        l_ch, a_ch, b_ch = cv2.split(lab)
+
+        # Estimate sensor noise sigma via Median Absolute Deviation of Laplacian
+        lap = cv2.Laplacian(l_ch, cv2.CV_16S)
+        sigma = float(np.median(np.abs(lap))) / 0.6745
+        h_luma = float(np.clip(sigma * 0.85, 3.0, 11.0))
+
+        # Edge-preserving bilateral filter on chrominance channels A and B (eliminates color blotches)
+        a_dn = cv2.bilateralFilter(a_ch, d=5, sigmaColor=18, sigmaSpace=18)
+        b_dn = cv2.bilateralFilter(b_ch, d=5, sigmaColor=18, sigmaSpace=18)
+
+        # Non-Local Means luminance denoising (on proxy if image > 1400px for speed, preserving high-freq edges)
+        max_dn = 1400
+        if max(h, w) > max_dn:
+            sc = max_dn / max(h, w)
+            sw, sh = max(1, int(w * sc)), max(1, int(h * sc))
+            l_small = cv2.resize(l_ch, (sw, sh), interpolation=cv2.INTER_AREA)
+            l_small_dn = cv2.fastNlMeansDenoising(l_small, None, h=h_luma, templateWindowSize=7, searchWindowSize=15)
+            diff = cv2.resize(
+                (l_small_dn.astype(np.float32) - l_small.astype(np.float32)),
+                (w, h),
+                interpolation=cv2.INTER_LINEAR,
+            )
+            l_dn = np.clip(l_ch.astype(np.float32) + diff, 0, 255).astype(np.uint8)
+        else:
+            l_dn = cv2.fastNlMeansDenoising(l_ch, None, h=h_luma, templateWindowSize=7, searchWindowSize=15)
+
+        bgr = cv2.cvtColor(cv2.merge([l_dn, a_dn, b_dn]), cv2.COLOR_LAB2BGR)
+
+    # ---- Stage 2: Low-Light & Exposure Correction (Zero-DCE curve + CLAHE + Vibrance) ----
+    if low_light:
+        lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+        l_ch, a_ch, b_ch = cv2.split(lab)
+        l_norm = l_ch.astype(np.float32) / 255.0
+
+        # Guard flat/solid images
+        p1, p99 = np.percentile(l_ch, [1.0, 99.0])
+        if p99 - p1 >= 4.0:
+            # Spatially-smooth illumination estimation (Zero-DCE quadratic enhancement curve)
+            illum = cv2.GaussianBlur(l_norm, (0, 0), sigmaX=max(8.0, min(w, h) * 0.03))
+            mean_lum = float(np.mean(l_norm))
+            # Stronger shadow lift when overall scene or local region is dark
+            base_alpha = float(np.clip((0.52 - mean_lum) * 1.4, 0.05, 0.55))
+            alpha_map = base_alpha * (1.0 - illum) * (1.0 - 0.5 * l_norm)
+            for _ in range(3):
+                l_norm = l_norm + alpha_map * l_norm * (1.0 - l_norm)
+
+            l_ifted = np.clip(l_norm * 255.0, 0, 255).astype(np.uint8)
+
+            # Gentle CLAHE micro-contrast blended at 35%
+            clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+            l_clahe = clahe.apply(l_ifted)
+            l_blend = cv2.addWeighted(l_ifted, 0.65, l_clahe, 0.35, 0)
+
+            # Soft 1-99% percentile stretch
+            lo, hi = np.percentile(l_blend, [1.0, 99.0])
+            if hi - lo > 10.0:
+                l_stretch = np.clip((l_blend.astype(np.float32) - lo) * (250.0 / (hi - lo)) + 2.0, 0, 255).astype(np.uint8)
+                l_ch = cv2.addWeighted(l_blend, 0.4, l_stretch, 0.6, 0)
+            else:
+                l_ch = l_blend
+
+            # Natural vibrance (+14% boost weighted toward less-saturated pixels so skin tones don't clip)
+            af = a_ch.astype(np.float32) - 128.0
+            bf = b_ch.astype(np.float32) - 128.0
+            chroma = np.hypot(af, bf) / 128.0
+            vib_gain = 1.0 + 0.14 * (1.0 - np.clip(chroma, 0.0, 1.0))
+            a_ch = np.clip(128.0 + af * vib_gain, 0, 255).astype(np.uint8)
+            b_ch = np.clip(128.0 + bf * vib_gain, 0, 255).astype(np.uint8)
+
+            bgr = cv2.cvtColor(cv2.merge([l_ch, a_ch, b_ch]), cv2.COLOR_LAB2BGR)
+
+    # ---- Stage 3: AI Super-Resolution & Detail Restoration (ESPCN ONNX) ----
+    if upscale:
+        ycrcb = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)
+        y_ch, cr_ch, cb_ch = cv2.split(ycrcb)
+        y_float = y_ch.astype(np.float32) / 255.0
+
+        sess = _get_sr_session()
+        max_dim = max(h, w)
+        if max_dim < 1600:
+            # True 2x AI Upscale (capped at 3840px)
+            scale_up = min(2.0, 3840.0 / max_dim)
+            tw, th = max(1, int(round(w * scale_up))), max(1, int(round(h * scale_up)))
+            if sess is not None:
+                y_sr = _run_espcn_y(sess, y_float, tw, th)
+                y_out = np.clip(y_sr * 255.0, 0, 255).astype(np.uint8)
+            else:
+                y_out = cv2.resize(y_ch, (tw, th), interpolation=cv2.INTER_CUBIC)
+            cr_out = cv2.resize(cr_ch, (tw, th), interpolation=cv2.INTER_CUBIC)
+            cb_out = cv2.resize(cb_ch, (tw, th), interpolation=cv2.INTER_CUBIC)
+            bgr = cv2.cvtColor(cv2.merge([y_out, cr_out, cb_out]), cv2.COLOR_YCrCb2BGR)
+            w, h = tw, th
+        else:
+            # High-res detail restoration via ESPCN on a working proxy + neural high-frequency injection
+            if sess is not None:
+                proxy_scale = 960.0 / max_dim
+                pw, ph = max(32, int(round(w * proxy_scale))), max(32, int(round(h * proxy_scale)))
+                y_small = cv2.resize(y_float, (pw, ph), interpolation=cv2.INTER_AREA)
+                y_sr = _run_espcn_y(sess, y_small, w, h)
+                y_base = cv2.resize(y_small, (w, h), interpolation=cv2.INTER_LINEAR)
+                neural_detail = y_sr - y_base
+                y_enhanced = np.clip(y_float + 0.55 * neural_detail, 0.0, 1.0)
+                y_out = (y_enhanced * 255.0).astype(np.uint8)
+                bgr = cv2.cvtColor(cv2.merge([y_out, cr_ch, cb_ch]), cv2.COLOR_YCrCb2BGR)
+            else:
+                blur = cv2.GaussianBlur(bgr, (0, 0), sigmaX=1.2)
+                bgr = cv2.addWeighted(bgr, 1.25, blur, -0.25, 0)
+
+    ok, out_buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    if not ok:
+        raise RuntimeError("Failed to encode remastered image")
+    return out_buf.tobytes(), w, h
+
+
+def _get_rapidocr_engine():
+    """Load and cache the RapidOCR (PaddleOCR v4 ONNX, Apache-2.0) engine."""
+    global _RAPIDOCR_ENGINE
+    if _RAPIDOCR_ENGINE is not None:
+        return _RAPIDOCR_ENGINE
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+        _RAPIDOCR_ENGINE = RapidOCR()
+        return _RAPIDOCR_ENGINE
+    except Exception as exc:
+        log.info("RapidOCR not available (%s)", exc)
+        return None
+
+
 def extract_text(image_bytes: bytes) -> str:
-    """Extract text from image using pytesseract if installed."""
+    """Extract text from image using RapidOCR (PaddleOCR v4 ONNX, Apache-2.0) with pytesseract fallback."""
+    # 1. Try RapidOCR (Apache-2.0)
+    engine = _get_rapidocr_engine()
+    if engine is not None:
+        try:
+            arr = np.frombuffer(image_bytes, np.uint8)
+            bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if bgr is not None:
+                h, w = bgr.shape[:2]
+                if max(h, w) > 2000:
+                    sc = 2000.0 / max(h, w)
+                    bgr = cv2.resize(bgr, (max(1, int(w * sc)), max(1, int(h * sc))), interpolation=cv2.INTER_AREA)
+                result, _ = engine(bgr)
+                if not result:
+                    return ""
+                # Sort detected boxes top-to-bottom, then left-to-right
+                sorted_lines = sorted(
+                    result,
+                    key=lambda item: (
+                        round(float(item[0][0][1]) / 12.0),
+                        float(item[0][0][0]),
+                    ),
+                )
+                return "\n".join(str(item[1]).strip() for item in sorted_lines if str(item[1]).strip())
+        except Exception as exc:
+            log.warning("RapidOCR failed (%s); falling back to pytesseract", exc)
+
+    # 2. Fallback to pytesseract (Apache-2.0)
     try:
         import pytesseract
         pil_img = Image.open(io.BytesIO(image_bytes))

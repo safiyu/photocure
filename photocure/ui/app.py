@@ -1617,12 +1617,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
         import base64
         from ..editor_actions import ActionError, remove_background
         content_type = request.headers.get("content-type", "")
+        model_name = "birefnet-general"
         if content_type.startswith("multipart/form-data"):
             form = await request.form()
             file_item = form.get("file")
             if not file_item:
                 raise HTTPException(400, "Missing 'file' in form data")
             image_bytes = await file_item.read()
+            if form.get("model"):
+                model_name = str(form.get("model"))
         else:
             try:
                 body = await request.json()
@@ -1635,9 +1638,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 image_bytes = base64.b64decode(data_str)
             except Exception:
                 raise HTTPException(400, "Invalid base64 image data")
+            if body.get("model"):
+                model_name = str(body.get("model"))
 
         try:
-            png_bytes = remove_background(image_bytes)
+            png_bytes = remove_background(image_bytes, model_name=model_name)
             b64_out = base64.b64encode(png_bytes).decode("ascii")
             return {"ok": True, "image": f"data:image/png;base64,{b64_out}"}
         except ActionError as e:
@@ -1645,6 +1650,52 @@ def create_app(db_path: str | None = None) -> FastAPI:
         except Exception as e:
             logging.getLogger("photocure.ui").exception("remove-bg failed")
             raise HTTPException(500, f"Background removal failed: {e}")
+
+    @app.post("/api/editor/remaster", dependencies=auth)
+    async def editor_remaster(request: Request):
+        import base64
+        from ..editor_actions import ActionError, remaster_image
+        content_type = request.headers.get("content-type", "")
+        denoise = True
+        low_light = True
+        upscale = True
+        if content_type.startswith("multipart/form-data"):
+            form = await request.form()
+            file_item = form.get("file")
+            if not file_item:
+                raise HTTPException(400, "Missing 'file' in form data")
+            image_bytes = await file_item.read()
+            if "denoise" in form:
+                denoise = str(form.get("denoise")).lower() not in ("0", "false", "no")
+            if "low_light" in form:
+                low_light = str(form.get("low_light")).lower() not in ("0", "false", "no")
+            if "upscale" in form:
+                upscale = str(form.get("upscale")).lower() not in ("0", "false", "no")
+        else:
+            try:
+                body = await request.json()
+            except Exception:
+                raise HTTPException(400, "Invalid JSON body")
+            data_str = body.get("image", "")
+            if "," in data_str:
+                data_str = data_str.split(",", 1)[1]
+            try:
+                image_bytes = base64.b64decode(data_str)
+            except Exception:
+                raise HTTPException(400, "Invalid base64 image data")
+            denoise = bool(body.get("denoise", True))
+            low_light = bool(body.get("low_light", True))
+            upscale = bool(body.get("upscale", True))
+
+        try:
+            jpg_bytes, w, h = remaster_image(image_bytes, denoise=denoise, low_light=low_light, upscale=upscale)
+            b64_out = base64.b64encode(jpg_bytes).decode("ascii")
+            return {"ok": True, "image": f"data:image/jpeg;base64,{b64_out}", "width": w, "height": h}
+        except ActionError as e:
+            raise HTTPException(e.status, str(e))
+        except Exception as e:
+            logging.getLogger("photocure.ui").exception("remaster failed")
+            raise HTTPException(500, f"Remaster failed: {e}")
 
     @app.post("/api/editor/ocr", dependencies=auth)
     async def editor_ocr(request: Request):

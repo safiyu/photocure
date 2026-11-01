@@ -52,8 +52,9 @@ flowchart TD
         OrientedImage --> BurstCollage
         BackendSave["POST /api/images/{id}/edit-save"] --> WriteDisk["Write to Disk (Copy or Overwrite)"]
         WriteDisk --> DB["Update/Insert ImageRecord & Invalidate Thumbs"]
-        BGRemove["POST /api/editor/remove-bg"] --> AISeg["OpenCV GrabCut / rembg / RMBG-1.4"]
-        OCR["POST /api/editor/ocr"] --> AITess["pytesseract / OCR"]
+        BGRemove["POST /api/editor/remove-bg"] --> AISeg["BiRefNet (MIT) / U2-Net (Apache-2.0) / GrabCut"]
+        Remaster["POST /api/editor/remaster"] --> AIRem["AI Denoise + Low-Light Curve + ESPCN Super-Resolution (Apache-2.0)"]
+        OCR["POST /api/editor/ocr"] --> AITess["RapidOCR (Apache-2.0) / pytesseract"]
     end
 ```
 
@@ -77,17 +78,23 @@ flowchart TD
      - Replaces existing file on disk atomically.
      - Updates `file_size`, `file_mtime`, `quick_hash`, `sha256`, `width`, `height`, and resets `orientation = 1`.
      - Purges thumbnail cache entries (`micro`, `medium`, `preview`) so UI refreshes immediately.
-3. **`remove_background(image_bytes)`**:
-   - Tries `briaai/RMBG-1.4` / `rembg` if available in the Python environment.
-   - Robust fallback to OpenCV `cv2.grabCut` + morphology mask for guaranteed offline operation without extra dependencies.
-4. **`extract_text(image_bytes)`**:
-   - Tries `pytesseract` if Tesseract is installed on the host.
+3. **`remove_background(image_bytes, model_name="birefnet-general")`**:
+   - Uses `BiRefNet` (`birefnet-general`, MIT License) or `U2-Net` (`u2net`, Apache-2.0 License) via `rembg` ONNX runtime with an explicit permissive-license allowlist.
+   - Robust fallback to OpenCV `cv2.grabCut` + morphology mask for guaranteed offline operation.
+4. **`remaster_image(image_bytes, denoise=True, low_light=True, upscale=True)`**:
+   - 3-stage AI & computational photography remaster chain:
+     - Stage 1: Chroma & Luminance AI/Edge-Preserving Denoising (LAB bilateral chroma + Non-Local Means luminance).
+     - Stage 2: Low-Light & Exposure Correction (Zero-DCE iterative quadratic illumination curve + CLAHE + auto-levels + vibrance).
+     - Stage 3: AI Super-Resolution & Detail Restoration (`super_resolution_espcn.onnx`, Apache-2.0 Sub-Pixel CNN on luminance channel).
+5. **`extract_text(image_bytes)`**:
+   - Uses `RapidOCR` (`rapidocr-onnxruntime`, Apache-2.0 PaddleOCR v4 ONNX) with fallback to `pytesseract`.
 
 ### 3.2 FastAPI Routes in `photocure/ui/app.py`
 - `GET /api/images/{image_id}/full`: Stream oriented full-res image.
 - `POST /api/images/{image_id}/edit-save`: Authenticated save endpoint (`mode="copy" | "overwrite"`).
-- `POST /api/editor/remove-bg`: Authenticated background removal endpoint.
-- `POST /api/editor/ocr`: Authenticated text extraction endpoint.
+- `POST /api/editor/remove-bg`: Authenticated background removal endpoint (`BiRefNet` MIT).
+- `POST /api/editor/remaster`: Authenticated 3-stage AI remaster endpoint.
+- `POST /api/editor/ocr`: Authenticated text extraction endpoint (`RapidOCR` Apache-2.0).
 
 ---
 

@@ -1204,13 +1204,45 @@
       }
 
       else if (T === "remaster") {
-        add(pEl("p", "pcur-hint", "Auto-levels with a 1–99% percentile stretch, a +15% saturation boost and a mild sharpen. Safe on flat and solid-color images."));
+        const ropts = { denoise: true, low_light: true, upscale: true };
+        const rcbox = (key, label) => {
+          const l = pEl("label", "pcur-chk");
+          const i = document.createElement("input");
+          i.type = "checkbox"; i.checked = ropts[key];
+          i.addEventListener("change", () => { ropts[key] = i.checked; });
+          l.append(i, pEl("span", "", esc(label)));
+          return l;
+        };
+        add(rcbox("denoise", "AI Denoise (chroma & luminance grain)"));
+        add(rcbox("low_light", "Low-light & exposure correction"));
+        add(rcbox("upscale", "AI Super-Resolution & detail restore"));
+        add(pEl("p", "pcur-hint", "3-stage AI & vision chain: removes sensor grain, lifts dark shadows (Zero-DCE + CLAHE), and restores crisp detail via ESPCN ONNX super-resolution."));
         const b = pBtn("Remaster", "primary", async () => {
           busy(b, true);
           try {
-            await new Promise((r) => setTimeout(r, 30));   // let the busy state paint first
-            remaster(ctx2d(workC), workC.width, workC.height);
+            const b2 = await canvasToBlob(workC, "image/jpeg", 0.96);
+            const fd = new FormData();
+            fd.append("file", b2, "remaster.jpg");
+            fd.append("denoise", ropts.denoise ? "1" : "0");
+            fd.append("low_light", ropts.low_light ? "1" : "0");
+            fd.append("upscale", ropts.upscale ? "1" : "0");
+            const res = await fetch("/api/editor/remaster", { method: "POST", body: fd });
+            if (res.ok) {
+              const j = await res.json();
+              const img = await loadImage(j.image);
+              let nw = img.width, nh = img.height;
+              if (Math.max(nw, nh) > MAX_PX) {
+                const f = MAX_PX / Math.max(nw, nh);
+                nw = Math.round(nw * f);
+                nh = Math.round(nh * f);
+              }
+              workC.width = nw; workC.height = nh;
+              ctx2d(workC).drawImage(img, 0, 0, nw, nh);
+            } else {
+              remaster(ctx2d(workC), workC.width, workC.height);
+            }
             syncDisp();
+            relayout();
             await commit();
             toast("Remaster applied", "ok");
           } catch (e) { toast("Remaster failed: " + e.message, "err"); }
@@ -1297,7 +1329,7 @@
           busy(b, false);
         });
         add(pEl("div", "pcur-btns", "").appendChild(b));
-        add(pEl("p", "pcur-hint", "Runs on the server (rembg when available, GrabCut offline fallback). The result keeps transparency."));
+        add(pEl("p", "pcur-hint", "Runs BiRefNet (MIT) / U2-Net (Apache-2.0) on the server with GrabCut fallback. Keeps full alpha transparency."));
       }
 
       else if (T === "draw") {
@@ -1578,7 +1610,7 @@
         });
         copyB.hidden = true;
         add(copyB);
-        add(pEl("p", "pcur-hint", "Runs Tesseract OCR on the current image on the server."));
+        add(pEl("p", "pcur-hint", "Runs RapidOCR (PaddleOCR v4 ONNX, Apache-2.0) on the server with Tesseract fallback."));
       }
     }
 

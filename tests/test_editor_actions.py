@@ -16,6 +16,7 @@ from photocure.db.session import get_session
 from photocure.editor_actions import (
     extract_text,
     get_oriented_image_stream,
+    remaster_image,
     remove_background,
     save_edited_image,
 )
@@ -145,11 +146,51 @@ def test_remove_background_fallback():
 
 
 def test_extract_text():
-    # If tesseract is not installed, it returns empty string without crashing
+    # Test blank image and image with text via RapidOCR
     buf = io.BytesIO()
     Image.new("RGB", (60, 30), (255, 255, 255)).save(buf, format="PNG")
     res = extract_text(buf.getvalue())
     assert isinstance(res, str)
+
+    # Render synthetic text and verify RapidOCR extracts it
+    canvas = np.full((120, 400, 3), 255, dtype=np.uint8)
+    cv2.putText(canvas, "HELLO 2026", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3, cv2.LINE_AA)
+    ok, enc = cv2.imencode(".png", canvas)
+    assert ok
+    txt = extract_text(enc.tobytes())
+    assert "2026" in txt
+
+
+def test_remaster_image_and_endpoint(env):
+    # Create a dark, noisy 160x120 test image
+    rng = np.random.default_rng(42)
+    dark_img = rng.integers(15, 65, size=(120, 160, 3), dtype=np.uint8)
+    ok, enc = cv2.imencode(".png", dark_img)
+    assert ok
+
+    out_bytes, w, h = remaster_image(enc.tobytes(), denoise=True, low_light=True, upscale=True)
+    out_arr = cv2.imdecode(np.frombuffer(out_bytes, np.uint8), cv2.IMREAD_COLOR)
+    assert out_arr is not None
+    # Small image (< 1600px) with upscale=True is 2x upscaled via ESPCN super-resolution
+    assert (w, h) == (320, 240)
+    assert out_arr.shape[0] == 240
+    assert out_arr.shape[1] == 320
+    # Low-light curve should brighten the dark image
+    assert float(out_arr.mean()) > float(dark_img.mean())
+
+    # Test POST /api/editor/remaster endpoint
+    import base64
+    b64_str = base64.b64encode(enc.tobytes()).decode("ascii")
+    r = env.client.post(
+        "/api/editor/remaster",
+        json={"image": f"data:image/png;base64,{b64_str}", "denoise": True, "low_light": True, "upscale": False},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["image"].startswith("data:image/jpeg;base64,")
+    assert data["width"] == 160
+    assert data["height"] == 120
 
 
 def test_api_full_and_edit_save(env):
