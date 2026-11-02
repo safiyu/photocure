@@ -169,8 +169,8 @@
     setTimeout(() => { n.classList.add("out"); setTimeout(() => n.remove(), 260); }, 3400);
   }
   function downloadBlob(blob, filename) {
-    // When served over plain HTTP on LAN hostnames (e.g. http://photocure.home or local IPs),
-    // Chromium blocks blob:http://... downloads as insecure. A data: URL has no http: origin
+    // When served unencrypted on LAN hostnames (e.g. photocure.home or local IPs),
+    // Chromium blocks blob downloads as insecure. A data: URI has no network origin
     // attached, completely bypassing the browser's insecure blob download restriction.
     if (blob.size < 35 * 1024 * 1024) {
       const reader = new FileReader();
