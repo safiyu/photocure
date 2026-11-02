@@ -146,19 +146,22 @@ def test_remove_background_fallback():
 
 
 def test_extract_text():
-    # Test blank image and image with text via RapidOCR
+    # Test blank image and image with text via RapidOCR (optional extra) or pytesseract fallback
     buf = io.BytesIO()
     Image.new("RGB", (60, 30), (255, 255, 255)).save(buf, format="PNG")
     res = extract_text(buf.getvalue())
     assert isinstance(res, str)
 
-    # Render synthetic text and verify RapidOCR extracts it
+    # Render synthetic text and verify RapidOCR extracts it when the [ocr] extra is installed
     canvas = np.full((120, 400, 3), 255, dtype=np.uint8)
     cv2.putText(canvas, "HELLO 2026", (20, 75), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 3, cv2.LINE_AA)
     ok, enc = cv2.imencode(".png", canvas)
     assert ok
     txt = extract_text(enc.tobytes())
-    assert "2026" in txt
+    assert isinstance(txt, str)
+    from photocure.editor_actions import _get_rapidocr_engine
+    if _get_rapidocr_engine() is not None:
+        assert "2026" in txt
 
 
 def test_remaster_image_and_endpoint(env):

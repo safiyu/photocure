@@ -104,7 +104,8 @@ def test_heic_pixels_are_oriented_exactly_once(tmp_path):
 def test_heic_date_is_read_in_a_fresh_process_that_never_imported_the_loader(tmp_path):
     import os
     p = make_heic(tmp_path / "a.heic")
-    code = ("from photocure.scanner.exif_reader import extract_exif;"
+    code = ("import sys; sys.path.insert(0, '.');"
+            "from photocure.scanner.exif_reader import extract_exif;"
             f"i = extract_exif({str(p)!r}); print(i.taken_at_source, i.taken_at.isoformat())")
     env = {k: v for k, v in os.environ.items() if k.startswith(("LD_", "DYLD_", "SYSTEM"))}
     env.update({"PYTHONPATH": str(ROOT), "PATH": ""})

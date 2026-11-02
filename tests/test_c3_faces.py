@@ -525,7 +525,8 @@ def test_no_insightface_in_the_running_package():
     env = {k: v for k, v in os.environ.items() if k.startswith(("LD_", "DYLD_", "SYSTEM"))}
     env.update({"PYTHONPATH": str(ROOT), "PATH": ""})
     out = subprocess.run([sys.executable, "-I", "-c",
-                          "import sys, photocure, photocure.cli, photocure.ui.app, photocure.inference.pipeline;"
+                          "import sys; sys.path.insert(0, '.');"
+                          "import photocure, photocure.cli, photocure.ui.app, photocure.inference.pipeline;"
                           "assert 'insightface' not in sys.modules"],
                          capture_output=True, text=True, cwd=ROOT, env=env)
     assert out.returncode == 0, out.stderr
