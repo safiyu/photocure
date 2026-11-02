@@ -521,10 +521,13 @@ def test_reject_blinks_needs_auth_and_a_real_burst(burst_api):
 
 # ------------------------------------------------------------ repository rules
 def test_no_insightface_in_the_running_package():
+    import os
+    env = {k: v for k, v in os.environ.items() if k.startswith(("LD_", "DYLD_", "SYSTEM"))}
+    env.update({"PYTHONPATH": str(ROOT), "PATH": ""})
     out = subprocess.run([sys.executable, "-I", "-c",
                           "import sys, photocure, photocure.cli, photocure.ui.app, photocure.inference.pipeline;"
                           "assert 'insightface' not in sys.modules"],
-                         capture_output=True, text=True, cwd=ROOT, env={"PYTHONPATH": str(ROOT), "PATH": ""})
+                         capture_output=True, text=True, cwd=ROOT, env=env)
     assert out.returncode == 0, out.stderr
 
 
