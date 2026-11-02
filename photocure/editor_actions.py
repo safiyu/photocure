@@ -89,7 +89,7 @@ def get_oriented_image_stream(db_path: Path | str, image_id: int) -> tuple[bytes
 
 def save_edited_image(db_path: Path | str, cfg: CuratorConfig, image_id: int, image_bytes: bytes,
                       mode: Literal["copy", "overwrite"] = "copy",
-                      format: str | None = None) -> dict:
+                      storage_format: str | None = None) -> dict:
     """Save an edited photo buffer either as a new copy or overwriting the original.
     
     In 'copy' mode:
@@ -129,12 +129,12 @@ def save_edited_image(db_path: Path | str, cfg: CuratorConfig, image_id: int, im
         orig_path = Path(orig_str)
 
         # Output extension determination & validation
-        if format:
-            fmt_clean = f".{format.lower().lstrip('.')}"
+        if storage_format:
+            fmt_clean = f".{storage_format.lower().lstrip('.')}"
             if fmt_clean == ".jpeg":
                 fmt_clean = ".jpg"
             if fmt_clean not in (".jpg", ".png", ".webp"):
-                raise ActionError(f"Unsupported storage format '{format}'. Supported formats: jpg, png, webp", 400)
+                raise ActionError(f"Unsupported storage format '{storage_format}'. Supported formats: jpg, png, webp", 400)
             out_ext = fmt_clean
         else:
             out_ext = orig_path.suffix.lower()
@@ -161,7 +161,9 @@ def save_edited_image(db_path: Path | str, cfg: CuratorConfig, image_id: int, im
                         image_bytes = buf.getvalue()
                         w, h = pil_img.size
                 except Exception as e:
-                    log.warning("Could not convert image to match original container %s: %s", target_ext, e)
+                    raise ActionError(
+                        f"Could not convert edited image to original container {target_ext}: {e}. "
+                        "Use 'Save as copy' to keep the edited format instead.", 400) from None
 
         if mode == "copy":
             stem = orig_path.stem
@@ -318,14 +320,22 @@ def _get_rembg_session(model_name: str = "birefnet-general"):
 
 def remove_background(image_bytes: bytes, model_name: str = "birefnet-general") -> bytes:
     """Remove background from image bytes using BiRefNet (MIT) / U2-Net (Apache-2.0) or OpenCV GrabCut fallback."""
-    # 1. Try rembg with strictly permissive MIT / Apache-2.0 models (BiRefNet -> U2-Net)
+    # 1. Try rembg with strictly permissive MIT / Apache-2.0 models (primary -> U2-Net fallback)
+    tried: set[str] = set()
     for candidate in (model_name, "u2net"):
+        if candidate in tried:
+            continue
+        tried.add(candidate)
         try:
             import rembg
+        except ImportError as exc:
+            log.warning("rembg not installed (%s); falling back to GrabCut", exc)
+            break
+        try:
             session = _get_rembg_session(candidate)
             return rembg.remove(image_bytes, session=session)
-        except Exception as exc:
-            log.warning("rembg (%s) failed or uninstalled (%s)", candidate, exc)
+        except (MemoryError, RuntimeError, OSError, ValueError) as exc:
+            log.warning("rembg (%s) failed (%s)", candidate, exc)
 
     # 2. Fallback to OpenCV cv2.grabCut with morphological refinement
     arr = np.frombuffer(image_bytes, np.uint8)

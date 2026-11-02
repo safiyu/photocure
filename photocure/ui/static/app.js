@@ -2532,9 +2532,13 @@
   function lbRender() {
     const id = lbIdAt(lb.i);
     let it = state.byId[id];
-    if (!it || it._basic || it.category === undefined) {
-      if (!it) it = { id, filename: "Photo #" + id, _basic: true };
-      if (id != null) {
+    if (!it || it._basic) {
+      if (!it) {
+        it = { id, filename: "Photo #" + id, _basic: true };
+        state.byId[id] = it;
+      }
+      if (id != null && !it._fetchAttempted) {
+        it._fetchAttempted = true;
         fetchImageDetails(id).then((fullItem) => {
           if (fullItem && lb.open && lbIdAt(lb.i) === id) {
             lbRender();

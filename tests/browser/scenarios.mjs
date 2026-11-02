@@ -1030,13 +1030,14 @@ try {
     }
   });
 
-  await scenario("the photo editor opens from a card, shows all 13 tools, and closes with Escape", async () => {
+  await scenario("the photo editor opens from a card, shows all 12 tools, and closes with Escape", async () => {
     await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); true");
     await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
     const id = Number(await page.eval("document.querySelector('#grid .vg-window .card').dataset.id"));
     await page.eval(`document.querySelector('#grid .card[data-id="${id}"] [data-edit]').click(); true`);
     await page.waitFor("window.PCUR_EDITOR && PCUR_EDITOR.active", 20000, "editor opens");
-    check(await page.eval("document.querySelectorAll('.pcur-ed .pcur-tool').length") === 13, "the toolbar does not list all 13 tools");
+    check(await page.eval("document.querySelectorAll('.pcur-ed .pcur-tool').length") === 12, "the toolbar does not list all 12 tools");
+    check(/%$/.test(await page.eval("document.querySelector('.pcur-zread').textContent")), "no zoom readout in the stage");
     check(await page.eval("window.PCUR_EDITOR.histLen") === 1, "the opening state is not recorded in the history");
     check(await page.eval("!!document.querySelector('.pcur-ed canvas.pcur-disp')"), "no display canvas in the stage");
     check(await page.eval("document.querySelector('.pcur-wrap').getBoundingClientRect().width > 50"), "the editor photo wrapper has zero width");
@@ -1081,7 +1082,7 @@ try {
     await page.eval("document.querySelector('.pcur-tool[data-tool=\"filters\"]').click(); true");
     await page.waitFor("!!document.querySelector('.pcur-filters .pcur-fil')", 8000, "filter grid renders");
     const setFilter = (i) => page.eval(`(() => { const f = document.querySelectorAll('.pcur-filters .pcur-fil'); f[${i}].click(); return f[${i}].classList.contains('on'); })()`);
-    const applyBtn = () => page.eval("document.querySelector('.pcur-filters').closest('.pcur-panelbody').querySelector('button.btn.primary').click(); true");
+    const applyBtn = () => page.eval("document.querySelector('.pcur-commit .btn.primary').click(); true");
     // The opening state is history #1; each Apply commits one more. Nine applies reach the cap of ten.
     for (let i = 0; i < 9; i++) {
       await setFilter(1 + (i % 2));
@@ -1112,6 +1113,55 @@ try {
     await page.waitFor("!document.querySelector('.pcur-saveback')", 8000, "save dialog closes");
     await press("Escape");
     await page.waitFor("!window.PCUR_EDITOR.active", 10000, "editor closes after saving");
+  });
+
+  await scenario("the editor groups its tools, keeps them reachable, and Save stays on screen on a phone", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); true");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
+    const id = Number(await page.eval("document.querySelector('#grid .vg-window .card').dataset.id"));
+    await page.eval(`document.querySelector('#grid .card[data-id="${id}"] [data-edit]').click(); true`);
+    await page.waitFor("window.PCUR_EDITOR && PCUR_EDITOR.active", 20000, "editor opens");
+    try {
+      check(await page.eval("document.querySelectorAll('.pcur-tgroup').length") === 3, "the tools are not in three groups");
+      check(await page.eval("Array.from(document.querySelectorAll('.pcur-tool')).every((b) => b.getBoundingClientRect().right <= innerWidth + 1)"), "a tool button is cut off at 1400px");
+      await page.viewport(430, 900);
+      await sleep(300);
+      check(await page.eval("(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(); return r('.pcur-top .btn.primary').right <= innerWidth && r('.pcur-x').right <= innerWidth; })()"), "Save or Close is off-screen on a phone");
+      check(await page.eval("getComputedStyle(document.querySelector('.pcur-gtabs')).display !== 'none'"), "no group tabs on a narrow screen");
+    } finally {
+      await page.viewport(1400, 900);
+    }
+    await press("Escape");
+    await page.waitFor("!window.PCUR_EDITOR.active", 10000, "the editor closes");
+  });
+
+  await scenario("a pending look has one Apply / Cancel bar, survives a tool switch, and Compare is a split view", async () => {
+    await page.eval("document.querySelector('.tab[data-tab=\"categories\"]').click(); true");
+    await page.waitFor("document.querySelectorAll('#grid .vg-window .card').length > 0", 15000, "cards render");
+    const id = Number(await page.eval("document.querySelector('#grid .vg-window .card').dataset.id"));
+    await page.eval(`document.querySelector('#grid .card[data-id="${id}"] [data-edit]').click(); true`);
+    await page.waitFor("window.PCUR_EDITOR && PCUR_EDITOR.active", 20000, "editor opens");
+    const hist = () => page.eval("window.PCUR_EDITOR.histLen");
+    const look = (i) => page.eval(`document.querySelectorAll('.pcur-filters .pcur-fil')[${i}].click(); true`);
+    await page.eval("document.querySelector('.pcur-tool[data-tool=\"filters\"]').click(); true");
+    await page.waitFor("!!document.querySelector('.pcur-filters .pcur-fil')", 8000, "looks render");
+    check(await page.eval("document.querySelector('.pcur-commit').hidden"), "the Apply bar shows with nothing to apply");
+    await look(1);
+    await page.waitFor("!document.querySelector('.pcur-commit').hidden", 5000, "the Apply bar appears");
+    await page.eval("document.querySelector('.pcur-commit .btn.ghost').click(); true");
+    await page.waitFor("document.querySelector('.pcur-commit').hidden", 5000, "Cancel hides the bar");
+    check((await hist()) === 1, "Cancel recorded a history state");
+    check(await page.eval("document.querySelectorAll('.pcur-filters .pcur-fil')[0].classList.contains('on')"), "Cancel did not return to Original");
+    await look(1);
+    await page.eval("document.querySelector('.pcur-tool[data-tool=\"adjust\"]').click(); true");
+    await page.waitFor("window.PCUR_EDITOR.histLen === 2", 15000, "the look was applied when switching tools");
+    await page.eval("document.querySelector('.pcur-compare').click(); true");
+    check(await page.eval("document.querySelector('.pcur-wrap').classList.contains('is-compare')"), "Compare did not open the split view");
+    check(await page.eval("(() => { const g = document.querySelector('.pcur-split-grip').getBoundingClientRect(); return g.width > 8 && g.height > 8; })()"), "the split handle is not visible");
+    await press("c");
+    check(await page.eval("!document.querySelector('.pcur-wrap').classList.contains('is-compare')"), "C did not close the split view");
+    await press("Escape");
+    await page.waitFor("!window.PCUR_EDITOR.active", 10000, "the editor closes");
   });
 
   await scenario("the burst collage saves a new photo to the library", async () => {

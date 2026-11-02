@@ -139,6 +139,10 @@ class FaceEngine:
                 min_face_presence_confidence=f.landmark_min_confidence)
             self._landmarker = vision.FaceLandmarker.create_from_options(opts)
             self._mp = mp
+            import atexit
+            import weakref
+            ref = weakref.ref(self)
+            atexit.register(lambda: (e := ref()) is not None and e.release())
         except Exception as e:
             self._landmarker_failed = True
             msg = f"{e.__class__.__name__}: {e}"

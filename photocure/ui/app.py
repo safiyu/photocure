@@ -927,6 +927,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
                             models.append({"name": m.get("name", file), "file": file})
         except Exception:
             pass
+        try:
+            from .. import models as bundled
+            models += [{"name": m["name"], "file": m.get("cache_file") or m.get("module", "")}
+                       for m in bundled.downloaded_models()]
+        except Exception:
+            pass
         return {
             "version": __version__,
             "author": "Safiyu",
@@ -1602,7 +1608,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             fmt = body.get("format", None)
 
         try:
-            res = save_edited_image(dbp, app.state.cfg, image_id, image_bytes, mode=mode, format=fmt)
+            res = save_edited_image(dbp, app.state.cfg, image_id, image_bytes, mode=mode, storage_format=fmt)
             return res
         except ActionError as e:
             raise HTTPException(e.status, str(e))
@@ -2170,8 +2176,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     raise
         except LibraryRootMissing:
             raise HTTPException(400, "Choose a library folder in Settings first.")
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(409, f"could not finalize: {getattr(e, 'detail', str(e))}") from None
+            raise HTTPException(500, f"could not finalize: {e}") from None
 
     @app.get("/api/overview")
     def overview(stage: StageFilter = Query("all")):
@@ -2569,6 +2577,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
                                 float(getattr(c.burst, "far_window_seconds", 0) or 0))
                     records, bursts = _burst_neighbourhood(s, new_ids, reach, stage=body.stage)
                     if not records:
+                        if finish:
+                            progress_mgr.finish("No new photos to cluster")
                         return {"ok": True, "burst_groups": len(stage_bids), "clusters": 0}
                 else:
                     if body.stage == "all":
@@ -2677,6 +2687,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 progress_mgr.start("Library", "Filing photos by what they show...", 1,
                                    "Moving photos whose category changed...")
                 refile_res = refile_library(dbp, c, cancel_check=progress_mgr.is_stopped)
+                if progress_mgr.is_stopped() or (isinstance(refile_res, dict) and refile_res.get("stopped")):
+                    progress_mgr.stop("Library analysis stopped by user")
+                    return {"ok": False, "stopped": True, "message": "Library analysis stopped by user"}
             except InterruptedError:
                 progress_mgr.stop("Library analysis stopped by user")
                 return {"ok": False, "stopped": True, "message": "Library analysis stopped by user"}

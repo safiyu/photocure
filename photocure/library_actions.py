@@ -151,6 +151,9 @@ def refile_library(dbp: Path, cfg: CuratorConfig, *, root: Path | None = None,
             changes[r.id] = (cat, dec.subcategory or "")
 
     moved, failed, txn = 0, 0, ""
+    if cancel_check and cancel_check():
+        return {"ok": False, "stopped": True, "checked": len(changes) + unchanged,
+                "recategorised": 0, "moved": 0, "failed": 0, "transaction_id": ""}
     if actions:
         rep = ActionEngine(cfg, db_path=dbp).execute(actions, organize_root=root)
         txn = rep.transaction_id

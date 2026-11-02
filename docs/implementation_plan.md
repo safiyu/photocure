@@ -34,7 +34,7 @@ flowchart TD
         BurstView["Bursts View (New & Library)"] -->|"Click Make Collage"| BurstCollage["Burst Collage Builder Modal"]
 
         subgraph EditorCore["Photo Editor Studio"]
-            Tools["15 Tools (Crop, Adjust, Filters, Remaster, Blur, Redeye, BG-Remove, Draw, Stickers, ID-Card, QR, OCR)"]
+            Tools["12 Tools in 3 groups (Adjust: Crop & Rotate, Light, Looks, Remaster, Detail, Red-Eye, Remove BG. Annotate: Draw, Stickers. Tools: ID Card, QR, OCR)"]
             CoordNorm["Coordinate Normalizer (Screen ⇄ Canvas)"]
             UndoStack["Bounded History Buffer (Blob/Canvas)"]
             Tools --> CoordNorm --> UndoStack
@@ -107,9 +107,9 @@ flowchart TD
   - Interactive overlay canvas handles live drawing, crop boundary selection, sticker placement, and QR code manipulation with exact coordinate normalization.
 - **Included Tools (Single Photo)**:
   1. **Crop & Aspect Ratio**: Free, 1:1, 4:3, 16:9, 3:2, 9:16 with boundary clamping (no out-of-bounds `IndexSizeError`).
-  2. **Transform**: Rotate 90° CW/CCW, fine slider rotation, Flip Horizontal, Flip Vertical.
+  2. **Rotate & flip** (inside Crop & Rotate): Rotate 90° CW/CCW, fine slider rotation, Flip Horizontal, Flip Vertical.
   3. **Adjustments**: Brightness (50–150%), Contrast (50–150%), Saturation (0–200%).
-  4. **Filters**: 33 presets (Classic + Social). Live preview applied via CSS filter during selection; baked to canvas on apply.
+  4. **Filters (Looks)**: 8 portrait-safe looks (Original, Vivid, Portrait, Film, Cinematic, Golden, Matte, Mono) with a Strength slider. Rendered per pixel (tone curve, split tone, vibrance, vignette, grain; no hue rotation). Live preview grades a copy capped at 1280px; the look is baked at full resolution on apply, before any Adjust or Blur sliders.
   5. **Remaster**: Auto-levels with zero-division safeguard + 1%–99% percentile stretch + 15% saturation + mild sharpen.
   6. **Blur & Sharpen**: Interactive blur/sharpen sliders with throttled preview.
   7. **Red-Eye Fix**: Click on pupil with adjustable radius and RGB desaturation.
@@ -119,7 +119,7 @@ flowchart TD
   11. **ID Card Maker**: A4 150 DPI layout for Front & Back photos with independent scaling.
   12. **QR Code Generator**: Wi-Fi, vCard, URL, Text, Phone, Email, SMS, Geo overlay.
   13. **OCR**: Copy extracted text to clipboard.
-  14. **Compare Mode**: Hold "Compare" button to temporarily view unedited original.
+  14. **Compare Mode**: Compare button (or `C`) toggles a draggable split between the original and the edit.
   15. **Save & Export**:
       - **Save as Copy** (adds new photo to Library).
       - **Overwrite Original** (updates existing photo in Library).
