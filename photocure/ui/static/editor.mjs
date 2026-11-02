@@ -34,26 +34,99 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const icon = (n) => `<svg class="ic sm" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 
-  // 33 filter presets (Classic + Social). Previewed via CSS filter, baked via ctx.filter.
-  const FILTERS = [
-    ["none", "Original", "none"], ["grayscale", "B&W", "grayscale(100%)"],
-    ["sepia", "Sepia", "sepia(100%)"], ["vintage", "Vintage", "sepia(50%) contrast(90%) brightness(90%)"],
-    ["warm", "Warm", "sepia(30%) saturate(120%) brightness(105%)"], ["cool", "Cool", "saturate(80%) hue-rotate(20deg) brightness(95%)"],
-    ["highContrast", "High Contrast", "contrast(150%) saturate(110%)"], ["noir", "Noir", "grayscale(100%) contrast(120%) brightness(90%)"],
-    ["fade", "Fade", "contrast(80%) brightness(110%) saturate(80%)"], ["kodak", "Kodak", "sepia(20%) saturate(160%) contrast(110%) brightness(105%)"],
-    ["technicolor", "Technicolor", "saturate(200%) contrast(130%) hue-rotate(-10deg)"], ["polaroid", "Polaroid", "contrast(110%) brightness(110%) grayscale(20%) sepia(20%)"],
-    ["dramatic", "Dramatic", "contrast(140%) grayscale(30%) brightness(90%)"], ["golden", "Golden", "sepia(40%) saturate(150%) brightness(110%) contrast(110%)"],
-    ["cyberpunk", "Cyberpunk", "hue-rotate(180deg) saturate(200%) contrast(130%)"], ["clarendon", "Clarendon", "sepia(10%) contrast(120%) brightness(125%) saturate(135%)"],
-    ["gingham", "Gingham", "sepia(10%) hue-rotate(-10deg) brightness(105%) contrast(110%) saturate(80%)"], ["juno", "Juno", "sepia(30%) contrast(115%) brightness(110%) saturate(140%) hue-rotate(-10deg)"],
-    ["lark", "Lark", "contrast(90%) brightness(120%) saturate(110%)"], ["ludwig", "Ludwig", "sepia(10%) contrast(105%) brightness(105%) saturate(180%)"],
-    ["valencia", "Valencia", "sepia(25%) contrast(108%) brightness(108%)"], ["moon", "Moon", "grayscale(100%) brightness(110%) contrast(110%)"],
-    ["reyes", "Reyes", "sepia(22%) brightness(110%) contrast(85%) saturate(75%)"], ["slumber", "Slumber", "sepia(35%) contrast(125%) saturate(125%)"],
-    ["crema", "Crema", "sepia(50%) contrast(125%) saturate(90%) hue-rotate(-2deg)"], ["aden", "Aden", "hue-rotate(-20deg) contrast(90%) saturate(85%) brightness(120%)"],
-    ["perpetua", "Perpetua", "contrast(110%) brightness(110%) saturate(110%)"], ["oldCinema", "Old Cinema", "grayscale(90%) contrast(160%) brightness(85%) sepia(20%)"],
-    ["retro", "Retro", "sepia(40%) saturate(140%) contrast(110%) brightness(95%)"], ["twilight", "Twilight", "sepia(40%) hue-rotate(180deg) saturate(140%) contrast(110%)"],
-    ["sunset", "Sunset", "sepia(30%) saturate(160%) hue-rotate(-10deg) contrast(110%)"], ["forest", "Forest", "sepia(20%) brightness(95%) contrast(110%) saturate(120%) hue-rotate(60deg)"],
-    ["rust", "Rust", "sepia(50%) saturate(150%) contrast(130%) hue-rotate(-20deg)"],
+  // Looks: a few portrait-safe grades (tone curve, split tone, vibrance, vignette, grain). No hue rotation.
+  const LOOK_DEFAULT = {
+    curve: 0, black: 0, white: 1, gamma: 1, sat: 0, vibrance: 0, skinSat: 0, warmth: 0,
+    shadow: [0, 0, 0], high: [0, 0, 0], vignette: 0, grain: 0, mono: null,
+  };
+  const LOOKS = [
+    { id: "none", label: "Original" },
+    { id: "pop", label: "Vivid", curve: 0.4, vibrance: 0.75, sat: 0.1 },
+    { id: "portrait", label: "Portrait", curve: 0.1, black: 0.025, white: 0.98, gamma: 1.07, vibrance: 0.12,
+      skinSat: -0.1, warmth: 0.4, shadow: [0.012, 0.004, 0] },
+    { id: "film", label: "Film", curve: 0.2, black: 0.055, white: 0.96, sat: -0.1, grain: 0.02,
+      shadow: [-0.02, 0.005, 0.03], high: [0.035, 0.015, -0.02] },
+    { id: "cinematic", label: "Cinematic", curve: 0.45, black: 0.03, white: 0.97, sat: -0.05, vibrance: 0.1,
+      shadow: [-0.05, 0.01, 0.04], high: [0.05, 0.02, -0.045], vignette: 0.28 },
+    { id: "golden", label: "Golden", curve: 0.15, gamma: 1.1, sat: 0.05, warmth: 0.85, vignette: 0.18,
+      shadow: [0.01, 0, -0.01], high: [0.04, 0.02, -0.03] },
+    { id: "matte", label: "Matte", curve: 0.05, black: 0.1, white: 0.94, sat: -0.12, shadow: [-0.01, 0, 0.02] },
+    { id: "mono", label: "Mono", mono: [0.4, 0.45, 0.15], curve: 0.35, black: 0.01, grain: 0.018, vignette: 0.12 },
   ];
+  const LOOK_PREVIEW_PX = 1280;
+
+  function trapezoid(x, a, b, c, d) {
+    if (x <= a || x >= d) return 0;
+    if (x < b) return (x - a) / (b - a);
+    if (x <= c) return 1;
+    return (d - x) / (d - c);
+  }
+
+  // Grades the canvas in place. strength 0..1 blends from the untouched pixel to the full look.
+  function applyLook(ctx, w, h, look, strength) {
+    const k = clamp(strength, 0, 1);
+    if (!look || look.id === "none" || k <= 0) return;
+    const p = { ...LOOK_DEFAULT, ...look };
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data;
+    const lut = new Float32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let t = i / 255;
+      t += p.curve * (t * t * (3 - 2 * t) - t);
+      t = Math.pow(clamp(t, 0, 1), 1 / p.gamma);
+      lut[i] = p.black + t * (p.white - p.black);
+    }
+    const [sr, sg, sb] = p.shadow, [hr, hg, hb] = p.high;
+    const cell = Math.max(1, Math.round(Math.max(w, h) / 1400));
+    const hx = w / 2, hy = h / 2;
+    for (let y = 0; y < h; y++) {
+      const dy = (y - hy) / hy, dy2 = dy * dy;
+      const cy = Math.floor(y / cell);
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        const or = d[i], og = d[i + 1], ob = d[i + 2];
+        let r = or, g = og, b = ob;
+        if (p.mono) { r = g = b = or * p.mono[0] + og * p.mono[1] + ob * p.mono[2]; }
+        r = lut[r | 0]; g = lut[g | 0]; b = lut[b | 0];
+
+        const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        const ws = (1 - l) * (1 - l), wh = l * l;
+        r += sr * ws + hr * wh; g += sg * ws + hg * wh; b += sb * ws + hb * wh;
+        if (p.warmth) {
+          const wm = p.warmth * 0.05 * (0.35 + 2.6 * l * (1 - l));
+          r += wm; b -= wm;
+        }
+        if (!p.mono && (p.sat || p.vibrance || p.skinSat)) {
+          const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+          const sat = mx > 0 ? (mx - mn) / mx : 0;
+          let skin = 0;
+          if (r >= g && g >= b && r > b) {
+            skin = trapezoid((g - b) / (r - b), 0.05, 0.2, 0.6, 0.85) * trapezoid(sat, 0.1, 0.25, 0.6, 0.8);
+          }
+          const f = Math.max(0, 1 + p.sat + p.vibrance * (1 - sat) * (1 - 0.6 * skin) + p.skinSat * skin);
+          const l2 = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+          r = l2 + (r - l2) * f; g = l2 + (g - l2) * f; b = l2 + (b - l2) * f;
+        }
+        if (p.vignette) {
+          const dx = (x - hx) / hx;
+          const v = clamp(((dx * dx + dy2) / 2 - 0.25) / 0.75, 0, 1);
+          const m = 1 - p.vignette * v * v;
+          r *= m; g *= m; b *= m;
+        }
+        if (p.grain) {
+          let n = Math.imul(Math.floor(x / cell), 374761393) ^ Math.imul(cy, 668265263);
+          n = Math.imul(n ^ (n >>> 13), 1274126177);
+          n ^= n >>> 16;
+          const gr = ((n & 255) / 127.5 - 1) * p.grain * (0.5 + 2 * l * (1 - l));
+          r += gr; g += gr; b += gr;
+        }
+        d[i] = or + (r * 255 - or) * k;
+        d[i + 1] = og + (g * 255 - og) * k;
+        d[i + 2] = ob + (b * 255 - ob) * k;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
 
   const STICKER_CATS = [
     { id: "fun", label: "Fun", items: ["😀","😂","😍","😎","🤔","😭","😡","👍","👎","🎉","🔥","❤️","💯","💩","👻","🤖"] },
@@ -65,12 +138,14 @@
   const CUSTOM_STICKER_KEY = "pcur_custom_stickers";
 
   const TOOLS = [
-    ["crop", "Crop", "grid"], ["transform", "Transform", "swap"], ["adjust", "Adjust", "sun"],
-    ["filters", "Filters", "cpu"], ["remaster", "Remaster", "image"], ["blur", "Blur / Sharpen", "eye"],
-    ["redeye", "Red-Eye", "face"], ["bg", "Remove BG", "layers"], ["draw", "Draw", "pen"],
-    ["stickers", "Stickers", "star"], ["idcard", "ID Card", "cal"], ["qr", "QR Code", "copy"],
-    ["ocr", "OCR", "search"],
+    ["crop", "Crop & Rotate", "grid", "adjust"], ["adjust", "Light", "sun", "adjust"],
+    ["filters", "Looks", "cpu", "adjust"], ["remaster", "Remaster", "image", "adjust"],
+    ["blur", "Detail", "eye", "adjust"], ["redeye", "Red-Eye", "face", "adjust"],
+    ["bg", "Remove BG", "layers", "adjust"],
+    ["draw", "Draw", "pen", "annotate"], ["stickers", "Stickers", "star", "annotate"],
+    ["idcard", "ID Card", "cal", "tools"], ["qr", "QR Code", "copy", "tools"], ["ocr", "OCR", "search", "tools"],
   ];
+  const TOOL_GROUPS = [["adjust", "Adjust"], ["annotate", "Annotate"], ["tools", "Tools"]];
 
   // --------------------------------------------------------------- small utils
   function makeCanvas(w, h) {
@@ -372,7 +447,7 @@
 
     const S = {
       tool: "crop", zoom: 1, panX: 0, panY: 0, fit: 0.3,
-      brightness: 100, contrast: 100, saturation: 100, filter: "none", blur: 0,
+      brightness: 100, contrast: 100, saturation: 100, look: "none", lookStrength: 100, blur: 0,
       pendingFlip: null, pendingRotate: 0,
       crop: null, cropAspect: null,
       drawMode: "pen", color: "#ff3b30", brush: 10,
@@ -381,20 +456,28 @@
       // so moving/resizing/rotating re-bakes base + sticker (no dual-track replay).
       sticker: null,
       needsAlpha: false,
-      compare: false,
+      compare: false, split: 0.5, cropDirty: false, _built: false,
       history: [], hi: -1,
       _drag: null, _live: null, _space: false,
     };
     let closed = false;
+    let commitBar = null, commitApply = null, commitCancel = null, zRead = null, cmpC = null;
 
     // ---- history: <= 10 compressed states, bitmaps closed on discard ----
-    function closeBitmap(b) { try { b && b.close && b.close(); } catch (e) { /* */ } }
+    function closeBitmap(entry) {
+      const b = entry && entry.bitmap ? entry.bitmap : entry;
+      try { b && b.close && b.close(); } catch (e) { /* */ }
+    }
     function snapshot() {
       const type = S.needsAlpha ? "image/png" : "image/jpeg";
       const q = S.needsAlpha ? undefined : 0.92;
-      return canvasToBlob(workC, type, q).then(blobToBitmap).catch(() => null);
+      const needsAlpha = S.needsAlpha;
+      return canvasToBlob(workC, type, q).then(blobToBitmap)
+        .then((bitmap) => bitmap ? { bitmap, needsAlpha } : null)
+        .catch(() => null);
     }
     async function commit() {
+      if (S.compare) setCompare(false);
       const st = await snapshot();
       if (!st) { syncDisp(); return; }
       S.history = S.history.slice(0, S.hi + 1);
@@ -404,28 +487,55 @@
       state.histLen = S.history.length;
       syncDisp(); renderOverlay(); historyBtns();
     }
-    async function restoreState(b) {
+    async function restoreState(entry) {
+      if (!entry) return;
+      const b = entry.bitmap;
       if (!b) return;
       W = b.width; H = b.height;
       workC.width = W; workC.height = H;
       ctx2d(workC).drawImage(b, 0, 0);
       S.sticker = null; S.crop = null;
+      S.needsAlpha = !!entry.needsAlpha;
       resetAdjustPreview();
       relayout(); syncDisp(); renderOverlay();
     }
     async function undo() { if (S.hi > 0) { S.hi--; await restoreState(S.history[S.hi]); historyBtns(); } }
     async function redo() { if (S.hi < S.history.length - 1) { S.hi++; await restoreState(S.history[S.hi]); historyBtns(); } }
 
-    // ---- display: dispC = clean copy of workC; live filter/preview is CSS only ----
+    // ---- display: dispC = workC (graded by the active look); adjust/blur preview is CSS only ----
     function liveFilter() {
       const f = [];
       if (S.brightness !== 100) f.push(`brightness(${S.brightness}%)`);
       if (S.contrast !== 100) f.push(`contrast(${S.contrast}%)`);
       if (S.saturation !== 100) f.push(`saturate(${S.saturation}%)`);
-      const fl = FILTERS.find((z) => z[0] === S.filter);
-      if (fl && fl[2] !== "none") f.push(fl[2]);
       if (S.blur > 0) f.push(`blur(${(S.blur / 10).toFixed(2)}px)`);
       return f.length ? f.join(" ") : "none";
+    }
+    const activeLook = () => (S.look !== "none" && S.lookStrength > 0 ? LOOKS.find((z) => z.id === S.look) : null);
+    let lookSrc = null, lookTmp = null, lookRaf = 0;
+    // Grades a downscaled copy and stretches it into dispC, so a slider drag stays fluid on big photos.
+    function renderLookPreview() {
+      lookRaf = 0;
+      if (closed) return;
+      const x = ctx2d(dispC);
+      x.clearRect(0, 0, dispC.width, dispC.height);
+      const look = activeLook();
+      if (!look) { x.drawImage(workC, 0, 0); return; }
+      if (!lookSrc) {
+        const f = Math.min(1, LOOK_PREVIEW_PX / Math.max(workC.width, workC.height));
+        lookSrc = makeCanvas(workC.width * f, workC.height * f);
+        ctx2d(lookSrc).drawImage(workC, 0, 0, lookSrc.width, lookSrc.height);
+        lookTmp = makeCanvas(lookSrc.width, lookSrc.height);
+      }
+      const tx = ctx2d(lookTmp);
+      tx.clearRect(0, 0, lookTmp.width, lookTmp.height);
+      tx.drawImage(lookSrc, 0, 0);
+      applyLook(tx, lookTmp.width, lookTmp.height, look, S.lookStrength / 100);
+      x.drawImage(lookTmp, 0, 0, dispC.width, dispC.height);
+    }
+    function scheduleLookPreview() {
+      if (!lookRaf) lookRaf = requestAnimationFrame(renderLookPreview);
+      refreshCommitBar();
     }
     let cachedOvRect = null;
     function getOvRect() {
@@ -437,16 +547,20 @@
     }
 
     function syncDisp() {
+      lookSrc = lookTmp = null;
       if (dispC.width !== workC.width || dispC.height !== workC.height) {
         dispC.width = workC.width; dispC.height = workC.height;
       }
       const x = ctx2d(dispC);
       x.clearRect(0, 0, dispC.width, dispC.height);
       x.drawImage(workC, 0, 0);
+      wrap.classList.toggle("has-alpha", !!S.needsAlpha);
+      if (activeLook()) renderLookPreview();
+      if (S.compare) drawCompare();
       applyPreview();
     }
     function applyPreview() {
-      wrap.style.filter = liveFilter();
+      dispC.style.filter = liveFilter();
       const z = S.zoom * S.fit;
       const r = stage.getBoundingClientRect();
       const cx = r.width / 2 + S.panX;
@@ -461,14 +575,20 @@
       t += ` translate(${(-workC.width / 2).toFixed(2)}px,${(-workC.height / 2).toFixed(2)}px)`;
 
       wrap.style.transform = t;
+      wrap.style.setProperty("--inv", (1 / Math.max(0.02, Math.abs(z))).toFixed(4));
+      if (zRead) zRead.textContent = Math.round(z * 100) + "%";
       invalidateOvRect();
+      refreshCommitBar();
     }
     function resetAdjustPreview() {
+      const hadLook = S.look !== "none";
       S.brightness = 100; S.contrast = 100; S.saturation = 100;
-      S.filter = "none"; S.blur = 0; S.pendingFlip = null; S.pendingRotate = 0;
-      applyPreview();
+      S.look = "none"; S.lookStrength = 100; S.blur = 0; S.sharpenPending = 0; S.pendingFlip = null; S.pendingRotate = 0;
+      if (hadLook) syncDisp(); else applyPreview();
     }
     function bakeFilter() {
+      const look = activeLook();
+      if (look) applyLook(ctx2d(workC), workC.width, workC.height, look, S.lookStrength / 100);
       const f = liveFilter();
       const sh = S.sharpenPending; S.sharpenPending = 0;
       if (f && f !== "none") {
@@ -482,9 +602,76 @@
         ctx2d(workC).drawImage(tmp, 0, 0);
       }
       S.brightness = 100; S.contrast = 100; S.saturation = 100;
-      S.filter = "none"; S.blur = 0;
+      S.look = "none"; S.lookStrength = 100; S.blur = 0;
       if (sh > 0) sharpen(ctx2d(workC), workC.width, workC.height, sh);
       syncDisp();
+    }
+
+    // ---- pending changes: one Apply / Cancel bar for every deferred tool ----
+    const PENDING_LABEL = { crop: "Apply crop", adjust: "Apply", filters: "Apply look", blur: "Apply" };
+    const APPLIED_MSG = { crop: "Crop applied", adjust: "Adjustments applied", filters: "Look applied", blur: "Blur / sharpen applied" };
+    function hasPending() {
+      switch (S.tool) {
+        case "crop": return !!S.crop && S.cropDirty;
+        case "adjust": return S.brightness !== 100 || S.contrast !== 100 || S.saturation !== 100;
+        case "filters": return !!activeLook();
+        case "blur": return S.blur > 0 || (S.sharpenPending || 0) > 0;
+        default: return false;
+      }
+    }
+    function refreshCommitBar() {
+      if (!commitBar) return;
+      const on = hasPending();
+      commitBar.hidden = !on;
+      if (on) {
+        commitApply.querySelector("span").textContent = PENDING_LABEL[S.tool] || "Apply";
+        commitCancel.querySelector("span").textContent = S.tool === "crop" ? "Reset" : "Cancel";
+      }
+    }
+    function defaultCrop() {
+      const mx = Math.round(workC.width * 0.05), my = Math.round(workC.height * 0.05);
+      return { x: mx, y: my, w: workC.width - 2 * mx, h: workC.height - 2 * my };
+    }
+    function resetCrop() {
+      S.crop = defaultCrop();
+      S.cropDirty = false;
+      if (S.cropAspect) applyAspect();
+      renderOverlay();
+    }
+    async function applyCrop() {
+      const c = S.crop;
+      if (!c || c.w < 2 || c.h < 2) { toast("Adjust the crop area first", "err"); return false; }
+      const nc = makeCanvas(c.w, c.h);
+      ctx2d(nc).drawImage(workC, c.x, c.y, c.w, c.h, 0, 0, c.w, c.h);
+      let nw = nc.width, nh = nc.height;
+      if (Math.max(nw, nh) > MAX_PX) { const f = MAX_PX / Math.max(nw, nh); nw = Math.round(nw * f); nh = Math.round(nh * f); }
+      workC.width = nw; workC.height = nh;
+      ctx2d(workC).drawImage(nc, 0, 0, nw, nh);
+      S.crop = defaultCrop();
+      S.cropDirty = false;
+      if (S.cropAspect) applyAspect();
+      relayout();
+      await commit();
+      return true;
+    }
+    async function applyPending() {
+      if (!hasPending()) return false;
+      const tool = S.tool;
+      if (tool === "crop") {
+        if (!(await applyCrop())) return false;
+      } else {
+        bakeFilter();
+        await commit();
+        buildPanel();
+      }
+      toast(APPLIED_MSG[tool] || "Applied", "ok");
+      refreshCommitBar();
+      return true;
+    }
+    function cancelPending() {
+      if (S.tool === "crop") resetCrop();
+      else { resetAdjustPreview(); buildPanel(); }
+      refreshCommitBar();
     }
 
     // ---- DOM ----
@@ -510,8 +697,8 @@
     titleEl.title = baseName;
     const undoBtn = mkBtn(icon("undo") + "<span>Undo</span>", "pcur-hist");
     const redoBtn = mkBtn("<span>Redo</span>" + icon("right"), "pcur-hist");
-    const compareBtn = mkBtn(icon("eye") + "<span>Compare</span>", "pcur-hist pcur-compare"); compareBtn.title = "Hold to compare with the original";
-    const dlBtn = mkBtn(icon("down") + "<span>Download</span>", "btn sm secondary pcur-top-btn");
+    const compareBtn = mkBtn(icon("eye") + "<span>Compare</span>", "pcur-hist pcur-compare"); compareBtn.title = "Compare with the original (C)"; compareBtn.setAttribute("aria-pressed", "false");
+    const dlBtn = mkBtn(icon("down") + "<span>Download</span>", "btn sm secondary pcur-top-btn pcur-dl");
     const saveBtn = mkBtn(icon("check") + "<span>Save</span>", "btn sm primary pcur-top-btn");
     const closeBtn = mkBtn(icon("x"), "pcur-x");
     closeBtn.title = "Close (Esc)";
@@ -530,40 +717,88 @@
     const fxLayer = document.createElement("div");
     fxLayer.className = "pcur-photo-fx";
     fxLayer.innerHTML = `<div class="pcur-fx-shimmer"></div><div class="pcur-fx-beam"></div>`;
-    wrap.append(dispC, ovC, fxLayer);
+    cmpC = makeCanvas(W, H);
+    cmpC.className = "pcur-cmp";
+    const splitEl = document.createElement("div");
+    splitEl.className = "pcur-split";
+    splitEl.innerHTML = `<span class="pcur-cmp-badge l">Original</span><span class="pcur-cmp-badge r">Edited</span><span class="pcur-split-line"><button type="button" class="pcur-split-grip" aria-label="Drag to compare the original and the edit">\u2039 \u203a</button></span>`;
+    wrap.append(dispC, cmpC, ovC, fxLayer, splitEl);
 
     const stageStatus = document.createElement("div");
     stageStatus.className = "pcur-stage-status";
     stageStatus.hidden = true;
     stageStatus.innerHTML = `<div class="pcur-status-card"><span class="pcur-status-ring"></span><span class="pcur-status-txt">Processing photo…</span></div>`;
-    stage.append(wrap, stageStatus);
+    const zoomBox = document.createElement("div");
+    zoomBox.className = "pcur-zoom";
+    const zOut = mkBtn("\u2212", "pcur-zbtn"); zOut.title = "Zoom out"; zOut.setAttribute("aria-label", "Zoom out");
+    const zIn = mkBtn("+", "pcur-zbtn"); zIn.title = "Zoom in"; zIn.setAttribute("aria-label", "Zoom in");
+    const zFit = mkBtn("Fit", "pcur-zbtn"); zFit.title = "Fit the photo to the window";
+    const z100 = mkBtn("1:1", "pcur-zbtn"); z100.title = "Show at actual size";
+    zRead = document.createElement("span");
+    zRead.className = "pcur-zread";
+    zRead.setAttribute("aria-live", "polite");
+    zoomBox.append(zOut, zRead, zIn, zFit, z100);
+    zoomBox.addEventListener("pointerdown", (e) => e.stopPropagation());
+    stage.append(wrap, stageStatus, zoomBox);
 
+    const toolwrap = document.createElement("div");
+    toolwrap.className = "pcur-toolwrap";
+    const gtabs = document.createElement("div");
+    gtabs.className = "pcur-gtabs";
     const toolbar = document.createElement("div");
     toolbar.className = "pcur-tools";
     toolbar.setAttribute("role", "toolbar");
     toolbar.setAttribute("aria-label", "Editor tools");
-    TOOLS.forEach(([tid, label, ic], i) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "pcur-tool";
-      b.dataset.tool = tid;
-      b.title = `${label} (${i + 1})`;
-      b.innerHTML = icon(ic) + `<span>${esc(label)}</span>`;
-      b.onclick = () => selectTool(tid);
-      toolbar.appendChild(b);
+    toolbar.dataset.group = "adjust";
+    TOOL_GROUPS.forEach(([gid, glabel]) => {
+      const g = document.createElement("div");
+      g.className = "pcur-tgroup";
+      g.dataset.g = gid;
+      const gl = document.createElement("span");
+      gl.className = "pcur-tglabel";
+      gl.textContent = glabel;
+      const row = document.createElement("div");
+      row.className = "pcur-tgbtns";
+      TOOLS.forEach(([tid, label, ic, grp], i) => {
+        if (grp !== gid) return;
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "pcur-tool";
+        b.dataset.tool = tid;
+        b.title = i < 9 ? `${label} (${i + 1})` : label;
+        b.innerHTML = icon(ic) + `<span>${esc(label)}</span>`;
+        b.onclick = () => selectTool(tid);
+        row.appendChild(b);
+      });
+      g.append(gl, row);
+      toolbar.appendChild(g);
+      const t = document.createElement("button");
+      t.type = "button";
+      t.className = "pcur-gtab" + (gid === "adjust" ? " on" : "");
+      t.dataset.g = gid;
+      t.textContent = glabel;
+      t.onclick = () => showGroup(gid);
+      gtabs.appendChild(t);
     });
+    toolwrap.append(gtabs, toolbar);
 
     const panel = document.createElement("div");
     panel.className = "pcur-panel";
     const panelBody = document.createElement("div");
     panelBody.className = "pcur-panelbody";
-    panel.appendChild(panelBody);
+    commitBar = document.createElement("div");
+    commitBar.className = "pcur-btns pcur-commit";
+    commitBar.hidden = true;
+    commitCancel = mkBtn("<span>Cancel</span>", "btn sm ghost");
+    commitApply = mkBtn(icon("check") + "<span>Apply</span>", "btn sm primary");
+    commitBar.append(commitCancel, commitApply);
+    panel.append(panelBody, commitBar);
 
     const mid = document.createElement("div");
     mid.className = "pcur-mid";
     mid.append(stage, panel);
 
-    rootEl.append(topbar, mid, toolbar);
+    rootEl.append(topbar, mid, toolwrap);
 
     function grow() { const n = document.createElement("span"); n.className = "grow"; return n; }
     function mkBtn(html, cls) {
@@ -929,6 +1164,12 @@
         applyPreview();
         return;
       }
+      if (d.kind === "split") {
+        const r = getOvRect();
+        S.split = clamp((ev.clientX - r.left) / Math.max(1, r.width), 0, 1);
+        wrap.style.setProperty("--split", (S.split * 100).toFixed(2) + "%");
+        return;
+      }
       const p = screenToCanvas(ev.clientX, ev.clientY);
       if (d.kind === "cropnew") {
         const scale = S.fit * S.zoom;
@@ -987,6 +1228,7 @@
           renderOverlay();
         }
       }
+      if (d && /^crop/.test(d.kind) && !(d.kind === "cropnew" && !d.started)) { S.cropDirty = true; refreshCommitBar(); }
       if (S.tool === "crop") {
         stage.style.cursor = "crosshair";
       } else {
@@ -1013,17 +1255,26 @@
     }
 
     // ---- tool panels ----
-    function selectTool(tid) {
+    function showGroup(gid) {
+      toolbar.dataset.group = gid;
+      $$(".pcur-gtab", gtabs).forEach((b) => b.classList.toggle("on", b.dataset.g === gid));
+    }
+    async function selectTool(tid) {
+      if (tid === S.tool && S._built) return;
+      if (S.compare) setCompare(false);
+      if (tid !== S.tool && hasPending()) await applyPending();
       S.tool = tid;
+      S._built = true;
       resetAdjustPreview();
       if (tid !== "crop") {
         S.crop = null;
+        S.cropDirty = false;
       } else if (!S.crop) {
-        const marginX = Math.round(workC.width * 0.05);
-        const marginY = Math.round(workC.height * 0.05);
-        S.crop = { x: marginX, y: marginY, w: workC.width - 2 * marginX, h: workC.height - 2 * marginY };
+        S.crop = defaultCrop();
         if (S.cropAspect) applyAspect();
       }
+      const grp = (TOOLS.find((t) => t[0] === tid) || [])[3];
+      if (grp) showGroup(grp);
       $$(".pcur-tool", toolbar).forEach((b) => b.classList.toggle("active", b.dataset.tool === tid));
       buildPanel();
       renderOverlay();
@@ -1108,55 +1359,24 @@
 
       if (T === "crop") {
         S.cropAspectKey = S.cropAspectKey || "free";
+        add(pEl("div", "pcur-sect", "Crop"));
         add(chipRow([["free", "Free"], ["1:1", "1:1"], ["4:3", "4:3"], ["16:9", "16:9"], ["3:2", "3:2"], ["9:16", "9:16"]],
           S.cropAspectKey, (v) => {
             S.cropAspectKey = v;
             S.cropAspect = v === "free" ? null : Number(v.split(":")[0]) / Number(v.split(":")[1]);
-            if (!S.crop) {
-              const marginX = Math.round(workC.width * 0.05);
-              const marginY = Math.round(workC.height * 0.05);
-              S.crop = { x: marginX, y: marginY, w: workC.width - 2 * marginX, h: workC.height - 2 * marginY };
-            }
+            if (!S.crop) S.crop = defaultCrop();
+            S.cropDirty = true;
             applyAspect();
             renderOverlay();
           }));
         add(pEl("p", "pcur-hint", "Drag the corner brackets or edge bars to resize. Drag inside the box to move it."));
-        const apply = pBtn(icon("check") + "<span>Apply crop</span>", "primary", async () => {
-          const c = S.crop;
-          if (!c || c.w < 2 || c.h < 2) { toast("Adjust the crop area first", "err"); return; }
-          const nc = makeCanvas(c.w, c.h);
-          ctx2d(nc).drawImage(workC, c.x, c.y, c.w, c.h, 0, 0, c.w, c.h);
-          let nw = nc.width, nh = nc.height;
-          if (Math.max(nw, nh) > MAX_PX) { const f = MAX_PX / Math.max(nw, nh); nw = Math.round(nw * f); nh = Math.round(nh * f); }
-          workC.width = nw; workC.height = nh;
-          ctx2d(workC).drawImage(nc, 0, 0, nw, nh);
-          const marginX = Math.round(nw * 0.05);
-          const marginY = Math.round(nh * 0.05);
-          S.crop = { x: marginX, y: marginY, w: nw - 2 * marginX, h: nh - 2 * marginY };
-          if (S.cropAspect) applyAspect();
-          relayout();
-          await commit();
-          toast("Crop applied", "ok");
-        });
-        const reset = pBtn("Reset", "ghost", () => {
-          const marginX = Math.round(workC.width * 0.05);
-          const marginY = Math.round(workC.height * 0.05);
-          S.crop = { x: marginX, y: marginY, w: workC.width - 2 * marginX, h: workC.height - 2 * marginY };
-          if (S.cropAspect) applyAspect();
-          renderOverlay();
-        });
-        const btnBox = pEl("div", "pcur-btns", "");
-        btnBox.append(apply, reset);
-        add(btnBox);
-      }
-
-      else if (T === "transform") {
+        add(pEl("div", "pcur-sect", "Rotate & flip"));
         const r90 = pEl("div", "pcur-btns");
         r90.append(
-          pBtn("⟲ 90°", "", () => rotate90(-90), "Rotate counter-clockwise"),
-          pBtn("90° ⟳", "", () => rotate90(90), "Rotate clockwise"),
-          pBtn("Flip ↔", "", () => { bakeFlip("h"); toast("Flipped horizontally", "ok"); }, "Flip horizontal"),
-          pBtn("Flip ↕", "", () => { bakeFlip("v"); toast("Flipped vertically", "ok"); }, "Flip vertical"),
+          pBtn("\u27f2 90\u00b0", "", () => rotate90(-90), "Rotate counter-clockwise"),
+          pBtn("90\u00b0 \u27f3", "", () => rotate90(90), "Rotate clockwise"),
+          pBtn("Flip \u2194", "", () => { bakeFlip("h"); toast("Flipped horizontally", "ok"); }, "Flip horizontal"),
+          pBtn("Flip \u2195", "", () => { bakeFlip("v"); toast("Flipped vertically", "ok"); }, "Flip vertical"),
         );
         add(r90);
         let sFine = null;
@@ -1169,66 +1389,55 @@
               const inp = sFine && sFine.querySelector("input");
               const val = sFine && sFine.querySelector(".pcur-val");
               if (inp) inp.value = "0";
-              if (val) val.textContent = "0°";
-              toast(`Rotated ${Math.round(v)}°`, "ok");
+              if (val) val.textContent = "0\u00b0";
+              toast(`Rotated ${Math.round(v)}\u00b0`, "ok");
             } else {
               applyPreview();
             }
-          }, (v) => Math.round(v) + "°");
+          }, (v) => Math.round(v) + "\u00b0");
         add(sFine);
-        add(pEl("p", "pcur-hint", "90° and flips bake instantly. Fine rotation previews live and bakes when you release the slider."));
+        add(pEl("p", "pcur-hint", "90\u00b0 turns and flips apply instantly. Fine rotation previews live and applies when you release the slider."));
       }
 
-      else if (T === "adjust") {
+            else if (T === "adjust") {
         const sB = pSlider("Brightness", 50, 150, S.brightness, (v) => { S.brightness = v; applyPreview(); }, null, (v) => v + "%");
         const sC = pSlider("Contrast", 50, 150, S.contrast, (v) => { S.contrast = v; applyPreview(); }, null, (v) => v + "%");
         const sS = pSlider("Saturation", 0, 200, S.saturation, (v) => { S.saturation = v; applyPreview(); }, null, (v) => v + "%");
         add(sB); add(sC); add(sS);
-        const resetSliders = () => {
-          S.brightness = S.contrast = S.saturation = 100;
-          applyPreview();
-          for (const box of [sB, sC, sS]) {
-            const inp = box.querySelector("input");
-            const val = box.querySelector(".pcur-val");
-            if (inp) inp.value = "100";
-            if (val) val.textContent = "100%";
-          }
-        };
-        const apply = pBtn(icon("check") + "<span>Apply adjustments</span>", "primary", async () => {
-          if (S.brightness === 100 && S.contrast === 100 && S.saturation === 100) return;
-          bakeFilter();
-          await commit();
-          resetSliders();
-          toast("Adjustments applied", "ok");
-        });
-        const reset = pBtn("Reset", "ghost", resetSliders);
-        const btnBox = pEl("div", "pcur-btns", "");
-        btnBox.append(apply, reset);
-        add(btnBox);
-        add(pEl("p", "pcur-hint", "Adjust sliders preview live. Click 'Apply adjustments' to bake into the photo."));
+        add(pEl("p", "pcur-hint", "Sliders preview live. Use Apply below to keep the change."));
       }
 
-      else if (T === "filters") {
+            else if (T === "filters") {
+        const SW = 112;
+        const side = Math.min(workC.width, workC.height);
+        const sq = makeCanvas(SW, SW);
+        ctx2d(sq).drawImage(workC, (workC.width - side) / 2, (workC.height - side) / 2, side, side, 0, 0, SW, SW);
         const grid = pEl("div", "pcur-filters");
-        FILTERS.forEach(([fid, label, css]) => {
-          const b = pEl("button", "pcur-fil" + (S.filter === fid ? " on" : ""));
+        const btns = [];
+        LOOKS.forEach((look) => {
+          const b = pEl("button", "pcur-fil" + (S.look === look.id ? " on" : ""));
           b.type = "button";
-          b.title = label;
-          b.innerHTML = `<span class="pcur-fprev" style="background-image:var(--pcur-thumb,none);filter:${css}"></span><span>${esc(label)}</span>`;
+          b.title = look.label;
+          const prev = makeCanvas(SW, SW);
+          const px = ctx2d(prev);
+          px.drawImage(sq, 0, 0);
+          applyLook(px, SW, SW, look, 1);
+          prev.className = "pcur-fprev";
+          b.append(prev, pEl("span", "", esc(look.label)));
           b.onclick = () => {
-            S.filter = fid;
-            applyPreview();
-            $$(".pcur-fil", grid).forEach((z) => z.classList.remove("on"));
-            b.classList.add("on");
+            S.look = look.id;
+            btns.forEach((z) => z.classList.toggle("on", z === b));
+            scheduleLookPreview();
           };
+          btns.push(b);
           grid.appendChild(b);
         });
         add(grid);
-        const apply = pBtn(icon("check") + "<span>Apply filter</span>", "primary", () => { bakeFilter(); commit(); toast("Filter applied", "ok"); }, "Bake the selected filter into the photo");
-        add(btnRow(apply));
+        add(pSlider("Strength", 0, 100, S.lookStrength,
+          (v) => { S.lookStrength = v; scheduleLookPreview(); }, null, (v) => Math.round(v) + "%"));
       }
 
-      else if (T === "remaster") {
+            else if (T === "remaster") {
         const ropts = { denoise: true, low_light: true, upscale: true };
         const rcbox = (key, label) => {
           const l = pEl("label", "pcur-chk");
@@ -1277,33 +1486,12 @@
 
       else if (T === "blur") {
         const sBlur = pSlider("Blur", 0, 40, S.blur, (v) => { S.blur = v; applyPreview(); }, null, (v) => v + "px");
-        const sSharp = pSlider("Sharpen", 0, 100, Math.round((S.sharpenPending || 0) * 100), (v) => { S.sharpenPending = v / 100; }, null, (v) => v + "%");
+        const sSharp = pSlider("Sharpen", 0, 100, Math.round((S.sharpenPending || 0) * 100), (v) => { S.sharpenPending = v / 100; refreshCommitBar(); }, null, (v) => v + "%");
         add(sBlur); add(sSharp);
-        const resetBlur = () => {
-          S.blur = 0; S.sharpenPending = 0;
-          applyPreview();
-          const inps = [sBlur.querySelector("input"), sSharp.querySelector("input")];
-          const vals = [sBlur.querySelector(".pcur-val"), sSharp.querySelector(".pcur-val")];
-          if (inps[0]) inps[0].value = "0";
-          if (vals[0]) vals[0].textContent = "0px";
-          if (inps[1]) inps[1].value = "0";
-          if (vals[1]) vals[1].textContent = "0%";
-        };
-        const apply = pBtn(icon("check") + "<span>Apply blur / sharpen</span>", "primary", async () => {
-          if (S.blur <= 0 && (!S.sharpenPending || S.sharpenPending <= 0)) return;
-          bakeFilter();
-          await commit();
-          resetBlur();
-          toast("Blur / sharpen applied", "ok");
-        });
-        const reset = pBtn("Reset", "ghost", resetBlur);
-        const btnBox = pEl("div", "pcur-btns", "");
-        btnBox.append(apply, reset);
-        add(btnBox);
-        add(pEl("p", "pcur-hint", "Blur previews with the GPU. Click 'Apply blur / sharpen' to bake into the photo."));
+        add(pEl("p", "pcur-hint", "Blur previews live. Use Apply below to keep the change."));
       }
 
-      else if (T === "redeye") {
+            else if (T === "redeye") {
         add(pSlider("Radius", 6, 80, S.redRadius, (v) => { S.redRadius = v; }, null, (v) => v + "px"));
         add(pEl("p", "pcur-hint", "Click directly on a red pupil. Reddish pixels inside the radius are darkened."));
       }
@@ -1656,6 +1844,7 @@
       x.drawImage(workC, -workC.width / 2, -workC.height / 2);
       workC.width = tmp.width; workC.height = tmp.height;
       ctx2d(workC).drawImage(tmp, 0, 0);
+      if (S.crop) { S.crop = defaultCrop(); S.cropDirty = false; if (S.cropAspect) applyAspect(); }
       S.sticker = null;
       syncDisp();
       relayout();
@@ -1670,6 +1859,7 @@
       x.drawImage(workC, 0, 0);
       workC.width = tmp.width; workC.height = tmp.height;
       ctx2d(workC).drawImage(tmp, 0, 0);
+      if (S.crop) { S.crop = defaultCrop(); S.cropDirty = false; if (S.cropAspect) applyAspect(); }
       S.sticker = null;
       syncDisp();
       relayout();
@@ -1689,6 +1879,7 @@
       if (Math.max(cw, ch) > MAX_PX) { const f = MAX_PX / Math.max(cw, ch); cw = Math.round(cw * f); ch = Math.round(ch * f); }
       workC.width = cw; workC.height = ch;
       ctx2d(workC).drawImage(tmp, 0, 0, cw, ch);
+      if (S.crop) { S.crop = defaultCrop(); S.cropDirty = false; if (S.cropAspect) applyAspect(); }
       S.sticker = null;
       syncDisp();
       relayout();
@@ -1713,43 +1904,40 @@
         toast("Download started", "ok");
       } catch (e) { toast("Export failed: " + e.message, "err"); }
     }
-    function openSaveModal() {
+    function openSaveModal(mode) {
+      const dlOnly = mode === "download";
       const m = pEl("div", "pcur-saveback");
       const dlg = pEl("div", "pcur-savedlg");
       dlg.setAttribute("role", "dialog");
-      dlg.setAttribute("aria-label", "Save changes");
+      dlg.setAttribute("aria-label", dlOnly ? "Download" : "Save changes");
       dlg.innerHTML = `
-        <h3>Save changes</h3>
+        <h3>${dlOnly ? "Download" : "Save changes"}</h3>
         <div class="pcur-row"><label class="pcur-lbl">Format</label>
           <select class="pcur-sel">
             <option value="jpeg">JPEG</option><option value="png">PNG</option>
-            <option value="webp">WebP</option><option value="pdf">PDF</option>
+            <option value="webp">WebP</option>${dlOnly ? '<option value="pdf">PDF</option>' : ""}
           </select>
         </div>
-        <div class="pcur-slider"><div class="pcur-shead"><label class="pcur-lbl">Quality</label><span class="pcur-val">92%</span></div>
+        <div class="pcur-slider" data-quality><div class="pcur-shead"><label class="pcur-lbl">Quality</label><span class="pcur-val">92%</span></div>
           <input type="range" min="50" max="100" value="92" step="1" class="pcur-q">
         </div>
-        <div class="pcur-btns">
-          <button type="button" class="btn sm primary" data-act="copy">${icon("copy")}<span>Save as copy</span></button>
-          <button type="button" class="btn sm secondary" data-act="overwrite">${icon("swap")}<span>Overwrite original</span></button>
-          <button type="button" class="btn sm ghost" data-act="download">${icon("down")}<span>Download</span></button>
+        <div class="pcur-btns pcur-savebtns">
+          ${dlOnly
+            ? `<button type="button" class="btn sm primary" data-act="download">${icon("down")}<span>Download</span></button>`
+            : `<button type="button" class="btn sm primary" data-act="copy">${icon("copy")}<span>Save as copy</span></button>
+               <button type="button" class="btn sm ghost pcur-warn" data-act="overwrite">${icon("swap")}<span>Overwrite original</span></button>`}
         </div>
-        <p class="pcur-hint">“Save as copy” adds a new photo to the library. “Overwrite” replaces the original in place.</p>`;
+        <p class="pcur-hint">${dlOnly
+          ? "Saves a file to your computer. Your library is not changed."
+          : "Save as copy adds a new photo next to the original. Overwrite replaces the original file and cannot be undone."}</p>`;
       m.appendChild(dlg);
       rootEl.appendChild(m);
       const sel = m.querySelector(".pcur-sel");
       const q = m.querySelector(".pcur-q");
       const qv = m.querySelector(".pcur-val");
-      const copyBtn = dlg.querySelector('[data-act="copy"]');
-      const overwriteBtn = dlg.querySelector('[data-act="overwrite"]');
+      const qBox = m.querySelector("[data-quality]");
       q.addEventListener("input", () => { qv.textContent = q.value + "%"; });
-      const updateFormatUi = () => {
-        const isPdf = sel.value === "pdf";
-        copyBtn.disabled = isPdf;
-        overwriteBtn.disabled = isPdf;
-        copyBtn.title = isPdf ? "PDF can only be downloaded" : "";
-        overwriteBtn.title = isPdf ? "PDF can only be downloaded" : "";
-      };
+      const updateFormatUi = () => { qBox.hidden = sel.value === "png"; };
       sel.addEventListener("change", updateFormatUi);
       updateFormatUi();
 
@@ -1757,54 +1945,52 @@
       m.addEventListener("close-save", closeM);
       m.addEventListener("click", (e) => { if (e.target === m) closeM(); });
 
-      const doSave = async (mode) => {
+      const doSave = async (saveMode) => {
         const type = sel.value;
-        if (type === "pdf") {
-          toast("PDF can only be downloaded, not saved to the photo library.", "err");
-          return;
-        }
         try {
           const quality = Number(q.value) / 100;
           const blob = await exportBlob(type, quality);
           const fd = new FormData();
           fd.append("file", blob, "edit." + extFor(type));
-          fd.append("mode", mode);
+          fd.append("mode", saveMode);
           fd.append("format", type);
           const res = await fetch(`/api/images/${id}/edit-save`, { method: "POST", body: fd });
           if (!res.ok) throw new Error(((await res.json().catch(() => ({}))).detail) || "HTTP " + res.status);
           const j = await res.json();
           closeM();
-          toast(mode === "copy" ? "Saved as a new photo" : "Original updated", "ok");
+          toast(saveMode === "copy" ? "Saved as a new photo" : "Original updated", "ok");
           if (onSaved) onSaved(j);
         } catch (e) { toast("Save failed: " + e.message, "err"); }
       };
-      copyBtn.onclick = () => doSave("copy");
-      overwriteBtn.onclick = () => doSave("overwrite");
-      dlg.querySelector('[data-act="download"]').onclick = () => { download(sel.value, Number(q.value) / 100); closeM(); };
+      const copyBtn = dlg.querySelector('[data-act="copy"]');
+      const overwriteBtn = dlg.querySelector('[data-act="overwrite"]');
+      const dlBtn2 = dlg.querySelector('[data-act="download"]');
+      if (copyBtn) copyBtn.onclick = () => doSave("copy");
+      if (overwriteBtn) overwriteBtn.onclick = () => doSave("overwrite");
+      if (dlBtn2) dlBtn2.onclick = () => { download(sel.value, Number(q.value) / 100); closeM(); };
     }
 
-    // ---- compare (hold to view the unedited original) ----
+    // ---- compare: draggable split between the original (left) and the edit (right) ----
+    function drawCompare() {
+      if (cmpC.width !== workC.width || cmpC.height !== workC.height) {
+        cmpC.width = workC.width; cmpC.height = workC.height;
+      }
+      const x = ctx2d(cmpC);
+      x.clearRect(0, 0, cmpC.width, cmpC.height);
+      x.drawImage(originalC, 0, 0, cmpC.width, cmpC.height);
+    }
     function setCompare(on) {
       if (S.compare === on) return;
       S.compare = on;
+      wrap.classList.toggle("is-compare", on);
+      compareBtn.classList.toggle("on", on);
+      compareBtn.setAttribute("aria-pressed", on ? "true" : "false");
       if (on) {
-        wrap.style.filter = "none";
-        const x = ctx2d(dispC);
-        x.clearRect(0, 0, dispC.width, dispC.height);
-        x.drawImage(originalC, 0, 0, workC.width, workC.height);
-        const ox = ctx2d(ovC);
-        ox.clearRect(0, 0, ovC.width, ovC.height);
-        ox.fillStyle = "rgba(0,0,0,.35)";
-        ox.fillRect(0, 0, ovC.width, ovC.height);
-        ox.fillStyle = "#fff";
-        ox.font = `bold ${Math.max(16, Math.round(ovC.width / 40))}px sans-serif`;
-        ox.textAlign = "center";
-        ox.fillText("ORIGINAL", ovC.width / 2, ovC.height / 2);
-      } else {
-        syncDisp();
-        renderOverlay();
+        drawCompare();
+        wrap.style.setProperty("--split", (S.split * 100).toFixed(2) + "%");
       }
     }
+    function zoomBy(f) { S.zoom = clamp(S.zoom * f, 0.2, 12); applyPreview(); }
 
     // ---- keyboard ----
     function onKey(ev) {
@@ -1829,14 +2015,13 @@
       const tag = (ev.target && ev.target.tagName) || "";
       if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
       if (ev.key === " ") { S._space = true; stage.style.cursor = "grab"; ev.preventDefault(); return; }
-      if (ev.key === "c" || ev.key === "C") { setCompare(true); return; }
+      if (ev.key === "c" || ev.key === "C") { if (!ev.repeat) setCompare(!S.compare); return; }
       const n = parseInt(ev.key, 10);
       if (n >= 1 && n <= TOOLS.length) selectTool(TOOLS[n - 1][0]);
     }
     function onKeyUp(ev) {
       if (closed) return;
       if (ev.key === " ") { S._space = false; stage.style.cursor = ""; }
-      if (ev.key === "c" || ev.key === "C") setCompare(false);
     }
 
     // ---- mount ----
@@ -1855,14 +2040,27 @@
     window.addEventListener("resize", relayout);
     undoBtn.onclick = undo;
     redoBtn.onclick = redo;
-    dlBtn.onclick = () => download("jpeg", 0.92);
-    saveBtn.onclick = openSaveModal;
+    dlBtn.onclick = async () => { await applyPending(); openSaveModal("download"); };
+    saveBtn.onclick = async () => { await applyPending(); openSaveModal("save"); };
     closeBtn.onclick = close;
-    compareBtn.addEventListener("pointerdown", (e) => { e.preventDefault(); setCompare(true); });
-    const cmpUp = () => setCompare(false);
-    compareBtn.addEventListener("pointerup", cmpUp);
-    compareBtn.addEventListener("pointerleave", cmpUp);
-    window.addEventListener("pointerup", cmpUp);
+    compareBtn.onclick = () => setCompare(!S.compare);
+    commitApply.onclick = async () => {
+      commitApply.disabled = true;
+      try { await applyPending(); } finally { commitApply.disabled = false; refreshCommitBar(); }
+    };
+    commitCancel.onclick = cancelPending;
+    zOut.onclick = () => zoomBy(1 / 1.25);
+    zIn.onclick = () => zoomBy(1.25);
+    zFit.onclick = () => { S.zoom = 1; S.panX = 0; S.panY = 0; applyPreview(); };
+    z100.onclick = () => { S.zoom = clamp(1 / Math.max(0.01, S.fit), 0.2, 12); S.panX = 0; S.panY = 0; applyPreview(); };
+    const grip = splitEl.querySelector(".pcur-split-grip");
+    grip.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); invalidateOvRect(); S._drag = { kind: "split" }; });
+    grip.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault(); e.stopPropagation();
+      S.split = clamp(S.split + (e.key === "ArrowRight" ? 0.05 : -0.05), 0, 1);
+      wrap.style.setProperty("--split", (S.split * 100).toFixed(2) + "%");
+    });
 
     // focus trap
     let releaseTrap = null;
@@ -1908,7 +2106,6 @@
       window.removeEventListener("pointerup", onPointerUp, true);
       window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("keyup", onKeyUp, true);
-      window.removeEventListener("pointerup", cmpUp);
       window.removeEventListener("resize", relayout);
       if (releaseTrap) releaseTrap();
       document.body.style.overflow = "";

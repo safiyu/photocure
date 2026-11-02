@@ -256,17 +256,29 @@ class BurstDetector:
         thr = float(thr)
         floor = float(getattr(self.t, "untimed_floor", thr - 0.05))
         max_group = int(getattr(self.t, "untimed_max_group", 12))
+        # Cap neighbours per photo: enough candidates to form a group but bounded in RAM.
+        top_k = max(max_group * 4, 32)
         edges: list[tuple[float, int, int]] = []
         for start in range(0, n, _BLOCK):
             block = embs[start:start + _BLOCK] @ embs.T
             for r in range(block.shape[0]):
                 row = block[r]
                 i = start + r
-                for j in np.flatnonzero(row[i + 1:] >= thr):
-                    edges.append((float(row[i + 1 + j]), i, i + 1 + int(j)))
+                tail = row[i + 1:]
+                cand = np.flatnonzero(tail >= thr)
+                if cand.size == 0:
+                    continue
+                if cand.size > top_k:
+                    top = np.argpartition(tail[cand], -top_k)[-top_k:]
+                    cand = cand[top]
+                for j in cand:
+                    edges.append((float(tail[j]), i, i + 1 + int(j)))
         # Most alike pairs first; a group takes a new member only when that member is close to
         # every photo already in it, so a chain of look-alikes cannot drift into a stranger.
-        edges.sort(reverse=True)
+        # Tie-break by image_id so a rescan with the same photos produces the same groups
+        # regardless of the order rows were read from the database.
+        iid = [items[u].image_id for u in usable]
+        edges.sort(key=lambda e: (-e[0], min(iid[e[1]], iid[e[2]]), max(iid[e[1]], iid[e[2]])))
         parent = list(range(n))
         members: dict[int, list[int]] = {i: [i] for i in range(n)}
 

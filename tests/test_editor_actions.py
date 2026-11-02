@@ -265,7 +265,7 @@ def test_save_format_validation_and_raw_overwrite_guard(env):
     # Reject unsupported format (e.g. pdf)
     from photocure.editor_actions import ActionError
     with pytest.raises(ActionError, match="Unsupported storage format"):
-        save_edited_image(env.db, env.app.state.cfg, iid, b, mode="copy", format="pdf")
+        save_edited_image(env.db, env.app.state.cfg, iid, b, mode="copy", storage_format="pdf")
 
     # Reject overwrite on RAW or HEIF
     with get_session(env.db) as s:

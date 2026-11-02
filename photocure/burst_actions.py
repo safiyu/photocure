@@ -248,13 +248,19 @@ def finalize_bursts(
                 rec.stage = M.STAGE_TRASH
                 rec.route_status = "trashed"
                 rec.scan_status = "missing"
+                rec.delete_approved = False
                 detach_faces(s, rec.id)
                 trashed_count += 1
+            elif rec and rec.scan_status != "missing":
+                # file vanished but was not marked for delete: record the missing state so the
+                # row doesn't stay stuck in a burst with a stale scan_status.
+                rec.scan_status = "missing"
         for a in actions:
             rec = s.get(M.ImageRecord, a.image_id)
             if rec:
                 if rec.delete_approved and rec.stage == M.STAGE_TRASH:
                     detach_faces(s, a.image_id)
+                    rec.delete_approved = False
                     trashed_count += 1
                 elif rec.stage == M.STAGE_LIBRARY:
                     finalized_count += 1

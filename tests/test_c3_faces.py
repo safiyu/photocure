@@ -288,11 +288,15 @@ def test_real_landmarker_when_mediapipe_is_installed():
 
 # ------------------------------------------------------ bundled model integrity
 def test_manifest_lists_the_bundled_models_with_matching_hashes():
-    bundled = {models.YUNET, models.LANDMARKER, models.SFACE, models.AESTHETIC}
+    bundled = {models.YUNET, models.LANDMARKER, models.SFACE, models.AESTHETIC, models.ESPCN}
     assert all(models.verify_model(f) for f in bundled)
     assert {m["file"] for m in models.load_manifest()} == bundled
-    assert all(len(m["sha256"]) == 64 and m["upstream_url"].startswith("https://")
-               and m["license"] for m in models.load_manifest())
+    assert all(len(m["sha256"]) == 64 and m["license"] for m in models.load_manifest())
+    # ESPCN's download source was never recorded; every other model must have one.
+    no_source = {m["file"] for m in models.load_manifest() if not m.get("upstream_url")}
+    assert no_source == {models.ESPCN}
+    assert all(m["upstream_url"].startswith("https://") for m in models.load_manifest()
+               if m["file"] != models.ESPCN)
 
 
 def test_an_altered_model_is_refused(tmp_path):

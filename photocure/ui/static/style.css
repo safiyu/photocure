@@ -4473,7 +4473,7 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
   display: flex; align-items: center; gap: 10px; padding: 10px 16px;
   background: color-mix(in srgb, var(--sheet) 92%, #000);
   backdrop-filter: blur(14px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 7%, transparent);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.22);
   flex: none; z-index: 10;
 }
@@ -4486,8 +4486,8 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
 .pcur-hist-group {
   display: inline-flex; align-items: center; gap: 3px; padding: 3px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: color-mix(in srgb, var(--ink) 7%, var(--sheet));
+  border: 1px solid color-mix(in srgb, var(--ink) 9%, transparent);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 .pcur-hist {
@@ -4499,20 +4499,20 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
 }
 .pcur-hist:disabled { opacity: .38; cursor: default; }
 .pcur-hist:not(:disabled):hover {
-  background: rgba(255, 255, 255, 0.09);
-  border-color: rgba(255, 255, 255, 0.14);
-  color: #ffffff;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  border-color: color-mix(in srgb, var(--ink) 13%, transparent);
+  color: var(--ink);
 }
 .pcur-hist:not(:disabled):active { transform: scale(0.96); }
 .pcur-hist.pcur-compare:not(:disabled):hover {
   background: rgba(56, 189, 248, 0.16);
   border-color: rgba(56, 189, 248, 0.40);
-  color: #38bdf8;
+  color: var(--pcur-link);
 }
 .pcur-x {
   width: 34px; height: 34px; display: grid; place-items: center; border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05); color: var(--mut); cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--ink) 11%, transparent);
+  background: color-mix(in srgb, var(--ink) 4%, transparent); color: var(--mut); cursor: pointer;
   transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
 }
 .pcur-x:hover {
@@ -4528,24 +4528,24 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
   transition: transform 0.15s ease, box-shadow 0.18s ease, background 0.18s ease, border-color 0.18s ease;
 }
 .pcur-top .btn.secondary {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ink) 13%, transparent);
   color: var(--ink);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
 }
 .pcur-top .btn.secondary:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--ink) 11%, transparent);
   border-color: rgba(56, 189, 248, 0.45);
   transform: translateY(-1px);
 }
 .pcur-top .btn.primary {
-  background: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
+  background: linear-gradient(135deg, var(--blue-400) 0%, var(--blue-600) 100%);
   border: 1px solid rgba(125, 211, 252, 0.45);
   color: #ffffff;
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .pcur-top .btn.primary:hover {
-  background: linear-gradient(135deg, #7dd3fc 0%, #3b82f6 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--blue-400) 70%, #fff) 0%, var(--blue-500) 100%);
   box-shadow: 0 6px 18px rgba(56, 189, 248, 0.48), inset 0 1px 0 rgba(255, 255, 255, 0.35);
   transform: translateY(-1px);
 }
@@ -4555,15 +4555,15 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
 }
 .pcur-stage {
   flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; touch-action: none;
-  background:
-    repeating-conic-gradient(var(--well) 0% 25%, var(--sheet) 0% 50%) 0 0 / 22px 22px;
+  background: color-mix(in srgb, var(--ink) 7%, var(--table));
 }
 .pcur-stage.is-processing { cursor: progress; }
 .pcur-wrap {
   position: absolute; left: 0; top: 0; transform-origin: 0 0;
   box-shadow: var(--shadow); border-radius: 4px; overflow: hidden;
-  background:
-    repeating-conic-gradient(#e8ecf3 0% 25%, #ffffff 0% 50%) 0 0 / 18px 18px;
+}
+.pcur-wrap.has-alpha {
+  background: repeating-conic-gradient(#e8ecf3 0% 25%, #ffffff 0% 50%) 0 0 / 18px 18px;
 }
 .pcur-wrap canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
 .pcur-ov { pointer-events: none; z-index: 2; }
@@ -4623,8 +4623,8 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
 .pcur-status-ring {
   width: 18px; height: 18px; border-radius: 50%; flex: none;
   border: 2.5px solid rgba(56, 189, 248, 0.25);
-  border-top-color: #38bdf8;
-  border-right-color: #ec4899;
+  border-top-color: var(--blue-400);
+  border-right-color: var(--pink-500);
   animation: pcur-spin 0.75s linear infinite;
 }
 @keyframes pcur-beam-sweep {
@@ -4654,32 +4654,23 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
 .pcur-panelbody > h3 { margin: 0 0 2px; font-size: 15px; }
 
 .pcur-tools {
-  display: flex; align-items: center; gap: 8px; padding: 10px 16px; overflow-x: auto;
-  background: color-mix(in srgb, var(--sheet) 94%, #000);
-  backdrop-filter: blur(14px);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.25);
-  flex: none; z-index: 10;
+  display: flex; align-items: stretch; padding: 6px 12px 8px; overflow-x: auto; scrollbar-width: thin;
 }
 .pcur-tool {
-  display: inline-flex; align-items: center; gap: 8px; flex: none;
-  height: 40px; padding: 0 15px; border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
-  color: var(--mut); font-size: 13px; font-weight: 600; cursor: pointer;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; flex: none;
+  min-width: 62px; height: 50px; padding: 5px 9px; border-radius: 10px;
+  border: 1px solid transparent; background: transparent;
+  color: var(--mut); font-size: 11px; font-weight: 600; white-space: nowrap; cursor: pointer;
   transition: transform 0.15s ease, background 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
 }
 .pcur-tool:hover {
-  color: #ffffff;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.11) 0%, rgba(255, 255, 255, 0.05) 100%);
-  border-color: rgba(56, 189, 248, 0.38);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.26);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  border-color: var(--line);
 }
 .pcur-tool:active { transform: translateY(0) scale(0.98); }
 .pcur-tool.active, .pcur-tool[aria-pressed="true"], .pcur-tool.on {
-  background: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
+  background: linear-gradient(135deg, var(--blue-400) 0%, var(--blue-600) 100%);
   border-color: rgba(125, 211, 252, 0.55);
   color: #ffffff;
   box-shadow: 0 4px 16px rgba(37, 99, 235, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.30);
@@ -4694,44 +4685,44 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
   display: inline-flex; align-items: center; justify-content: center; gap: 7px;
   height: 36px; padding: 0 14px; border-radius: 10px;
   font-size: 12.5px; font-weight: 600; cursor: pointer;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.03) 100%);
+  border: 1px solid color-mix(in srgb, var(--ink) 11%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 6%, transparent) 0%, color-mix(in srgb, var(--ink) 3%, transparent) 100%);
   color: var(--ink);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18), inset 0 1px 0 color-mix(in srgb, var(--ink) 5%, transparent);
   transition: transform 0.14s ease, background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
 .pcur-btns .btn:hover {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.06) 100%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 12%, transparent) 0%, color-mix(in srgb, var(--ink) 5%, transparent) 100%);
   border-color: rgba(56, 189, 248, 0.45);
-  color: #ffffff;
+  color: var(--ink);
   transform: translateY(-1px);
 }
 .pcur-btns .btn:active { transform: translateY(0) scale(0.98); }
 .pcur-btns .btn.ghost {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.10);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+  border-color: color-mix(in srgb, var(--ink) 9%, transparent);
   color: var(--mut);
 }
 .pcur-btns .btn.ghost:hover {
-  background: rgba(255, 255, 255, 0.09);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
   border-color: rgba(255, 255, 255, 0.22);
   color: var(--ink);
 }
 .pcur-btns .btn.primary {
   flex: 1 1 auto;
-  background: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
+  background: linear-gradient(135deg, var(--blue-400) 0%, var(--blue-600) 100%);
   border-color: rgba(125, 211, 252, 0.50);
   color: #ffffff;
   box-shadow: 0 4px 14px rgba(37, 99, 235, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 .pcur-btns .btn.primary:hover {
-  background: linear-gradient(135deg, #7dd3fc 0%, #3b82f6 100%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--blue-400) 70%, #fff) 0%, var(--blue-500) 100%);
   box-shadow: 0 6px 18px rgba(56, 189, 248, 0.46), inset 0 1px 0 rgba(255, 255, 255, 0.36);
 }
 .pcur-btns .btn.secondary {
   background: rgba(56, 189, 248, 0.12);
   border-color: rgba(56, 189, 248, 0.40);
-  color: #38bdf8;
+  color: var(--pcur-link);
 }
 .pcur-btns .btn.secondary:hover {
   background: rgba(56, 189, 248, 0.20);
@@ -4742,20 +4733,20 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
 .pcur-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .pcur-ed .chip {
   height: 32px; padding: 0 13px; border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid color-mix(in srgb, var(--ink) 9%, transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--ink) 5%, transparent) 0%, color-mix(in srgb, var(--ink) 2%, transparent) 100%);
   color: var(--mut); font-size: 12px; font-weight: 600; cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16), inset 0 1px 0 color-mix(in srgb, var(--ink) 4%, transparent);
   transition: transform 0.14s ease, background 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
 }
 .pcur-ed .chip:hover {
   color: var(--ink);
   border-color: rgba(56, 189, 248, 0.40);
-  background: rgba(255, 255, 255, 0.09);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
   transform: translateY(-1px);
 }
 .pcur-ed .chip.on {
-  background: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
+  background: linear-gradient(135deg, var(--blue-400) 0%, var(--blue-600) 100%);
   border-color: rgba(125, 211, 252, 0.50);
   color: #ffffff;
   box-shadow: 0 3px 10px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.25);
@@ -4765,18 +4756,24 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
 .pcur-shead { display: flex; align-items: baseline; justify-content: space-between; }
 .pcur-val { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .pcur-slider input[type="range"], .pcur-sel, .pcur-q { width: 100%; accent-color: var(--primary); }
-.pcur-sel { height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--well); color: var(--ink); padding: 0 10px; }
+.pcur-sel {
+  height: 34px; border-radius: 9px; border: 1px solid var(--line); background-color: var(--well); color: var(--ink);
+  padding: 0 30px 0 10px; appearance: none; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--mut) 50%), linear-gradient(135deg, var(--mut) 50%, transparent 50%);
+  background-repeat: no-repeat; background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%; background-size: 5px 5px, 5px 5px;
+}
 
-.pcur-filters { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pcur-filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); gap: 8px; }
 .pcur-fil {
   display: grid; justify-items: center; gap: 5px; padding: 7px 6px 8px; border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08); background: var(--well); color: var(--mut); font-size: 11px; font-weight: 600; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--ink) 7%, transparent); background: var(--well); color: var(--mut);
+  font-size: 11px; font-weight: 600; cursor: pointer;
   transition: transform 0.14s ease, border-color 0.16s ease, color 0.16s ease;
 }
 .pcur-fil:hover { color: var(--ink); border-color: rgba(56, 189, 248, 0.40); transform: translateY(-1px); }
-.pcur-fil.on { border-color: #38bdf8; color: #ffffff; box-shadow: 0 0 0 1px #38bdf8, 0 4px 12px rgba(56, 189, 248, 0.25); }
+.pcur-fil.on { border-color: var(--blue-400); color: var(--ink); box-shadow: 0 0 0 1px var(--blue-400), 0 4px 12px rgba(56, 189, 248, 0.25); }
 .pcur-fprev {
-  width: 100%; aspect-ratio: 1; border-radius: 6px; background-size: cover; background-position: center;
+  width: 100%; aspect-ratio: 1; border-radius: 6px; object-fit: cover;
   border: 1px solid var(--line); display: block;
 }
 
@@ -4784,15 +4781,15 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
   display: flex; align-items: center; gap: 9px; font-size: 12.5px; font-weight: 500;
   color: var(--ink); cursor: pointer;
   padding: 8px 11px; border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ink) 7%, transparent);
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 .pcur-chk:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
   border-color: rgba(56, 189, 248, 0.32);
 }
-.pcur-chk input { width: 15px; height: 15px; accent-color: #38bdf8; cursor: pointer; }
+.pcur-chk input { width: 15px; height: 15px; accent-color: var(--blue-400); cursor: pointer; }
 
 .pcur-stickers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
 .pcur-stk {
@@ -4833,6 +4830,93 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
 }
 .pcur-savedlg h3 { margin: 0; font-size: 16px; }
 .pcur-savedlg .pcur-q { margin-top: 2px; }
+
+.pcur-ed { --pcur-link: var(--blue-600); }
+:root[data-theme="dark"] .pcur-ed { --pcur-link: var(--blue-400); }
+
+.pcur-toolwrap {
+  flex: none; z-index: 10; display: flex; flex-direction: column;
+  background: color-mix(in srgb, var(--sheet) 94%, #000);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.14);
+}
+.pcur-gtabs { display: none; gap: 4px; padding: 8px 12px 0; }
+.pcur-gtab {
+  flex: 1; height: 30px; border-radius: 999px; border: 1px solid var(--line);
+  background: transparent; color: var(--mut); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.pcur-gtab.on { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.pcur-tgroup { display: flex; flex-direction: column; gap: 3px; padding: 0 10px; flex: none; }
+.pcur-tgroup:first-child { padding-left: 0; }
+.pcur-tgroup + .pcur-tgroup { border-left: 1px solid var(--line); }
+.pcur-tglabel {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--faint); padding-left: 4px;
+}
+.pcur-tgbtns { display: flex; gap: 4px; }
+
+.pcur-sect {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--faint); margin-top: 6px;
+}
+.pcur-panelbody > .pcur-sect:first-child { margin-top: 0; }
+.pcur-slider[hidden] { display: none; }
+
+.pcur-btns.pcur-commit {
+  flex: none; flex-wrap: nowrap; gap: 8px; padding: 10px 16px 12px;
+  border-top: 1px solid var(--line); background: var(--sheet);
+  box-shadow: 0 -8px 16px -10px rgba(0, 0, 0, 0.25);
+}
+.pcur-btns.pcur-commit[hidden] { display: none; }
+.pcur-btns.pcur-commit .btn { flex: 1 1 0; }
+.pcur-btns.pcur-commit .btn.primary { flex: 2 1 0; }
+
+.pcur-zoom {
+  position: absolute; left: 12px; bottom: 12px; z-index: 6;
+  display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+  border-radius: 999px; border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--sheet) 88%, transparent);
+  backdrop-filter: blur(8px); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+.pcur-zbtn {
+  min-width: 28px; height: 26px; padding: 0 8px; border-radius: 999px; border: 0;
+  background: transparent; color: var(--ink); font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.pcur-zbtn:hover { background: color-mix(in srgb, var(--ink) 9%, transparent); }
+.pcur-zread { min-width: 44px; text-align: center; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--mut); }
+
+.pcur-hist.on { background: color-mix(in srgb, var(--blue-400) 22%, transparent); color: var(--pcur-link); }
+.pcur-wrap canvas.pcur-cmp { z-index: 1; clip-path: inset(0 calc(100% - var(--split, 50%)) 0 0); }
+.pcur-wrap:not(.is-compare) .pcur-cmp, .pcur-wrap:not(.is-compare) .pcur-split { display: none; }
+.pcur-split { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+.pcur-split-line {
+  position: absolute; top: 0; bottom: 0; left: var(--split, 50%);
+  width: calc(2px * var(--inv, 1)); margin-left: calc(-1px * var(--inv, 1));
+  background: #fff; box-shadow: 0 0 0 calc(1px * var(--inv, 1)) rgba(0, 0, 0, 0.35);
+}
+.pcur-split-grip {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: calc(36px * var(--inv, 1)); height: calc(36px * var(--inv, 1)); padding: 0;
+  border-radius: 50%; border: calc(2px * var(--inv, 1)) solid #fff;
+  background: var(--blue-500); color: #fff; font-size: calc(14px * var(--inv, 1)); font-weight: 700; line-height: 1;
+  display: grid; place-items: center; pointer-events: auto; cursor: ew-resize; touch-action: none;
+  box-shadow: 0 calc(2px * var(--inv, 1)) calc(10px * var(--inv, 1)) rgba(0, 0, 0, 0.4);
+}
+.pcur-cmp-badge {
+  position: absolute; top: calc(10px * var(--inv, 1));
+  padding: calc(3px * var(--inv, 1)) calc(10px * var(--inv, 1)); border-radius: 999px;
+  font-size: calc(12px * var(--inv, 1)); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  background: rgba(15, 23, 42, 0.72); color: #fff;
+}
+.pcur-cmp-badge.l { left: calc(10px * var(--inv, 1)); }
+.pcur-cmp-badge.r { right: calc(10px * var(--inv, 1)); }
+
+.pcur-savebtns { flex-direction: column; }
+.pcur-savebtns .btn { width: 100%; flex: none; }
+.pcur-warn:hover {
+  color: #ef4444; border-color: color-mix(in srgb, #ef4444 50%, transparent);
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+}
 
 button.pcur-hist, button.pcur-tool, button.chip, button.pcur-fil, button.pcur-stk { touch-action: manipulation; }
 
@@ -4925,6 +5009,26 @@ button.pcur-hist, button.pcur-tool, button.chip, button.pcur-fil, button.pcur-st
   .pcur-mid { flex-direction: column; }
   .pcur-panel { width: 100%; max-height: 38%; border-left: 0; border-top: 1px solid var(--line); }
   .pcur-title { max-width: 40vw; }
+}
+
+@media (max-width: 860px) {
+  .pcur-gtabs { display: flex; }
+  .pcur-tgroup { display: none; padding: 0; border-left: 0 !important; }
+  .pcur-tools[data-group="adjust"] .pcur-tgroup[data-g="adjust"],
+  .pcur-tools[data-group="annotate"] .pcur-tgroup[data-g="annotate"],
+  .pcur-tools[data-group="tools"] .pcur-tgroup[data-g="tools"] { display: flex; }
+  .pcur-tglabel { display: none; }
+  .pcur-tool { min-width: 0; padding: 5px 7px; font-size: 10.5px; }
+  .pcur-panel { max-height: 42%; }
+}
+@media (max-width: 640px) {
+  .pcur-top { padding: 8px 10px; gap: 6px; }
+  .pcur-title { max-width: 24vw; }
+  .pcur-hist span { display: none; }
+  .pcur-hist { padding: 0 9px; }
+  .pcur-dl span { display: none; }
+  .pcur-top .btn.pcur-dl { padding: 0 11px; }
+  .pcur-tool { padding: 5px 3px; font-size: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

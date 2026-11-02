@@ -2,9 +2,9 @@
 
 # Photocure Studio
 
-**Sort, cull and tidy your photo library, privately, on your own computer.**
+**Sort, cull, edit and tidy your photo library, privately, on your own computer.**
 
-Photocure looks at every photo, works out what it shows, finds the best shot in each burst, spots duplicates and clutter, and files everything into a clean folder structure. Nothing is uploaded anywhere, and nothing on your disk changes until you say so. Every change can be undone.
+Photocure looks at every photo, works out what it shows, finds the best shot in each burst, spots duplicates and clutter, and files everything into a clean folder structure. Nothing is uploaded, and nothing on your disk changes until you say so. Every move can be undone.
 
 <p align="center">
   <img src="docs/shot_light.png" width="48%" alt="Photocure Studio Pipeline page, light theme">
@@ -13,246 +13,129 @@ Photocure looks at every photo, works out what it shows, finds the best shot in 
 
 ## Contents
 
-- [What Photocure does for you](#what-photocure-does-for-you)
-- [What you need](#what-you-need)
-- [Install and first start](#install-and-first-start)
-- [Using Photocure day to day](#using-photocure-day-to-day)
-- [New, Library and Trash](#new-library-and-trash)
-- [A tour of the app](#a-tour-of-the-app)
-- [Keyboard shortcuts](#keyboard-shortcuts)
-- [Your photos stay safe](#your-photos-stay-safe)
-- [Optional extras](#optional-extras)
-- [Command line](#command-line)
-- [Troubleshooting](#troubleshooting)
+[What it does](#what-it-does) · [Install](#install) · [Day to day](#day-to-day) · [New, Library and Trash](#new-library-and-trash) · [The app](#the-app) · [Photo editor](#photo-editor) · [Shortcuts](#keyboard-shortcuts) · [Safety](#your-photos-stay-safe) · [Extras](#optional-extras) · [Command line](#command-line) · [Troubleshooting](#troubleshooting)
 
----
+## What it does
 
-## What Photocure does for you
+- **Sorts photos by what they show:** people, food, animals, scenery, vehicles, buildings, products, art and more, with no manual tagging.
+- **Finds the best photo in every burst**, including retakes taken hours apart and look-alikes with no capture time. Blinks are caught, and for group shots it names the frames to combine.
+- **Finds duplicates**, identical or look-alike, and suggests which to keep.
+- **Keeps reference shots apart:** receipts, whiteboards, screenshots, labels and medicine packaging go to a Utility tab.
+- **Ranks your best photos** and builds balanced event stories.
+- **Searches by description:** "dog on the beach".
+- **Edits photos** with a built-in editor, and builds collages from burst frames.
+- **Files your photos safely:** preview first, undo with one click.
 
-- **Sorts photos by what they show.** People, food, animals, scenery, plants, vehicles, buildings, products, art and more. It recognizes photos by looking at them, so you do not tag anything by hand.
-- **Finds the best photo in every burst.** When you took ten frames in a row, it keeps the sharpest one and tells you which others are spare.
-- **Catches blinks, and group shots where someone blinked.** For group photos it checks every face in every frame and points out the frame where everyone's eyes are open. If no frame is perfect, it tells you which two to combine.
-- **Finds duplicates.** Identical files and look-alike photos, with a suggested one to keep and how much space you would free.
-- **Keeps useful reference shots apart.** Receipts, whiteboards and notes, screenshots, device labels and serial numbers, parking spot signs and medicine packaging go to their own Utility tab, instead of cluttering your photos or being treated as junk.
-- **Finds your best photos.** Ranks your photos by how appealing they look, boosted by your stars and favourites, and learns your personal taste over time.
-- **Builds event stories.** For a trip or party, it picks a balanced set: wide scene-setters, close-up details, action and atmosphere, rather than twenty near-identical medium shots.
-- **Finds photos by description.** Type "dog on the beach" or "birthday cake" and it finds them.
-- **Organizes your files safely.** Preview exactly what will move, apply it, and undo it with one click if you change your mind.
+Works with JPEG, PNG, WebP, TIFF, HEIC and common RAW formats (CR2, NEF, ARW, DNG). Libraries of 100,000 photos scroll smoothly.
 
-Photocure works with JPEG, PNG, WebP, TIFF, HEIC and the common camera RAW formats (CR2, NEF, ARW, DNG). Large libraries are fine: a library of 100,000 photos still scrolls smoothly.
+**New in 2.x:** the [photo editor](#photo-editor), burst collages, **Reanalyse library**, **Finalize** buttons that move marked photos to the trash, and smarter burst detection.
 
-## What you need
+## Install
 
-- A Mac, Linux or Windows computer. Apple Silicon Macs and NVIDIA graphics cards make analysis much faster, but a plain processor works too. (Windows graphics-card support is best effort.)
-- Some patience for the first set-up, which is mostly waiting for the AI model to download. Allow a few gigabytes of free disk space for it.
-- An internet connection **for the first set-up only**. After that, Photocure works fully offline.
-- Python 3.11 or newer, unless you use the Debian/Ubuntu package or Docker below.
+You need a Mac, Linux or Windows computer, a few GB of disk for the AI model, and internet for the first set-up only (it runs offline afterwards). Apple Silicon and NVIDIA GPUs are much faster, but a plain processor works. Python 3.11+ is needed unless you use the Debian package or Docker.
 
-## Install and first start
+**Debian or Ubuntu**
 
-Pick the way that suits you. All three end with the same app in your web browser.
+```bash
+curl -LO https://github.com/safiyu/photocure/releases/latest/download/photocure_amd64.deb
+sudo apt install ./photocure_amd64.deb
+photocure setup
+```
 
-### Option 1: Debian or Ubuntu (easiest on Linux)
+**Mac, Windows or any Linux (from source)**
 
-1. Download and install the package:
+```bash
+git clone https://github.com/safiyu/photocure.git && cd photocure
+python3 -m venv .venv
+source .venv/bin/activate          # on Windows: .venv\Scripts\activate
+pip install -e .
+photocure setup
+```
 
-   ```bash
-   curl -LO https://github.com/safiyu/photocure/releases/latest/download/photocure_amd64.deb
-   sudo apt install ./photocure_amd64.deb
-   ```
+`photocure setup` picks the AI parts that fit your computer, downloads the model, checks everything works and opens the browser. It asks before downloading. Useful flags: `--yes`, `--dry-run`, `--cpu-only`, `--no-faces`, `--no-open`.
 
-2. Run the one-time set-up:
-
-   ```bash
-   photocure setup
-   ```
-
-### Option 2: Mac, Windows or any Linux (from source)
-
-1. Install [Python 3.11 or newer](https://www.python.org/downloads/) if you do not have it.
-2. Download Photocure and open a terminal in its folder:
-
-   ```bash
-   git clone https://github.com/safiyu/photocure.git
-   cd photocure
-   ```
-
-3. Create a private Python environment and install:
-
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate          # on Windows: .venv\Scripts\activate
-   pip install -e .
-   ```
-
-4. Run the one-time set-up:
-
-   ```bash
-   photocure setup
-   ```
-
-### What `photocure setup` does
-
-It looks at your computer, installs the AI parts that fit it (using your graphics card if there is a supported one), downloads the model, checks that everything works, and opens Photocure in your browser. It asks before downloading anything.
-
-| If you want to... | Add this |
-|---|---|
-| Skip the confirmation question | `--yes` |
-| See what it would do without doing it | `--dry-run` |
-| Ignore your graphics card and use the processor | `--cpu-only` |
-| Skip blink detection | `--no-faces` |
-| Set up but do not open the browser | `--no-open` |
-
-### Option 3: Docker
-
-Good for a NAS or a server. Replace the two paths with your own folders: the photos to read, and the library folder where finished photos are kept. The image sets `PCUR_LIBRARY_ROOT=/output/Organized` for you, so Docker never asks for a folder on first start.
+**Docker** (good for a NAS or server):
 
 ```bash
 PHOTOS_DIR=/path/to/photos OUTPUT_DIR=/path/to/organized docker compose up
 ```
 
-Then open <http://localhost:8080/> in your browser. The first start downloads the AI parts into a saved volume, so later starts are quick.
+Open <http://localhost:8080/>. For GPUs add `-f docker-compose.gpu.yml` (NVIDIA, needs the NVIDIA Container Toolkit), `docker-compose.rocm.yml` (AMD) or `docker-compose.intel.yml`. The image sets `PCUR_LIBRARY_ROOT=/output/Organized`, so it never asks for a library folder. For Portainer or a home server use [docker-compose.stack.yml](docker-compose.stack.yml). Docker on a Mac cannot use the Mac GPU, so use the source install there.
 
-For faster analysis, use the file that matches your graphics card, for example for NVIDIA (this needs the NVIDIA Container Toolkit):
+## Day to day
 
-```bash
-PHOTOS_DIR=/path/to/photos OUTPUT_DIR=/path/to/organized docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
-```
+Run `photocure start` (or `./start.sh`). Your browser opens at <http://localhost:8080/>. Stop with `Ctrl+C` or `photocure stop`. If asked to sign in, paste the one-time code printed in the terminal.
 
-For AMD use `docker-compose.rocm.yml` in place of `docker-compose.gpu.yml`, and for Intel use `docker-compose.intel.yml`.
+1. **Import:** pick your photo folder and press **Scan**.
+2. **Analyze:** press **Analyze Now**. This is the slow step and you can keep browsing. Finished photos are never analyzed again.
+3. **Look around:** Library, Bursts, Duplicates, Utility, Highlights.
+4. **Tidy up:** fix uncertain photos in Finalize, choose which duplicates to keep.
+5. **Organize:** in Apply and undo, choose Move or Copy, preview, apply.
 
-#### Portainer / Home Server Stack
-If you are deploying as a stack in **Portainer** or on a remote server, use the sample [docker-compose.stack.yml](docker-compose.stack.yml) file. It uses the pre-built `safiyu/photocure:latest` image and includes pre-configured environment variables (`PCUR_AUTH_TOKEN`, `PCUR_ALLOWED_HOSTS=*`, user IDs, and volumes).
-
-On a Mac, Docker cannot use the Mac graphics chip. For full speed on a Mac, use Option 2.
-
-## Using Photocure day to day
-
-Start it any time with:
-
-```bash
-photocure start
-```
-
-(or `./start.sh` from the Photocure folder). Your browser opens at <http://localhost:8080/>. To stop it, press `Ctrl+C` in the terminal, or run `photocure stop`.
-
-If the page asks you to sign in, paste the one-time code that Photocure printed in the terminal where you started it.
-
-**A typical first session:**
-
-1. **Import:** pick your photo folder and press **Scan**. Photocure lists your photos without changing them.
-2. **Analyze:** press **Analyze Now**. It reads each photo, groups burst shots and sorts everything into categories. This is the slow step, and you can keep browsing while it runs. Analyze only reads new photos, and photos you already finished are never analyzed again.
-3. **Look around:** open Library, Bursts, Duplicates, Utility and Highlights to see what it found.
-4. **Tidy up:** fix anything it was unsure about in Finalize, and decide which duplicates to keep.
-5. **Organize:** in Apply and undo, choose Move or Copy, preview, and apply. Photos go into your library folder, which you chose the first time you opened the app.
-
-Adding more photos later? The big pink **Scan** button is always the next step when everything is up to date, then **Analyze Now** for the new ones. A line under the library count always tells you what to do next.
+For new photos later, press **Scan** then **Analyze Now**. A line under the library count always says what to do next.
 
 ## New, Library and Trash
 
-The switch at the top right shows where your photos are, with a count for each place.
+The switch at the top right shows where your photos are.
 
-- **New** is everything you scanned and have not applied yet. This is where you analyze, tidy up and build a plan.
-- **Library** is your finished photos, all in one library folder, sorted by category. Photos here are never analyzed again. You can still rename people, change a category (the file moves to the right folder) or delete a photo.
-- **Trash** is photos you removed. They are kept until you empty the trash; nothing leaves it on a timer. Select photos to **Restore** them into the library, or **Return to origin** to put them back where they came from so they count as new again. **Reanalyse trash** runs the AI on the trashed photos only, and **Delete permanently** and **Empty trash** remove the files for good.
+- **New:** scanned but not applied yet. Analyze, tidy up and plan here.
+- **Library:** finished photos in one folder, sorted by category. You can rename people, change a category (the file moves), edit or delete a photo. **Reanalyse library** runs the AI again on every library photo, finds bursts that were missed and refiles photos whose category changed, as one undoable step. Photos you sorted by hand, locked, marked for delete or that sit in a burst stay put. It can be stopped midway.
+- **Trash:** removed photos, kept until you empty it. **Restore** them, **Return to origin** (they count as new again), **Reanalyse trash**, **Delete permanently** or **Empty trash**.
 
-The library folder is chosen once, on first run. After that it is read-only in Settings. To use another folder, press **Move library to another folder**: Photocure copies everything, checks each copy, then switches over and leaves the old folder for you to delete.
+The library folder is chosen once on first run. To change it, press **Move library to another folder**: Photocure copies and verifies everything, switches over and leaves the old folder for you to delete.
 
-## A tour of the app
+## The app
 
-The menu on the left has everything. The little numbers show how many photos are in each place.
+- **Import:** choose a folder, **Scan**, **Analyze Now**, or **Run All**. Tick **Keep watching this folder** to pick up new photos automatically. The Activity panel logs everything. **Reset** clears Photocure's records only, never your files.
+- **Library:** every photo, oldest first. Filter by category, camera, rating, country, favourites or date. Open a photo to rate, favourite, lock, recategorize, inspect faces, **Edit**, or **Mark for delete**.
+  - **Mark for delete** is on every photo, section and the selection bar. Marked photos are dimmed and left out when you apply. With the trash option on (default) they go to Trash, otherwise they stay put. Nothing is deleted by marking. **Finalize** in any section moves its marked photos to Trash.
+  - **Clean export** makes share-safe copies: location and camera details removed, neutral names, optional web gallery. It can also blur or skip license plates, payment cards, screens, house numbers and ID documents. It is a helper, not a guarantee, so check what you share.
+- **Search:** describe what you want in your own words.
+- **Bursts:** every burst with the best frame marked and faces checked for closed eyes. For group shots, if no frame is perfect it names two frames to combine: **Create fixed photo** blends the open eyes into the best frame (`IMG_xxxx_fixed.jpg`), and **Export layered PSD** gives aligned layers for hand touch-ups. **Make best shot** overrides the pick. **Reject all blinks** sends blink frames to Junk review.
+  - **Make collage** combines 2 to 5 frames into one image with per-cell pan and zoom. You choose layout and export size (up to 4K) and it saves a new photo.
+  - **Finalize** on a burst (or **Finalize all**) moves frames marked for delete to Trash and keeps the rest in the library.
+- **Highlights:** best photos first, blending appeal with your stars and favourites. **Tune the ranking** sets the weights and **Learn from my ratings** learns your taste. Views: all, best of each event, or balanced event stories. **Year in review** downloads a shareable web page.
+- **Events:** groups photos by time and place. Set the hours and kilometres apart, press **Find events**, rename freely.
+- **Utility:** receipts, notes, screenshots, labels, parking signs, packaging. Filter to one kind.
+- **Finalize:** photos Photocure was unsure about. Press a number to pick a category, then **Learn from my choices** to re-sort the rest.
+- **Duplicates:** each photo is **Keep** or **Duplicate**. **Keep this one instead**, **Accept all suggestions**, or **Not duplicates**.
+- **Junk:** duplicates, memes, very dark or blurry shots and unreadable files. Move anything back to a real category.
+- **Apply and undo:** choose **Move** or **Copy**, **Rebuild plan**, **Preview changes**, **Review and apply**. **Undo this change** restores every file. **Verify files** and **Repair paths** fix mismatches if you moved folders yourself.
+- **Settings:** library folder, default Move or Copy, processing device, workers, file name collisions (never overwrites), keywords for digiKam or Lightroom, About, Restart, Reset library and Dark Mode.
 
-### Import
+## Photo editor
 
-Choose a folder and press **Scan**, then **Analyze Now**. **Run All** does both in one go. Tick **Keep watching this folder for new photos** and Photocure will pick up new arrivals by itself. The progress bar at the top shows what is running, and you can stop it. The **Activity** panel below keeps a timeline of everything that happened, with a filter for problems and a Clear button. **Reset** empties Photocure's own records only, never your photo files.
+Press **Edit** in the photo viewer. Edit the photo, then **Save**, or **Download**. Tools are grouped along the bottom: **Adjust**, **Annotate** and **Tools**.
 
-### Library
+| Tool | What it does |
+|---|---|
+| Crop & Rotate | Aspect crops, 90 degree turns, flips, fine rotate |
+| Light | Brightness, contrast, saturation |
+| Looks | 8 looks (Vivid, Portrait, Film, Cinematic, Golden, Matte, Mono) with a Strength slider. No hue shifts, so skin stays natural |
+| Remaster | AI denoise, low-light correction and super-resolution |
+| Detail, Red-Eye | Blur and sharpen, fix red eyes |
+| Remove BG | AI background removal, with a basic cutout fallback |
+| Draw, Stickers | Pen, highlighter, eraser, emoji stickers |
+| ID Card, QR Code | Print-ready ID layout, QR generator |
+| OCR | Read text from the photo |
 
-Every photo, oldest first. Narrow it down by category, camera, rating, country, favourites, or a date range (quick buttons for this year, last 90 days and last 30 days). The size slider changes thumbnail size. Click a photo to open it large, rate it, mark it as a favourite, change its category or lock it so nothing changes it by mistake. Click the tick on photos to select several and move them together.
-
-**Mark for delete.** Every photo, in every section, has a small trash icon (and the photo viewer and the selection bar have a **Mark for delete** button). A marked photo is dimmed and tagged, and it is left out of the result when you apply. With the trash option on (the default) it goes to the trash folder, where you can restore it or delete it for good: a move puts the file there, and a copy puts a copy there while your original stays where it is. With the trash option off, a marked photo stays where it is. Nothing is deleted just by marking, and unmarked photos are never removed. To mark everything Photocure flags as junk in one go, tick **Approve all proposed deletions** before you analyze.
-
-**Clean export.** With photos selected, press **Clean export** to make copies that are safe to share. Location, camera serial and other hidden details are removed, files get neutral names, and you can add a simple web gallery. Photocure can also check the selection for license plates, payment cards, screens, house numbers and ID documents, then blur those areas or leave those photos out. This check is a helper, not a guarantee: it can miss small details, so look over what you share. Your originals are never changed.
-
-### Search
-
-Describe what you want to find in your own words. It works from what Photocure saw in each photo, entirely on your computer.
-
-### Bursts
-
-Every burst of similar shots, with the best frame marked. Faces are checked for closed eyes. For group shots you get a clear verdict:
-
-- **Everyone's eyes open** in one frame: keep that one.
-- **No single frame is perfect:** it names the two frames that together cover everybody. Press **Create fixed photo** and Photocure lines the frames up and blends the open eyes into the best frame, saving `IMG_xxxx_fixed.jpg` next to the original. If the heads moved too much it says so and leaves the photo alone. **Export layered PSD** gives you the aligned frames as layers with the mask already over the blinking face, for touching up by hand.
-- **Reject all blinks** sends spare frames with closed eyes to Junk review. Nothing is deleted, and you can restore them.
-
-Disagree with the pick? Press **Make best shot** on any frame. To get rid of the others, press **Mark for delete** on a frame (or mark all the other frames at once).
-
-### Highlights
-
-Your best photos first. The score blends how appealing the photo looks with your own stars and favourites. Open **Tune the ranking** to choose how much each counts, or press **Learn from my ratings** so Photocure learns your taste (it needs a few photos you clearly liked and disliked). Three views:
-
-- **All photos, best first.**
-- **Best of each event.**
-- **Event stories (balanced):** a handful of photos per event covering wide shots, close-ups, action and atmosphere, in the order you took them. It needs the AI model installed.
-
-**Year in review** downloads a single web page of your best photos from a year, to keep or share.
-
-### Events
-
-Photocure groups photos taken at about the same time and place into events like "Weekend trip". Set how many hours apart and how many kilometres apart count as separate events, press **Find events**, and rename them anything you like.
-
-### Utility
-
-Things you photographed to look up later: receipts, whiteboards and notes, screenshots, labels and serial numbers, parking spot signs, medicine packaging. They live here, apart from your photos and from Junk. Use the buttons at the top to see just one kind.
-
-### Finalize
-
-Photos Photocure was not sure about. Press a number to choose a category for the highlighted photo. When you have fixed a few, press **Learn from my choices** and it re-sorts the rest using what you taught it.
-
-### Duplicates
-
-Groups of the same photo more than once, identical files and look-alikes. Each photo is marked **Keep** or **Duplicate**. Photocure suggests the best copy; press **Keep this one instead** on another if you prefer, then **Confirm**. **Accept all suggestions** does it for every group. **Not duplicates** dismisses a look-alike group. Nothing moves or is deleted until you apply a plan.
-
-### Junk
-
-Duplicates, graphics and memes, accidental shots (very dark or blurry) and unreadable files. Move anything that does not belong back to a real category.
-
-### Apply and undo
-
-Where Photocure finally files your photos into the library folder.
-
-1. Choose what to do with the files: **Move** them, or **Copy** them so the originals stay where they are (a good fit for read-only folders).
-2. Press **Rebuild plan**, then **Preview changes** to see exactly what will happen.
-3. Press **Review and apply** when you are happy.
-
-The destination is always your library folder; you do not pick one here. With **Copy**, photos you marked for delete are copied into the trash folder too, and your originals stay where they were.
-
-Changed your mind? **Undo this change** puts every file back. **Verify files** checks that organized files still match the record, and **Repair paths** fixes things if you moved folders yourself. Tick **Move photos marked for delete to a trash folder** to set them aside in Trash, where you can restore or delete them later.
-
-### Settings
-
-- **Library folder:** where finished photos live. You choose it on first run and it cannot change here afterwards; use **Move library to another folder** to relocate it. Under Docker or any setup that sets `PCUR_LIBRARY_ROOT`, the folder comes from that variable and you are never asked.
-- **New plans start with:** Move or Copy.
-- **Processing device:** Automatic picks the fastest option on your computer. You can choose a specific graphics card or the processor.
-- **Workers:** how many photos are handled at once. The defaults are fine.
-- **File name collisions:** what to do when a file with the same name already exists. Photocure never overwrites a file.
-- **Keywords for other programs:** can add Photocure's categories and highlights as keywords next to each photo, so programs like digiKam or Lightroom can filter by them.
-- **About, Restart, Reset library** and the **Dark Mode** switch.
+- **One Apply bar.** Crop, Light, Looks and Detail preview live; **Apply** and **Cancel** appear at the bottom of the panel. Switching tool applies what you were doing, so nothing is lost, and Undo still works.
+- **Compare** (button or **C**) shows a draggable split between the original and your edit.
+- The zoom control in the corner has zoom in and out, **Fit** and **1:1**.
+- Undo and redo keep the last 10 steps.
+- **Save** offers **Save as copy** (writes `name_edited.ext` next to the original as a new photo) or **Overwrite original**, which replaces the file, refuses RAW and HEIF, and stops without touching the file if the format cannot be converted. **Download** asks for a format and quality and does not change your library.
+- Editing runs on a canvas capped at 4K.
+- OCR works best with `pip install "photocure[ocr]"`; without it Photocure uses Tesseract if installed.
 
 ## Keyboard shortcuts
 
-Press **?** in the app to see this list any time.
+Press **?** in the app for this list.
 
 | Key | What it does |
 |---|---|
-| Arrow keys | Move around the photos |
-| Enter or Space | Open the highlighted photo |
-| **1** to **5** | Rate with that many stars |
-| **0** | Clear the rating |
-| **x** | Reject, or un-reject (nothing is deleted) |
-| **f** | Favourite, or remove from favourites |
-| **l** | Lock or unlock a photo so nothing changes it by mistake |
+| Arrow keys, Enter or Space | Move around, open the highlighted photo |
+| **1** to **5**, **0** | Rate with stars, clear the rating |
+| **x**, **f**, **l** | Reject, favourite, lock (each toggles) |
 | **j** and **k** | Next and previous photo in Finalize and Junk |
 | **1** to **9** | In Finalize and Junk: choose a category |
 | **u** | Undo the last category change |
@@ -260,24 +143,17 @@ Press **?** in the app to see this list any time.
 
 ## Your photos stay safe
 
-- **Nothing is moved until you press Apply**, after a preview.
-- **Removed photos wait in Trash** until you empty it yourself. Scanning, analyzing, rating and reviewing never touch your files.
-- **Every change can be undone**, and the undo restores files exactly as they were.
-- **Nothing is ever overwritten**, and rejecting a photo never deletes it.
-- **Ratings and rejects are saved next to each photo** in a small `.xmp` sidecar file that other programs understand. If another program changed that file, Photocure asks before replacing it. To keep ratings inside Photocure only, set `PCUR_WRITE_SIDECARS=false` before you start it.
-- **Everything stays on your computer.** The AI model runs locally, and your photos are never uploaded.
+- Nothing moves until you press Apply, after a preview. Every change can be undone exactly.
+- Removed photos wait in Trash until you empty it. Scanning, analyzing, rating and reviewing never touch your files.
+- Nothing is overwritten except when you choose **Overwrite** in the editor. Rejecting never deletes.
+- Ratings and rejects are saved in `.xmp` sidecar files other programs understand. Photocure asks before replacing a file another program changed. Set `PCUR_WRITE_SIDECARS=false` to keep ratings inside Photocure only.
+- Everything runs locally. Your photos are never uploaded.
 
 ## Optional extras
 
-**Place names.** To see city, region and country for photos with GPS, fill in places for photos you imported earlier:
+**Place names.** `photocure geocode` fills in city, region and country for photos with GPS, offline.
 
-```bash
-photocure geocode
-```
-
-The lookup is done offline.
-
-**Your own categories.** The built-in categories (People, Events, Food, Scenery and so on) can be extended or reworded with a small file. Point Photocure at it. The new rules apply to photos you analyze from then on; finished photos keep their category until you change it:
+**Your own categories.** Extend or reword the built-in categories with a small YAML or JSON file. New rules apply to photos analyzed afterwards.
 
 ```bash
 export PCUR_TAXONOMY_FILE=/full/path/to/my_categories.yaml
@@ -291,61 +167,42 @@ classes:
     date_grouped: true             # add year/month/day folders
     prompts:                       # what the AI should look for, in plain words
       - a concert with a stage and bright lights
-      - a crowd of people at a music festival
 ```
 
-A JSON file works the same way. Describe what is in the photo with a few different sentences; avoid "no people", because the AI reads the words, not the negation.
+Describe the photo with a few sentences and avoid "no people": the AI reads the words, not the negation.
 
-**Ask an AI agent about your photos.** Photocure can run an MCP server so an agent such as Claude can search your library, look at the photos and do two jobs for you, for example "find the router label I photographed last month and read me the default password", "fix the blinks in my group shots" or "make a clean copy of the beach photos I can share". It runs on your computer. It can only add new files (a fixed photo, a layered file, a clean export folder): no tool can change, move or delete a photo you already have.
+**Ask an AI agent about your photos.** An MCP server lets an agent such as Claude search your library, view photos, fix blinks or make a clean export. It runs locally and can only add new files, never change, move or delete existing photos. It has ten tools: eight read-only (overview, search, browse, photo details, view a photo, list bursts) and two that write new files (`create_composite`, `clean_export`).
 
 ```bash
 pip install "photocure[mcp]"
 claude mcp add photocure -- photocure mcp --db /full/path/to/photocure.db
 ```
 
-Other agents take the same command in their MCP settings: `photocure mcp --db /full/path/to/photocure.db`. Use the full path to the database. The agent gets ten tools. Eight only read: library overview, search by description, browse by date or category, photo details, view a photo, and list bursts. Two write new files: `create_composite` and `clean_export`.
-
 ## Command line
-
-You do not need these to use Photocure, but they are handy.
 
 | Command | What it does |
 |---|---|
-| `photocure setup` | One-time set-up of the AI model for your computer |
-| `photocure start` | Start Photocure and open it in your browser |
-| `photocure stop` | Stop a running Photocure |
+| `photocure setup` / `start` / `stop` | Set up, start or stop Photocure |
 | `photocure search "dog on the beach"` | Find photos by description |
-| `photocure highlights --year 2024 --top 50 --out DIR` | Write a year-in-review page, add `--copy` to copy the originals |
-| `photocure keywords` | Write Photocure keywords next to your photos (`--remove` to take them away) |
-| `photocure geocode` | Add place names to photos |
-| `photocure mcp --db FILE` | Run the agent (MCP) server over your library |
-| `photocure doctor` | Check that the AI model, graphics card and face detection are ready |
-| `photocure devices` | List the graphics cards and processors Photocure can use |
-| `photocure plan` / `photocure apply` | Build and apply a plan into the library folder (`--library-root DIR` to override, `--operation move\|copy`) |
+| `photocure highlights --year 2024 --top 50 --out DIR` | Year-in-review page (`--copy` copies originals) |
+| `photocure keywords` | Write keywords next to photos (`--remove` undoes) |
+| `photocure geocode` | Add place names |
+| `photocure mcp --db FILE` | Run the agent server |
+| `photocure doctor` / `devices` | Check the model and GPU, list usable devices |
+| `photocure plan` / `apply` | Build and apply a plan (`--library-root DIR`, `--operation move\|copy`) |
 | `photocure trash-purge` | Permanently delete everything in the trash |
 | `photocure version` | Show the version |
 
-Useful options for `photocure start`: `--port 9000` to use a different port, `--no-open` to not open the browser.
+`photocure start` also takes `--port 9000` and `--no-open`.
 
 ## Troubleshooting
 
-**"The AI model is switched off" appears on the Import page.**
-The model is installed, but a setting named `PCUR_BACKEND` is forcing the placeholder. In the terminal that starts Photocure, run `unset PCUR_BACKEND` (on Windows, remove the `PCUR_BACKEND` environment variable), then start Photocure again and re-run **Analyze Now**.
-
-**It says it needs the AI model.**
-Run `photocure setup` once. Search, Event stories and Analyze need the real model.
-
-**The page asks for a code.**
-Copy the one-time code from the terminal where you started Photocure. Starting it with `photocure start` opens the browser already signed in.
-
-**The port is already in use.**
-Photocure picks the next free port by itself and tells you which. To free the old one, run `photocure stop`.
-
-**Analysis is slow.**
-It is the heavy step. A supported graphics card or an Apple Silicon Mac is much faster. Run `photocure devices` to see what Photocure found, and check Settings, Processing device.
-
-**Something else looks wrong.**
-Run `photocure doctor`. It checks the model, graphics card and face detection, and tells you how to fix anything missing.
+- **"The AI model is switched off":** a `PCUR_BACKEND` setting forces the placeholder. Run `unset PCUR_BACKEND` (on Windows remove the variable), restart, and re-run **Analyze Now**.
+- **It needs the AI model:** run `photocure setup` once. Search, Event stories and Analyze need it.
+- **The page asks for a code:** copy it from the terminal. `photocure start` opens the browser already signed in.
+- **Port in use:** Photocure picks the next free port and tells you. Free the old one with `photocure stop`.
+- **Analysis is slow:** a supported GPU or Apple Silicon is much faster. Check `photocure devices` and Settings, Processing device.
+- **Anything else:** run `photocure doctor`.
 
 ---
 

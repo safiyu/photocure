@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import logging
+import os
 from pathlib import Path
 
 log = logging.getLogger("photocure.models")
@@ -13,6 +15,7 @@ YUNET = "face_detection_yunet_2023mar.onnx"
 LANDMARKER = "face_landmarker.task"
 SFACE = "face_recognition_sface_2021dec.onnx"
 AESTHETIC = "aesthetic_laion_sa_v1_vit_b_16.npz"
+ESPCN = "super_resolution_espcn.onnx"
 
 _verified: dict[tuple[str, int, int], bool] = {}
 
@@ -55,3 +58,21 @@ def model_path(name: str, models_dir: Path = MODELS_DIR) -> Path | None:
 def active_models(models_dir: Path = MODELS_DIR) -> list[dict]:
     """Manifest entries whose file is present and intact (what the About card may list)."""
     return [m for m in load_manifest(models_dir) if verify_model(m["file"], models_dir)]
+
+
+def downloaded_models(models_dir: Path = MODELS_DIR) -> list[dict]:
+    """Models fetched on first use (not bundled) that are installed on this computer."""
+    try:
+        entries = list(json.loads((models_dir / "MANIFEST.json").read_text(encoding="utf-8")).get("downloaded", []))
+    except (OSError, ValueError):
+        return []
+    home = Path(os.environ.get("U2NET_HOME") or Path(os.environ.get("XDG_DATA_HOME", "~")) / ".u2net").expanduser()
+    found = []
+    for m in entries:
+        if m.get("cache_file"):
+            present = (home / m["cache_file"]).is_file()
+        else:
+            present = bool(m.get("module")) and importlib.util.find_spec(m["module"]) is not None
+        if present:
+            found.append(m)
+    return found

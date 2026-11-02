@@ -555,7 +555,9 @@ class PhotoRepository:
         bursts = self.s.exec(sselect(func.count()).select_from(live_bursts)).one()
         people_where = [PersonCluster.face_count > 0, PersonCluster.stage != "trash"]
         if stage and stage != "all":
-            people_where.append(PersonCluster.stage == stage)
+            # New and Library share one set of people (see people_actions._cluster_stage).
+            cluster_stage = "trash" if stage == "trash" else "library"
+            people_where.append(PersonCluster.stage == cluster_stage)
         people = self.s.exec(
             sselect(func.count()).select_from(PersonCluster)
             .where(*people_where)
