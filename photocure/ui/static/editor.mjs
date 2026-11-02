@@ -510,13 +510,16 @@
     titleEl.title = baseName;
     const undoBtn = mkBtn(icon("undo") + "<span>Undo</span>", "pcur-hist");
     const redoBtn = mkBtn("<span>Redo</span>" + icon("right"), "pcur-hist");
-    const compareBtn = mkBtn("Compare", "btn sm ghost"); compareBtn.title = "Hold to compare with the original";
-    const dlBtn = mkBtn(icon("down") + "<span>Download</span>", "btn sm secondary");
-    const saveBtn = mkBtn(icon("check") + "<span>Save</span>", "btn sm primary");
+    const compareBtn = mkBtn(icon("eye") + "<span>Compare</span>", "pcur-hist pcur-compare"); compareBtn.title = "Hold to compare with the original";
+    const dlBtn = mkBtn(icon("down") + "<span>Download</span>", "btn sm secondary pcur-top-btn");
+    const saveBtn = mkBtn(icon("check") + "<span>Save</span>", "btn sm primary pcur-top-btn");
     const closeBtn = mkBtn(icon("x"), "pcur-x");
     closeBtn.title = "Close (Esc)";
     closeBtn.setAttribute("aria-label", "Close editor");
-    topbar.append(titleEl, grow(), undoBtn, redoBtn, compareBtn, dlBtn, saveBtn, closeBtn);
+    const histGroup = document.createElement("div");
+    histGroup.className = "pcur-hist-group";
+    histGroup.append(undoBtn, redoBtn, compareBtn);
+    topbar.append(titleEl, grow(), histGroup, dlBtn, saveBtn, closeBtn);
 
     const stage = document.createElement("div");
     stage.className = "pcur-stage";
@@ -524,8 +527,16 @@
     wrap.className = "pcur-wrap";
     dispC.className = "pcur-disp";
     ovC.className = "pcur-ov";
-    wrap.append(dispC, ovC);
-    stage.appendChild(wrap);
+    const fxLayer = document.createElement("div");
+    fxLayer.className = "pcur-photo-fx";
+    fxLayer.innerHTML = `<div class="pcur-fx-shimmer"></div><div class="pcur-fx-beam"></div>`;
+    wrap.append(dispC, ovC, fxLayer);
+
+    const stageStatus = document.createElement("div");
+    stageStatus.className = "pcur-stage-status";
+    stageStatus.hidden = true;
+    stageStatus.innerHTML = `<div class="pcur-status-card"><span class="pcur-status-ring"></span><span class="pcur-status-txt">Processing photo…</span></div>`;
+    stage.append(wrap, stageStatus);
 
     const toolbar = document.createElement("div");
     toolbar.className = "pcur-tools";
@@ -1071,14 +1082,28 @@
       });
       return r;
     }
-    function busy(b, on) {
+    function busy(b, on, label) {
       b.disabled = on;
       b.classList.toggle("busy", on);
+      wrap.classList.toggle("is-processing", !!on);
+      stage.classList.toggle("is-processing", !!on);
+      if (on) {
+        wrap.classList.remove("just-finished");
+        const txtEl = stageStatus.querySelector(".pcur-status-txt");
+        if (txtEl) txtEl.textContent = label || "Processing photo…";
+        stageStatus.hidden = false;
+      } else {
+        stageStatus.hidden = true;
+        wrap.classList.remove("just-finished");
+        void wrap.offsetWidth;
+        wrap.classList.add("just-finished");
+      }
     }
 
     async function buildPanel() {
       panelBody.innerHTML = "";
       const add = (n) => panelBody.appendChild(n);
+      const btnRow = (...btns) => { const d = pEl("div", "pcur-btns"); d.append(...btns); return d; };
       const T = S.tool;
 
       if (T === "crop") {
@@ -1200,7 +1225,7 @@
         });
         add(grid);
         const apply = pBtn(icon("check") + "<span>Apply filter</span>", "primary", () => { bakeFilter(); commit(); toast("Filter applied", "ok"); }, "Bake the selected filter into the photo");
-        add(pEl("div", "pcur-btns", "").appendChild(apply));
+        add(btnRow(apply));
       }
 
       else if (T === "remaster") {
@@ -1216,8 +1241,8 @@
         add(rcbox("denoise", "AI Denoise"));
         add(rcbox("low_light", "Low-light & exposure correction"));
         add(rcbox("upscale", "AI Super-Resolution & detail restore"));
-        const b = pBtn("Remaster", "primary", async () => {
-          busy(b, true);
+        const b = pBtn(icon("image") + "<span>Remaster photo</span>", "primary", async () => {
+          busy(b, true, "Remastering photo…");
           try {
             const b2 = await canvasToBlob(workC, "image/jpeg", 0.96);
             const fd = new FormData();
@@ -1247,7 +1272,7 @@
           } catch (e) { toast("Remaster failed: " + e.message, "err"); }
           busy(b, false);
         });
-        add(pEl("div", "pcur-btns", "").appendChild(b));
+        add(btnRow(b));
       }
 
       else if (T === "blur") {
@@ -1296,8 +1321,8 @@
         add(cbox("outline", "White sticker outline"));
         add(cbox("despeckle", "Clean edges (despeckle)"));
         add(cbox("trim", "Trim to the subject"));
-        const b = pBtn("Remove background", "primary", async () => {
-          busy(b, true);
+        const b = pBtn(icon("layers") + "<span>Remove background</span>", "primary", async () => {
+          busy(b, true, "Removing background…");
           try {
             const b2 = await canvasToBlob(workC, "image/png");
             const fd = new FormData();
@@ -1327,7 +1352,7 @@
           } catch (e) { toast("Background removal failed: " + e.message, "err"); }
           busy(b, false);
         });
-        add(pEl("div", "pcur-btns", "").appendChild(b));
+        add(btnRow(b));
       }
 
       else if (T === "draw") {
@@ -1440,7 +1465,7 @@
           await commit();
           toast("ID card layout applied", "ok");
         });
-        add(pEl("div", "pcur-btns", "").appendChild(apply));
+        add(btnRow(apply));
 
         function idDims() {
           return { w: Math.round(1240 * S.idc.dpi / 150), h: Math.round(1754 * S.idc.dpi / 150) };
@@ -1570,12 +1595,12 @@
           selectTool("stickers");
           toast("QR added — drag it into place", "ok");
         });
-        add(pEl("div", "pcur-btns", "").appendChild(addBtn));
+        add(btnRow(addBtn));
       }
 
       else if (T === "ocr") {
-        const b = pBtn("Extract text", "primary", async () => {
-          busy(b, true);
+        const b = pBtn(icon("search") + "<span>Extract text</span>", "primary", async () => {
+          busy(b, true, "Extracting text…");
           try {
             const b2 = await canvasToBlob(workC, "image/png");
             const fd = new FormData();
@@ -1594,7 +1619,7 @@
         ta.rows = 7;
         ta.placeholder = "Extracted text appears here.";
         ta.hidden = true;
-        add(pEl("div", "pcur-btns", "").appendChild(b));
+        add(btnRow(b));
         add(ta);
         const copyB = pBtn(icon("copy") + "<span>Copy to clipboard</span>", "secondary", async () => {
           try {
