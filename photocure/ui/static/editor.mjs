@@ -169,6 +169,29 @@
     setTimeout(() => { n.classList.add("out"); setTimeout(() => n.remove(), 260); }, 3400);
   }
   function downloadBlob(blob, filename) {
+    // When served over plain HTTP on LAN hostnames (e.g. http://photocure.home or local IPs),
+    // Chromium blocks blob:http://... downloads as insecure. A data: URL has no http: origin
+    // attached, completely bypassing the browser's insecure blob download restriction.
+    if (blob.size < 35 * 1024 * 1024) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const a = document.createElement("a");
+        a.href = reader.result;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      };
+      reader.onerror = () => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      };
+      reader.readAsDataURL(blob);
+      return;
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = filename;

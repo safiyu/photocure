@@ -400,11 +400,38 @@
       busy(dlBtn, true);
       try {
         const blob = await renderBlob("image/png");
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = "burst-collage.png";
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        const filename = "burst-collage.png";
+        if (blob.size < 35 * 1024 * 1024) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const a = document.createElement("a");
+            a.href = reader.result;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          };
+          reader.onerror = () => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 4000);
+          };
+          reader.readAsDataURL(blob);
+        } else {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 4000);
+        }
       } catch (e) { toast("Download failed: " + e.message, "err"); }
       finally { busy(dlBtn, false); }
     }
