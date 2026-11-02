@@ -1319,13 +1319,20 @@
       if (node) r.appendChild(node);
       return r;
     }
+    let _sliderCounter = 0;
     function pSlider(label, min, max, value, onInput, onCommit, fmt) {
+      _sliderCounter++;
+      const sId = "pcur-s-" + _sliderCounter;
       const box = pEl("div", "pcur-slider");
       const head = pEl("div", "pcur-shead");
-      head.appendChild(pEl("label", "pcur-lbl", esc(label)));
+      const lbl = pEl("label", "pcur-lbl", esc(label));
+      lbl.setAttribute("for", sId);
+      head.appendChild(lbl);
       const val = pEl("span", "pcur-val", fmt ? fmt(value) : String(value));
       head.appendChild(val);
       const inp = document.createElement("input");
+      inp.id = sId;
+      inp.setAttribute("aria-label", label);
       inp.type = "range"; inp.min = min; inp.max = max; inp.value = value;
       inp.step = (max - min) / 100;
       inp.addEventListener("input", () => {
@@ -1569,8 +1576,12 @@
       else if (T === "draw") {
         add(chipRow([["pen", "Pen"], ["highlighter", "Highlighter"], ["eraser", "Eraser"]], S.drawMode, (v) => { S.drawMode = v; }));
         const cr = pEl("div", "pcur-row");
-        cr.appendChild(pEl("label", "pcur-lbl", "Color"));
+        const cLbl = pEl("label", "pcur-lbl", "Color");
+        cLbl.setAttribute("for", "pcur-draw-color");
+        cr.appendChild(cLbl);
         const ci = document.createElement("input");
+        ci.id = "pcur-draw-color";
+        ci.setAttribute("aria-label", "Color");
         ci.type = "color"; ci.value = S.color;
         ci.addEventListener("input", () => { S.color = ci.value; });
         cr.appendChild(ci);
@@ -1629,7 +1640,7 @@
           (v) => { S.idc.dpi = v; renderID(); }));
         const slot = (which, label) => {
           const r = pEl("div", "pcur-row");
-          r.appendChild(pEl("label", "pcur-lbl", esc(label)));
+          r.appendChild(pEl("span", "pcur-lbl", esc(label)));
           const r2 = pEl("div", "pcur-btns");
           r2.append(
             pBtn(which === "front" ? "Front photo…" : "Back photo…", "ghost", () => pick(which)),
@@ -1782,9 +1793,14 @@
         function buildFields() {
           fields.innerHTML = "";
           for (const [k, lab] of DEFS[S.qr.type]) {
+            const fldId = "pcur-qr-" + k;
             const r = pEl("div", "pcur-row");
-            r.appendChild(pEl("label", "pcur-lbl", esc(lab)));
+            const lbl = pEl("label", "pcur-lbl", esc(lab));
+            lbl.setAttribute("for", fldId);
+            r.appendChild(lbl);
             const inp = document.createElement("input");
+            inp.id = fldId;
+            inp.setAttribute("aria-label", lab);
             inp.type = "text";
             inp.value = S.qr.fields[k] || "";
             inp.placeholder = lab;
@@ -1935,14 +1951,14 @@
       dlg.setAttribute("aria-label", dlOnly ? "Download" : "Save changes");
       dlg.innerHTML = `
         <h3>${dlOnly ? "Download" : "Save changes"}</h3>
-        <div class="pcur-row"><label class="pcur-lbl">Format</label>
-          <select class="pcur-sel">
+        <div class="pcur-row"><label class="pcur-lbl" for="pcur-save-format">Format</label>
+          <select id="pcur-save-format" class="pcur-sel" aria-label="Format">
             <option value="jpeg">JPEG</option><option value="png">PNG</option>
             <option value="webp">WebP</option>${dlOnly ? '<option value="pdf">PDF</option>' : ""}
           </select>
         </div>
-        <div class="pcur-slider" data-quality><div class="pcur-shead"><label class="pcur-lbl">Quality</label><span class="pcur-val">92%</span></div>
-          <input type="range" min="50" max="100" value="92" step="1" class="pcur-q">
+        <div class="pcur-slider" data-quality><div class="pcur-shead"><label class="pcur-lbl" for="pcur-save-quality">Quality</label><span class="pcur-val">92%</span></div>
+          <input id="pcur-save-quality" type="range" min="50" max="100" value="92" step="1" class="pcur-q" aria-label="Quality">
         </div>
         <div class="pcur-btns pcur-savebtns">
           ${dlOnly
