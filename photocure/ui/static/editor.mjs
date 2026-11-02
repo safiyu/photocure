@@ -1213,10 +1213,9 @@
           l.append(i, pEl("span", "", esc(label)));
           return l;
         };
-        add(rcbox("denoise", "AI Denoise (chroma & luminance grain)"));
+        add(rcbox("denoise", "AI Denoise"));
         add(rcbox("low_light", "Low-light & exposure correction"));
         add(rcbox("upscale", "AI Super-Resolution & detail restore"));
-        add(pEl("p", "pcur-hint", "3-stage AI & vision chain: removes sensor grain, lifts dark shadows (Zero-DCE + CLAHE), and restores crisp detail via ESPCN ONNX super-resolution."));
         const b = pBtn("Remaster", "primary", async () => {
           busy(b, true);
           try {
@@ -1329,7 +1328,6 @@
           busy(b, false);
         });
         add(pEl("div", "pcur-btns", "").appendChild(b));
-        add(pEl("p", "pcur-hint", "Runs BiRefNet (MIT) / U2-Net (Apache-2.0) on the server with GrabCut fallback. Keeps full alpha transparency."));
       }
 
       else if (T === "draw") {
@@ -1610,7 +1608,6 @@
         });
         copyB.hidden = true;
         add(copyB);
-        add(pEl("p", "pcur-hint", "Runs RapidOCR (PaddleOCR v4 ONNX, Apache-2.0) on the server with Tesseract fallback."));
       }
     }
 
