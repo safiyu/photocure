@@ -4199,6 +4199,10 @@
              aria-label="Open ${esc(p.filename)}">
           <img class="ppo-thumb-img" src="${p.thumb_url}" alt="${esc(p.filename)}" loading="lazy">
           ${p.face_url ? `<img class="ppo-thumb-face" src="${p.face_url}" alt="Detected face" loading="lazy">` : ""}
+          ${p.face_id ? `
+            <button type="button" class="ppo-not-this-person-btn" data-face-id="${num(p.face_id)}" title="Not this person? Reassign or separate" aria-label="Not this person">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>` : ""}
           ${p.delete_approved ? '<span class="ppo-badge-del">Marked for delete</span>' : ''}
           <div class="ppo-thumb-info">
             <span class="ppo-thumb-filename">${esc(p.filename)}</span>
@@ -4213,12 +4217,26 @@
         const openPhoto = () => {
           openLightboxList(allIds, imgId, thumb);
         };
-        thumb.addEventListener("click", openPhoto);
+        thumb.addEventListener("click", (ev) => {
+          if (ev.target.closest(".ppo-not-this-person-btn")) return;
+          openPhoto();
+        });
         thumb.addEventListener("keydown", (ev) => {
+          if (ev.target.closest(".ppo-not-this-person-btn")) return;
           if (ev.key === "Enter" || ev.key === " ") {
             ev.preventDefault();
             openPhoto();
           }
+        });
+      });
+
+      // Wire "Not this person" button
+      $$(".ppo-not-this-person-btn", ppoGrid()).forEach((btn) => {
+        btn.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          const faceId = num(btn.dataset.faceId);
+          if (!faceId) return;
+          await openNotThisPersonDialog(faceId, activePpoPersonId);
         });
       });
 
@@ -4309,6 +4327,40 @@
       }
     });
   }
+
+  async function openNotThisPersonDialog(faceId, currentPersonId) {
+    // Offer choices: 1) Separate into a new person, 2) Move to a named person or person ID
+    const known = Array.from(allKnownPeopleNames || []).filter(Boolean);
+    const chosen = await showConfirmDialog({
+      title: "Not this person?",
+      message: "Separate this face into its own individual person cluster, or move it to another person.",
+      input: true,
+      inputLabel: "Move to person name (or leave empty to create a separate person):",
+      inputPlaceholder: "e.g. Maya, or leave blank to separate",
+      inputDefault: "",
+      confirmText: "Apply",
+      variant: "primary",
+    });
+    if (chosen === false || chosen === null) return;
+    const targetName = (typeof chosen === "string" ? chosen : "").trim();
+    try {
+      if (targetName) {
+        await reassignFace(faceId, { new_name: targetName });
+        toast(`Moved face to "${targetName}"`, "ok");
+      } else {
+        await reassignFace(faceId, { separate: true });
+        toast("Separated into a new person", "ok");
+      }
+      _pc.fp = null;
+      if (currentPersonId) {
+        await showPersonPhotos(currentPersonId);
+      }
+      renderPeople(true);
+    } catch (e) {
+      toast(`Failed: ${e.message}`, "err");
+    }
+  }
+
   initPpo();
 
 

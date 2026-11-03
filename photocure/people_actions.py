@@ -241,9 +241,12 @@ def rename_person(db_path: Path | str, person_id: int, name: str) -> dict:
 
 
 def reassign_face(db_path: Path | str, face_id: int, *, person_id: int | None = None,
-                  new_name: str | None = None) -> dict:
-    if (person_id is None) == (new_name is None):
-        raise ActionError("exactly one of person_id or new_name is required")
+                  new_name: str | None = None, separate: bool = False) -> dict:
+    if separate:
+        if person_id is not None or new_name is not None:
+            raise ActionError("when separate is true, person_id and new_name must be omitted")
+    elif (person_id is None) == (new_name is None):
+        raise ActionError("exactly one of person_id, new_name, or separate=True is required")
     if new_name is not None:
         new_name = new_name.strip()
         if not new_name:
@@ -255,7 +258,13 @@ def reassign_face(db_path: Path | str, face_id: int, *, person_id: int | None = 
             raise ActionError(f"no face with id {face_id}", 404)
         old_person_id = face.person_id
         created_fresh = False
-        if person_id is not None:
+        if separate:
+            image = s.get(M.ImageRecord, face.image_id)
+            person_stage = _cluster_stage(image.stage if image is not None else "new")
+            embedding = dequantize_embedding(face.embedding_json) or []
+            target = repo.create_person_cluster(embedding, stage=person_stage)
+            created_fresh = True
+        elif person_id is not None:
             target = s.get(M.PersonCluster, person_id)
             if target is None:
                 raise ActionError(f"no person with id {person_id}", 404)
@@ -397,8 +406,114 @@ def bulk_delete_people(db_path: Path | str, person_ids: list[int], stage: str = 
         return {"deleted_count": count}
 
 
-def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = "new") -> dict:
+def consolidate_clusters(db_path: Path | str, threshold: float = 0.65, stage: str = "new") -> dict:
+    """Post-clustering consolidation: automatically merge visually convergent clusters.
+
+    When multiple clusters have drifted close (cosine similarity >= threshold) and have NO
+    overlapping photos (different people cannot be in the same photo as the same person),
+    they are safely merged into the more prominent cluster (named or higher face_count).
+    Named clusters with conflicting custom names are never auto-merged.
+    """
+    import numpy as np
+
+    with get_session(db_path) as s:
+        cluster_stage = _cluster_stage(stage)
+        clusters = s.exec(
+            select(M.PersonCluster)
+            .where(M.PersonCluster.stage == cluster_stage)
+            .where(M.PersonCluster.face_count > 0)
+        ).all()
+
+        if len(clusters) <= 1:
+            return {"merged_count": 0}
+
+        # Map cluster_id -> set of image_ids
+        cluster_images: dict[int, set[int]] = {}
+        cluster_centroids: dict[int, np.ndarray] = {}
+        for c in clusters:
+            if not c.centroid_json:
+                continue
+            emb = dequantize_embedding(c.centroid_json)
+            if not emb:
+                continue
+            arr = np.asarray(emb, dtype=np.float32)
+            norm = float(np.linalg.norm(arr))
+            if norm < 1e-6:
+                continue
+            cluster_centroids[c.id] = arr / norm
+            img_ids = set(s.exec(
+                select(M.FaceDetection.image_id)
+                .where(M.FaceDetection.person_id == c.id)
+                .where(M.FaceDetection.ignored == False)
+            ).all())
+            cluster_images[c.id] = img_ids
+
+        # Sort clusters by prominence: named first, then higher face_count
+        sorted_clusters = sorted(
+            [c for c in clusters if c.id in cluster_centroids],
+            key=lambda c: (1 if c.name else 0, c.face_count or 0, c.id or 0),
+            reverse=True,
+        )
+
+        merged_count = 0
+        deleted_ids: set[int] = set()
+
+        for i, target in enumerate(sorted_clusters):
+            if target.id in deleted_ids:
+                continue
+            target_emb = cluster_centroids[target.id]
+            target_imgs = cluster_images[target.id]
+
+            for j in range(i + 1, len(sorted_clusters)):
+                cand = sorted_clusters[j]
+                if cand.id in deleted_ids:
+                    continue
+                # Never auto-merge if candidate has a different custom name
+                if cand.name and cand.name != target.name:
+                    continue
+
+                # Check same-photo exclusivity: cannot merge if they share any photo
+                cand_imgs = cluster_images[cand.id]
+                if target_imgs.intersection(cand_imgs):
+                    continue
+
+                sim = float(np.dot(target_emb, cluster_centroids[cand.id]))
+                if sim >= threshold:
+                    # Merge candidate into target
+                    faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.person_id == cand.id)).all()
+                    for f in faces:
+                        f.person_id = target.id
+                    target.face_count = (target.face_count or 0) + len(faces)
+                    # Adopt candidate's name if target was unnamed
+                    if not target.name and cand.name:
+                        target.name = cand.name
+
+                    # Update target centroid
+                    cand_emb = cluster_centroids[cand.id]
+                    tot = target.face_count
+                    n_cand = len(faces)
+                    n_prev = max(1, tot - n_cand)
+                    new_cent = (target_emb * n_prev + cand_emb * n_cand) / max(1, tot)
+                    norm_new = float(np.linalg.norm(new_cent))
+                    if norm_new > 1e-6:
+                        target_emb = new_cent / norm_new
+                        cluster_centroids[target.id] = target_emb
+                        target.centroid_json = quantize_embedding(target_emb.tolist())
+
+                    target_imgs.update(cand_imgs)
+                    deleted_ids.add(cand.id)
+                    s.delete(cand)
+                    merged_count += 1
+
+        s.commit()
+        return {"merged_count": merged_count}
+
+
+def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = "new") -> dict:
     """Recluster faces on New Pipeline photos while anchoring on existing named/library PersonCluster centroids.
+
+    Uses two-stage clustering (core discovery + satellite absorption) with multi-exemplar matching
+    and temporal/burst co-occurrence boost, followed by post-clustering consolidation.
 
     - Preserves existing named clusters and Library photos.
     - Excludes ignored faces.
@@ -409,7 +524,7 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = 
     import numpy as np
 
     with get_session(db_path) as s:
-        # 1. Fetch all non-ignored faces on New Pipeline photos with valid embeddings
+        # 1. Fetch all non-ignored faces on photos in the specified stage with valid embeddings
         faces = s.exec(
             select(M.FaceDetection)
             .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
@@ -420,6 +535,20 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = 
 
         if not faces:
             return {"clusters_created": 0, "faces_clustered": 0}
+
+        # Fetch image timestamps and burst_id for temporal co-occurrence boost
+        face_img_ids = list({f.image_id for f in faces})
+        img_records = s.exec(
+            select(M.ImageRecord)
+            .where(col(M.ImageRecord.id).in_(face_img_ids))
+        ).all()
+        img_info = {
+            r.id: {
+                "burst_id": getattr(r, "burst_id", None),
+                "timestamp": r.taken_at.timestamp() if getattr(r, "taken_at", None) else None,
+            }
+            for r in img_records
+        }
 
         # Keep existing custom names mapped to old person_id
         cluster_stage = _cluster_stage(stage)
@@ -465,6 +594,7 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = 
             clusters.append({
                 "cluster_obj": c,
                 "centroid": u,
+                "exemplars": [u],
                 "face_ids": [],
                 "image_ids": anchored_img_ids,
                 "names": [c.name] if c.name else [],
@@ -487,10 +617,28 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = 
         # Map face_id -> old custom name if any
         face_custom_name = {f.id: custom_names[f.person_id] for f in faces if f.person_id in custom_names}
 
-        # 2. Sort pipeline faces by sharpness descending
-        faces_sorted = sorted(faces, key=lambda f: f.face_sharpness or 0.0, reverse=True)
+        # Helper: assess if a face is suitable as a "core" seed (frontal, sharp, unblinked)
+        # Note: A face is treated as satellite only if it has severe profile yaw or eyes closed.
+        def is_core_face(f) -> bool:
+            # Check landmarks if available (5 points: left eye, right eye, nose, left mouth, right mouth)
+            if f.landmarks:
+                try:
+                    lm = json.loads(f.landmarks) if isinstance(f.landmarks, str) else f.landmarks
+                    if len(lm) >= 5:
+                        le, re, nose = lm[0], lm[1], lm[2]
+                        # Yaw symmetry: nose should be between eyes horizontally
+                        eye_w = abs(re[0] - le[0])
+                        if eye_w > 1e-4:
+                            yaw_ratio = abs((nose[0] - le[0]) - (re[0] - nose[0])) / eye_w
+                            if yaw_ratio > 0.65:  # severe profile shot
+                                return False
+                except Exception:
+                    pass
+            return True
 
-        for f in faces_sorted:
+        # Pre-process embeddings
+        parsed_faces = []
+        for f in faces:
             try:
                 emb = dequantize_embedding(f.embedding_json)
                 if not emb:
@@ -500,16 +648,49 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = 
                 if norm < 1e-6:
                     continue
                 u = arr / norm
+                parsed_faces.append((f, u))
             except Exception:
                 continue
 
+        # Pass 1: Core faces (sharp, frontal) sorted by sharpness descending
+        # Pass 2: Satellite faces (profile, angled, lower sharpness)
+        core_faces = [item for item in parsed_faces if is_core_face(item[0])]
+        satellite_faces = [item for item in parsed_faces if not is_core_face(item[0])]
+
+        core_faces.sort(key=lambda item: item[0].face_sharpness or 0.0, reverse=True)
+        satellite_faces.sort(key=lambda item: item[0].face_sharpness or 0.0, reverse=True)
+
+        def assign_face_item(f, u, allow_new_cluster: bool):
             best_c = None
             best_sim = threshold
+            f_meta = img_info.get(f.image_id, {})
+            f_burst = f_meta.get("burst_id")
+            f_ts = f_meta.get("timestamp")
 
             for c in clusters:
                 if f.image_id in c["image_ids"]:
                     continue  # Can never have the same person twice in the same photo
+
+                # Multi-exemplar matching: max similarity against centroid or exemplars
                 sim = float(np.dot(u, c["centroid"]))
+                for ex in c.get("exemplars", []):
+                    ex_sim = float(np.dot(u, ex))
+                    if ex_sim > sim:
+                        sim = ex_sim
+
+                # Burst & temporal co-occurrence boost
+                c_bursts = {img_info.get(img_id, {}).get("burst_id") for img_id in c["image_ids"]}
+                c_bursts.discard(None)
+                if f_burst and f_burst in c_bursts:
+                    sim += 0.08  # Same burst bonus
+                elif f_ts is not None:
+                    # Check temporal closeness (within 120 seconds of this cluster's photos)
+                    for img_id in c["image_ids"]:
+                        ts = img_info.get(img_id, {}).get("timestamp")
+                        if ts is not None and abs(ts - f_ts) <= 120.0:
+                            sim += 0.05
+                            break
+
                 if sim >= best_sim:
                     best_sim = sim
                     best_c = c
@@ -520,19 +701,64 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = 
                 best_c["image_ids"].add(f.image_id)
                 if c_name:
                     best_c["names"].append(c_name)
-                # update running centroid
+                # Update running centroid
                 n = len(best_c["face_ids"]) + (best_c["cluster_obj"].face_count if best_c.get("is_existing") else 0)
                 new_cent = (best_c["centroid"] * max(1, n - 1) + u) / max(1, n)
                 best_c["centroid"] = new_cent / float(np.linalg.norm(new_cent))
-            else:
+                # Update exemplars
+                exemplars = best_c.setdefault("exemplars", [])
+                if len(exemplars) < 5:
+                    if not any(float(np.dot(u, ex)) > 0.88 for ex in exemplars):
+                        exemplars.append(u)
+            elif allow_new_cluster:
                 clusters.append({
                     "cluster_obj": None,
                     "centroid": u,
+                    "exemplars": [u],
                     "face_ids": [f.id],
                     "image_ids": {f.image_id},
                     "names": [c_name] if c_name else [],
                     "is_existing": False,
                 })
+            else:
+                # If satellite face didn't match any core at threshold, assign to best non-conflicting cluster
+                # if reasonably close (>= 0.45), rather than seeding an isolated singleton cluster
+                if best_c is None and clusters:
+                    fallback_c = None
+                    fallback_sim = 0.45
+                    for c in clusters:
+                        if f.image_id in c["image_ids"]:
+                            continue
+                        sim = float(np.dot(u, c["centroid"]))
+                        for ex in c.get("exemplars", []):
+                            ex_sim = float(np.dot(u, ex))
+                            if ex_sim > sim:
+                                sim = ex_sim
+                        if sim >= fallback_sim:
+                            fallback_sim = sim
+                            fallback_c = c
+                    if fallback_c is not None:
+                        fallback_c["face_ids"].append(f.id)
+                        fallback_c["image_ids"].add(f.image_id)
+                        if c_name:
+                            fallback_c["names"].append(c_name)
+                    else:
+                        # Otherwise allow creating a new cluster
+                        clusters.append({
+                            "cluster_obj": None,
+                            "centroid": u,
+                            "exemplars": [u],
+                            "face_ids": [f.id],
+                            "image_ids": {f.image_id},
+                            "names": [c_name] if c_name else [],
+                            "is_existing": False,
+                        })
+
+        # Execute Pass 1 (core) and Pass 2 (satellites)
+        for f, u in core_faces:
+            assign_face_item(f, u, allow_new_cluster=True)
+        for f, u in satellite_faces:
+            assign_face_item(f, u, allow_new_cluster=False)
 
         # 3. Apply assignments only for pipeline faces
         created_count = 0
@@ -585,7 +811,14 @@ def recluster_people(db_path: Path | str, threshold: float = 0.64, stage: str = 
             s.delete(p)
 
         s.commit()
-        return {"clusters_created": created_count, "faces_clustered": total_assigned}
+
+    # 4. Run post-clustering consolidation to merge convergent clusters
+    try:
+        consolidate_clusters(db_path, threshold=max(0.60, threshold + 0.05), stage=stage)
+    except Exception:
+        pass
+
+    return {"clusters_created": created_count, "faces_clustered": total_assigned}
 
 
 

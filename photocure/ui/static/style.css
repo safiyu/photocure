@@ -4217,6 +4217,31 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
 .ppo-thumb-face:hover {
   transform: scale(1.12);
 }
+
+.ppo-not-this-person-btn {
+  position: absolute; top: 8px; left: 8px;
+  width: 28px; height: 28px; border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(4px);
+  color: #f1f5f9;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity var(--mo-fast) var(--ease-soft), transform var(--mo-fast) var(--ease-soft), background var(--mo-fast);
+  z-index: 2;
+}
+.ppo-thumb:hover .ppo-not-this-person-btn,
+.ppo-not-this-person-btn:focus-visible {
+  opacity: 1;
+  transform: scale(1);
+}
+.ppo-not-this-person-btn:hover {
+  background: rgba(239, 68, 68, 0.9);
+  border-color: rgba(239, 68, 68, 1);
+  color: #fff;
+}
 .ppo-face-zoom {
   position: fixed; z-index: 10000; pointer-events: none;
   width: 240px; height: 240px; border-radius: 18px; overflow: hidden;

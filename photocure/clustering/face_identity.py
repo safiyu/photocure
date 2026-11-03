@@ -27,16 +27,33 @@ class ClusterCentroid:
     person_id: int
     centroid: list[float]
     face_count: int
+    exemplars: list[list[float]] | None = None  # Diverse member embeddings for multi-exemplar matching
 
 
 def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
-                   threshold: float) -> int | None:
-    """Id of the closest centroid at or above ``threshold``, else ``None``."""
+                   threshold: float,
+                   similarity_boosts: dict[int, float] | None = None) -> int | None:
+    """Id of the closest centroid/exemplars at or above ``threshold``, else ``None``.
+
+    Supports:
+    - Multi-exemplar matching (checks cluster centroid and any stored diverse exemplars).
+    - Similarity boosts (e.g. temporal/burst co-occurrence bonus per cluster).
+    """
     best_id, best_score = None, threshold
+    boosts = similarity_boosts or {}
     for c in centroids:
+        # Score against mean centroid
         score = cosine(embedding, c.centroid)
-        if score >= best_score:
-            best_id, best_score = c.person_id, score
+        # Multi-exemplar comparison: check closest exemplar if available
+        if c.exemplars:
+            for ex in c.exemplars:
+                ex_score = cosine(embedding, ex)
+                if ex_score > score:
+                    score = ex_score
+        # Add potential temporal / burst / event boost
+        effective_score = score + boosts.get(c.person_id, 0.0)
+        if effective_score >= best_score:
+            best_id, best_score = c.person_id, effective_score
     return best_id
 
 
@@ -45,6 +62,33 @@ def update_centroid(old_centroid: list[float], old_count: int,
     """Incremental running mean after adding one more embedding."""
     n = old_count + 1
     return [(c * old_count + e) / n for c, e in zip(old_centroid, new_embedding)]
+
+
+def update_exemplars(current_exemplars: list[list[float]] | None,
+                     new_embedding: list[float],
+                     max_exemplars: int = 5,
+                     diversity_min_cosine: float = 0.88) -> list[list[float]]:
+    """Maintain a small diverse set of exemplars (different poses/angles/lighting).
+
+    Adds ``new_embedding`` if the current pool is not full, or if it represents a sufficiently
+    different pose from all existing exemplars (cosine < diversity_min_cosine).
+    """
+    exemplars = list(current_exemplars or [])
+    if not exemplars:
+        return [list(new_embedding)]
+    # Check similarity to existing exemplars
+    max_sim = max(cosine(new_embedding, ex) for ex in exemplars)
+    if max_sim < diversity_min_cosine:
+        # Novel pose / angle: add it
+        if len(exemplars) < max_exemplars:
+            exemplars.append(list(new_embedding))
+        else:
+            # Replace the most redundant pair or oldest non-seed
+            exemplars.pop(1 if len(exemplars) > 1 else 0)
+            exemplars.append(list(new_embedding))
+    elif len(exemplars) < max_exemplars:
+        exemplars.append(list(new_embedding))
+    return exemplars
 
 
 @dataclass

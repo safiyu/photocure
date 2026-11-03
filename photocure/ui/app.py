@@ -109,6 +109,7 @@ class BulkDeletePeopleReq(BaseModel):
 class ReassignFaceReq(BaseModel):
     person_id: int | None = None
     new_name: str | None = None
+    separate: bool = False
 
 
 class PlanReq(BaseModel):
@@ -2035,10 +2036,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.post("/api/faces/{face_id}/reassign", dependencies=auth)
     def reassign_face_endpoint(face_id: int, body: ReassignFaceReq):
-        """Move one face to a different (or brand-new) person."""
+        """Move one face to a different (or brand-new) person, or separate into its own person."""
         from ..people_actions import ActionError, reassign_face
         try:
-            return reassign_face(dbp, face_id, person_id=body.person_id, new_name=body.new_name)
+            return reassign_face(dbp, face_id, person_id=body.person_id,
+                                 new_name=body.new_name, separate=body.separate)
         except ActionError as e:
             raise HTTPException(e.status, str(e)) from None
 
