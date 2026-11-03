@@ -49,6 +49,7 @@
   --err-soft: #fee2e2;
   --scrim: rgba(15, 23, 42, 0.55);
   --shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
+  --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.08);
 
   --r-sm: 8px;
   --r-lg: 14px;
@@ -5163,22 +5164,22 @@ button.pcur-hist, button.pcur-tool, button.chip, button.pcur-fil, button.pcur-st
 .storage-seg {
   height: 100%; transition: width var(--mo-std) var(--ease-soft);
 }
-.seg-keepers { background: var(--ok, #10b981); }
-.seg-bursts { background: #3b82f6; }
-.seg-dupes { background: #f59e0b; }
-.seg-junk { background: var(--err, #ef4444); }
-.seg-util { background: #8b5cf6; }
+.seg-keepers { background: var(--ok); }
+.seg-bursts { background: var(--primary); }
+.seg-dupes { background: var(--commit); }
+.seg-junk { background: var(--err); }
+.seg-util { background: var(--c-utility); }
 
 .storage-legend {
   display: flex; flex-wrap: wrap; gap: 18px; font-size: 13px; color: var(--mut);
 }
 .leg-item { display: inline-flex; align-items: center; gap: 6px; }
 .leg-item b { color: var(--ink); font-weight: 700; margin-left: 2px; }
-.dot-keepers { background: var(--ok, #10b981) !important; }
-.dot-bursts { background: #3b82f6 !important; }
-.dot-dupes { background: #f59e0b !important; }
-.dot-junk { background: var(--err, #ef4444) !important; }
-.dot-util { background: #8b5cf6 !important; }
+.dot-keepers { background: var(--ok) !important; }
+.dot-bursts { background: var(--primary) !important; }
+.dot-dupes { background: var(--commit) !important; }
+.dot-junk { background: var(--err) !important; }
+.dot-util { background: var(--c-utility) !important; }
 
 .insights-columns {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;
