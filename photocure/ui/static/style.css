@@ -5041,9 +5041,9 @@ button.pcur-hist, button.pcur-tool, button.chip, button.pcur-fil, button.pcur-st
 .pcur-cg-foot .btn.primary:hover { background: var(--primary-hover); }
 .pcur-cg-foot .btn.secondary { background: var(--well); border-color: var(--line); color: var(--ink); }
 
-/* busy state (shared by editor + collage buttons) */
-.btn.busy { opacity: .65; pointer-events: none; position: relative; }
-.btn.busy::after {
+/* busy state inside photo editor & collage builder */
+.pcur-ed .btn.busy, .pcur-cg .btn.busy { opacity: .65; pointer-events: none; position: relative; }
+.pcur-ed .btn.busy::after, .pcur-cg .btn.busy::after {
   content: ""; position: absolute; inset: -2px; margin: auto; width: 13px; height: 13px;
   border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
   animation: pcur-spin .8s linear infinite;
