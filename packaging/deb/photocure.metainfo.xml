@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="3.0.0" type="stable" date="2026-11-04">
+      <description>
+        <p>Photocure release 3.0.0: AuraFace-v1 face recognition (512-dim ArcFace embeddings) with canonical 112x112 affine alignment, chronological medoid chaining across years, co-occurrence sibling protection, and configurable fast-faces fallback.</p>
+      </description>
+    </release>
     <release version="2.2.0" type="stable" date="2026-11-03">
       <description>
         <p>Photocure release 2.2.0: Synchronized 1:1 Loupe in burst review, Live Photo companion video pairing, Google Takeout JSON sidecar ingest, multi-camera clock drift sync, Target Keeper Budget culling, Library Insights disk space analytics, and post-apply webhook triggers.</p>
