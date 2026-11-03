@@ -61,6 +61,7 @@ class BurstInput:
     taken_at_source: str = ""
     # A screen, page or flat graphic: only the tightest tier may group it.
     flat_content: bool = False
+    filename: str = ""
 
 
 class _UnionFind:
@@ -173,7 +174,10 @@ class BurstDetector:
         for members in groups:
             if len(members) < self.t.min_group_size:
                 continue
-            member_items = sorted(members, key=lambda gi: _ts(items[gi].taken_at) or 0.0)
+            member_items = sorted(
+                members,
+                key=lambda gi: (_ts(items[gi].taken_at) or 0.0, items[gi].filename or str(items[gi].image_id))
+            )
             result.append([items[gi].image_id for gi in member_items])
         return result
 
@@ -332,6 +336,7 @@ class BurstDetector:
                 sharpness_norm=sharp,
                 taken_at_source=r.taken_at_source or "",
                 flat_content=flat,
+                filename=getattr(r, "filename", "") or "",
             ))
         groups = self.cluster(inputs)
         return [BurstGroupResult(image_ids) for image_ids in groups]

@@ -2756,9 +2756,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     members = [by_id[m] for m in res.image_ids if m in by_id]
                     if len(members) < c.burst.min_group_size:
                         continue
+                    # RAW+JPEG safeguard: single shutter click in multiple formats is not a multi-shot burst
+                    stems = {Path(m.filename).stem.lower() for m in members if getattr(m, "filename", None)}
+                    if len(stems) < 2:
+                        continue
                     kept = [m.id for m in members if m.id in old_best]
                     best_id = kept[0] if len(kept) == 1 else sel.pick_best_shot(
                         [_candidate_from_record(m) for m in members]).image_id
+                    best_rec = by_id.get(best_id)
+                    winning_stem = Path(best_rec.filename).stem.lower() if (best_rec and best_rec.filename) else ""
                     earliest = min(members, key=lambda m: (m.taken_at is None,
                                                            m.taken_at or epoch))
                     stamp = (earliest.taken_at.strftime("%Y%m%d")
@@ -2773,8 +2779,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     ))
                     for m in members:
                         m.burst_id = bg.id
+                        m_stem = Path(m.filename).stem.lower() if m.filename else ""
+                        is_win_click = (m.id == best_id) or (winning_stem and m_stem == winning_stem)
                         m.is_best_shot = (m.id == best_id)
-                        m.is_alternate = (m.id != best_id)
+                        m.is_alternate = not is_win_click
                     n += 1
                     seq += 1
                 s.commit()

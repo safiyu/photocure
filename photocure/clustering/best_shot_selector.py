@@ -44,6 +44,8 @@ class ShotCandidate:
     width: int = 0
     height: int = 0
     has_face: bool = False
+    is_too_dark: bool = False
+    is_overexposed: bool = False
     # Tie-breakers / diagnostics.
     taken_ts: float = 0.0
     confidence: float = 0.0
@@ -113,9 +115,11 @@ class BestShotSelector:
         total_w = sum(wt for wt, _ in terms)
         composite = sum(wt * v for wt, v in terms) / total_w if total_w > 0 else 0.0
         penalty = min(w.blink_penalty * max(0, c.blink_count), w.blink_penalty_max)
-        composite -= penalty
+        exposure_penalty = 0.08 if (c.is_too_dark or c.is_overexposed) else 0.0
+        composite -= (penalty + exposure_penalty)
         breakdown = {
             "blink_penalty": float(penalty),
+            "exposure_penalty": float(exposure_penalty),
             "blur": s_blur, "face": s_face,
             "eye": s_eye if s_eye is not None else 0.0,
             "eye_known": s_eye is not None,
@@ -184,6 +188,8 @@ def _candidate_from_record(rec, face_min: float = 0.65, face_sharp_ref: float = 
     has_face = best_face is not None and best_face.confidence > face_min
     sem = getattr(rec, "semantic", None)
     aesthetic = getattr(sem, "aesthetic", None) if sem is not None else None
+    is_dark = bool(getattr(q, "is_too_dark", False)) if q is not None else False
+    is_over = bool(getattr(q, "is_overexposed", False)) if q is not None else False
     ts = 0.0
     if rec.taken_at is not None:
         taken = rec.taken_at
@@ -201,6 +207,8 @@ def _candidate_from_record(rec, face_min: float = 0.65, face_sharp_ref: float = 
         width=rec.width,
         height=rec.height,
         has_face=has_face,
+        is_too_dark=is_dark,
+        is_overexposed=is_over,
         taken_ts=ts,
         confidence=best_conf if has_face else 0.0,
         aesthetic=aesthetic,

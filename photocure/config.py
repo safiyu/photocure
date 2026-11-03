@@ -129,7 +129,7 @@ class BurstThresholds(BaseSettings):
     near_window_seconds: int = 600
     near_similarity_threshold: float = 0.89
     far_window_seconds: int = 10800
-    far_similarity_threshold: float = 0.89
+    far_similarity_threshold: float = 0.90
     # Joining two groups across a looser tier needs every cross pair at least this alike.
     loose_floor: float = 0.87
     # Photos with no trustworthy capture time (chat apps and downloads strip it) are grouped on

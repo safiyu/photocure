@@ -507,3 +507,91 @@ def test_candidate_carries_unknown_eye_and_aesthetic(cfg):
 def test_eye_open_score_unknown_is_none(cfg):
     from photocure.clustering.best_shot_selector import _eye_open_score
     assert _eye_open_score(None, cfg.burst) is None
+
+
+def test_exif_subsecond_parsing():
+    from photocure.scanner.exif_reader import _parse_subsec
+    assert _parse_subsec("42") == 420000
+    assert _parse_subsec("8") == 800000
+    assert _parse_subsec("042") == 42000
+    assert _parse_subsec("1234567") == 123456
+    assert _parse_subsec("") == 0
+    assert _parse_subsec("abc") == 0
+
+
+def test_aeb_exposure_penalty_in_best_shot(cfg):
+    from photocure.clustering.best_shot_selector import BestShotSelector, ShotCandidate
+    sel = BestShotSelector(cfg)
+    # Two identical frames in sharpness, but one is underexposed from AEB
+    balanced = ShotCandidate(image_id=1, sharpness_norm=0.7, width=1000, height=800, is_too_dark=False)
+    dark_aeb = ShotCandidate(image_id=2, sharpness_norm=0.72, width=1000, height=800, is_too_dark=True)
+    score_bal, br_bal = sel.score(balanced)
+    score_dark, br_dark = sel.score(dark_aeb)
+    assert br_dark["exposure_penalty"] == pytest.approx(0.08)
+    assert br_bal["exposure_penalty"] == 0.0
+    # Balanced exposure wins over slightly sharper underexposed bracket frame
+    assert sel.pick_best_shot([balanced, dark_aeb]).image_id == 1
+
+
+def test_raw_jpeg_pair_burst_safety(tmp_path, cfg):
+    from datetime import timezone
+    from photocure.services import Planner
+    from photocure.db.session import init_db, get_session
+    from photocure.db.models import ImageRecord, SemanticScore, QualityMetric
+    from photocure.db.repository import quantize_embedding
+
+    db_path = tmp_path / "raw_jpeg.db"
+    init_db(db_path, drop=True)
+
+    t0 = datetime(2023, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+    with get_session(db_path) as s:
+        # Scenario 1: single click captured in RAW+JPEG -> DSC0001.ARW + DSC0001.JPG
+        r1 = ImageRecord(path="/lib/DSC0001.JPG", filename="DSC0001.JPG", taken_at=t0,
+                         quick_hash="q1", sha256="s1", infer_status="inferred", stage="new")
+        r2 = ImageRecord(path="/lib/DSC0001.ARW", filename="DSC0001.ARW", taken_at=t0,
+                         quick_hash="q2", sha256="s2", infer_status="inferred", stage="new")
+        s.add_all([r1, r2])
+        s.commit()
+        s.refresh(r1)
+        s.refresh(r2)
+
+        # Same embedding for both
+        emb = quantize_embedding([0.1] * 512)
+        s.add_all([SemanticScore(image_id=r1.id, embedding=emb), SemanticScore(image_id=r2.id, embedding=emb)])
+        s.add_all([QualityMetric(image_id=r1.id, sharpness_norm=0.8), QualityMetric(image_id=r2.id, sharpness_norm=0.8)])
+        s.commit()
+
+        planner = Planner(cfg, db_path=db_path)
+        count = planner.cluster()
+        # Single click RAW+JPEG must NOT form a 1-shot burst
+        assert count == 0
+
+        # Scenario 2: True 2-frame burst where each frame has RAW+JPEG
+        t1 = t0 + timedelta(seconds=1)
+        r3 = ImageRecord(path="/lib/DSC0002.JPG", filename="DSC0002.JPG", taken_at=t1,
+                         quick_hash="q3", sha256="s3", infer_status="inferred", stage="new")
+        r4 = ImageRecord(path="/lib/DSC0002.ARW", filename="DSC0002.ARW", taken_at=t1,
+                         quick_hash="q4", sha256="s4", infer_status="inferred", stage="new")
+        s.add_all([r3, r4])
+        s.commit()
+        s.refresh(r3)
+        s.refresh(r4)
+        s.add_all([SemanticScore(image_id=r3.id, embedding=emb), SemanticScore(image_id=r4.id, embedding=emb)])
+        # Make DSC0002 sharper so it wins
+        s.add_all([QualityMetric(image_id=r3.id, sharpness_norm=0.95), QualityMetric(image_id=r4.id, sharpness_norm=0.95)])
+        s.commit()
+
+        count2 = planner.cluster()
+        assert count2 == 1
+
+        # Check that both DSC0002.JPG (best shot) and DSC0002.ARW (companion RAW) are kept (not alternates!)
+        s.refresh(r1)
+        s.refresh(r2)
+        s.refresh(r3)
+        s.refresh(r4)
+        assert (r3.is_best_shot or r4.is_best_shot) is True
+        assert r3.is_alternate is False
+        assert r4.is_alternate is False  # Companion RAW is NOT an alternate!
+        assert r1.is_alternate is True   # Non-winning frame alternates
+        assert r2.is_alternate is True
+

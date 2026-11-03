@@ -135,7 +135,7 @@ def read_takeout_sidecar(path: Path | str) -> dict | None:
         ptt = data.get("photoTakenTime") or data.get("creationTime")
         if isinstance(ptt, dict) and ptt.get("timestamp"):
             try:
-                ts = int(ptt["timestamp"])
+                ts = float(ptt["timestamp"])
                 if ts > 0:
                     utc_dt = dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc)
                     local_dt = utc_dt.astimezone()
@@ -267,12 +267,22 @@ def _gps_from_pil(gps_ifd) -> tuple[float, float] | None:
     return (lat_v, lon_v) if _valid_gps(lat_v, lon_v) else None
 
 
-# (Pillow tag, exifread key, source label, Pillow offset tag, exifread offset key)
+# (Pillow tag, exifread key, source label, Pillow offset tag, exifread offset key, Pillow subsec tag, exifread subsec key)
 _DATE_TAGS = (
-    (36867, "EXIF DateTimeOriginal", "exif:dtoriginal", 36881, "EXIF OffsetTimeOriginal"),
-    (36868, "EXIF DateTimeDigitized", "exif:create", 36882, "EXIF OffsetTimeDigitized"),
-    (306, "Image DateTime", "exif:create", 36880, "EXIF OffsetTime"),
+    (36867, "EXIF DateTimeOriginal", "exif:dtoriginal", 36881, "EXIF OffsetTimeOriginal", 37521, "EXIF SubSecTimeOriginal"),
+    (36868, "EXIF DateTimeDigitized", "exif:create", 36882, "EXIF OffsetTimeDigitized", 37522, "EXIF SubSecTimeDigitized"),
+    (306, "Image DateTime", "exif:create", 36880, "EXIF OffsetTime", 37520, "EXIF SubSecTime"),
 )
+
+
+def _parse_subsec(val: object) -> int:
+    """Parse EXIF subsecond string to microseconds (0..999999)."""
+    if val is None:
+        return 0
+    s = str(val).strip().rstrip("\x00")
+    if not s or not s.isdigit():
+        return 0
+    return int(s[:6].ljust(6, "0"))
 
 
 class ExifReader:
@@ -327,9 +337,12 @@ class ExifReader:
         any_offset = _parse_offset(exif_tags.get(36881))
         if any_offset is None:
             any_offset = _parse_offset(exif_tags.get(36880))
-        for p_tag, _k, source, p_off, _ko in _DATE_TAGS:
+        for p_tag, _k, source, p_off, _ko, p_sub, _ks in _DATE_TAGS:
             d = _parse_exif_date(exif_tags.get(p_tag))
             if d:
+                subsec = _parse_subsec(exif_tags.get(p_sub))
+                if subsec:
+                    d = d.replace(microsecond=subsec)
                 info.taken_at, info.taken_at_source = d, source
                 off = _parse_offset(exif_tags.get(p_off))
                 info.tz_offset_minutes = off if off is not None else any_offset
@@ -340,10 +353,14 @@ class ExifReader:
             try:
                 with open(path, "rb") as f:
                     raw_tags = exifread.process_file(f, details=False)
-                for _p, key, source, _po, off_key in _DATE_TAGS:
+                for _p, key, source, _po, off_key, _ps, sub_key in _DATE_TAGS:
                     tag = raw_tags.get(key)
                     d = _parse_exif_date(str(tag)) if tag else None
                     if d:
+                        sub_tag = raw_tags.get(sub_key)
+                        subsec = _parse_subsec(str(sub_tag)) if sub_tag else 0
+                        if subsec:
+                            d = d.replace(microsecond=subsec)
                         info.taken_at, info.taken_at_source = d, source
                         off = _parse_offset(str(raw_tags[off_key])) \
                             if raw_tags.get(off_key) else None

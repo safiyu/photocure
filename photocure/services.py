@@ -329,6 +329,11 @@ class Planner:
         for res in burst_results:
             members = [by_id[m] for m in res.image_ids if m in by_id]
             if len(members) >= self.cfg.burst.min_group_size:
+                # RAW+JPEG safeguard: if all members in the group share the same base stem,
+                # it is a single shutter click in multiple formats, not a multi-shot burst.
+                stems = {Path(m.filename).stem.lower() for m in members if getattr(m, "filename", None)}
+                if len(stems) < 2:
+                    continue
                 groups.append(members)
         # Blinks are judged per burst (a subject's own frames set their baseline) before the
         # best shot is chosen, so the selector sees the closed-eye counts.
@@ -339,6 +344,8 @@ class Planner:
                 [_candidate_from_record(m, self.cfg.taxonomy.face_confidence_min,
                                         self.cfg.burst.face_sharp_ref)
                  for m in members]).image_id
+            best_rec = by_id.get(best_id)
+            winning_stem = Path(best_rec.filename).stem.lower() if (best_rec and best_rec.filename) else ""
             earliest = min(members, key=lambda m: (m.taken_at is None,
                                                    m.taken_at or _EPOCH))
             stamp = earliest.taken_at.strftime("%Y%m%d") if earliest.taken_at \
@@ -353,8 +360,10 @@ class Planner:
             burst_count += 1
             for m in members:
                 m.burst_id = bg.id
-                m.is_best_shot = m.id == best_id
-                m.is_alternate = m.id != best_id
+                m_stem = Path(m.filename).stem.lower() if m.filename else ""
+                is_win_click = (m.id == best_id) or (winning_stem and m_stem == winning_stem)
+                m.is_best_shot = (m.id == best_id)
+                m.is_alternate = not is_win_click
         return burst_count
 
     # ---------------------------------------------------------------- plan
