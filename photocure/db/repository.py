@@ -589,9 +589,70 @@ class PhotoRepository:
         return d / f"{image_id:09d}.jpg"
 
     # -------------------------------------------------------- clear / reset
-    def clear_library(self, keep_ledger: bool = False) -> dict[str, int]:
-        """Wipe all indexed records, clusters, plans, and optionally ledger entries."""
+    def clear_library(self, keep_ledger: bool = False, stage: str | None = None) -> dict[str, int]:
+        """Clear indexed records, clusters, and plans.
+
+        When ``stage == 'new'``, only clears un-finalized photos in the 'new' section, leaving
+        organized Library photos, the ActionLedger, and existing People/Event clusters intact.
+        When ``stage is None``, wipes all indexed records.
+        """
         counts: dict[str, int] = {}
+
+        if stage == "new":
+            # 1. Collect all image IDs belonging to 'new' stage
+            new_ids = list(self.s.exec(
+                sselect(ImageRecord.id).where(ImageRecord.stage == "new")
+            ).all())
+
+            if not new_ids:
+                return counts
+
+            # 2. Delete child records for new images
+            for model in (SemanticScore, FaceDetection, QualityMetric, PlanActionRow):
+                res = self.s.exec(
+                    sdelete(model).where(col(model.image_id).in_(new_ids))
+                )
+                counts[model.__tablename__] = int(
+                    res.rowcount if res.rowcount is not None and res.rowcount >= 0 else 0
+                )
+
+            # 3. Delete un-applied plans
+            res = self.s.exec(sdelete(PlanRecord).where(PlanRecord.applied_transaction.is_(None)))
+            counts[PlanRecord.__tablename__] = int(
+                res.rowcount if res.rowcount is not None and res.rowcount >= 0 else 0
+            )
+
+            # 4. Delete the new ImageRecord rows themselves
+            res = self.s.exec(
+                sdelete(ImageRecord).where(col(ImageRecord.id).in_(new_ids))
+            )
+            counts[ImageRecord.__tablename__] = int(
+                res.rowcount if res.rowcount is not None and res.rowcount >= 0 else 0
+            )
+
+            # 5. Clean up any empty orphan burst groups or person clusters with 0 faces
+            orphan_bursts = list(self.s.exec(
+                sselect(BurstGroup.id)
+                .where(~col(BurstGroup.id).in_(sselect(ImageRecord.burst_id).where(ImageRecord.burst_id.isnot(None))))
+            ).all())
+            if orphan_bursts:
+                res = self.s.exec(sdelete(BurstGroup).where(col(BurstGroup.id).in_(orphan_bursts)))
+                counts["burst_groups_pruned"] = int(res.rowcount or 0)
+
+            # Recount faces per person cluster and prune unnamed clusters with 0 faces
+            clusters = list(self.s.exec(sselect(PersonCluster)).all())
+            for c in clusters:
+                rem = self.s.exec(
+                    sselect(func.count(FaceDetection.id))
+                    .where(FaceDetection.person_id == c.id, FaceDetection.ignored == False)
+                ).one()
+                c.face_count = int(rem or 0)
+                if c.face_count <= 0 and not c.name:
+                    self.s.delete(c)
+
+            self.s.commit()
+            return counts
+
         models = [
             SemanticScore,
             FaceDetection,

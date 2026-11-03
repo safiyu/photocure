@@ -2908,31 +2908,37 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return {"ok": True, "stopping": True, "message": "Stop requested"}
 
     @app.post("/api/reset", dependencies=auth)
-    def reset_library():
+    def reset_library(body: dict | None = None, stage: Literal["new", "all"] = Query("all")):
         if hasattr(app.state, "watch") and app.state.watch is not None:
             app.state.watch.stop()
         from ..features import save_features
         save_features(dbp, {"watch_enabled": False, "watch_path": ""})
+        # If stage was specified in JSON body, respect that
+        effective_stage = (body.get("stage") if body and "stage" in body else stage)
         with exclusive():
             with get_session(dbp) as s:
                 repo = PhotoRepository(s)
-                counts = repo.clear_library(keep_ledger=False)
-            thumb_dir = cfg.cache_dir / "thumbs"
-            if thumb_dir.exists():
-                stale = [*thumb_dir.glob(f"*/{db_fp}_*.webp"), *thumb_dir.glob(f"{db_fp}_*.jpg")]
-                for th in stale:
-                    try:
-                        th.unlink(missing_ok=True)
-                    except OSError:
-                        pass
-            app.state.pii.clear()  # ids restart at 1, so old scan results would match other photos
+                # When resetting from the 'New' section, only clear unfinalized photos in stage="new"
+                # Finalized Library photos and action ledger remain completely protected and intact!
+                target_stage = "new" if effective_stage == "new" else None
+                counts = repo.clear_library(keep_ledger=bool(target_stage), stage=target_stage)
+            if effective_stage == "all":
+                thumb_dir = cfg.cache_dir / "thumbs"
+                if thumb_dir.exists():
+                    stale = [*thumb_dir.glob(f"*/{db_fp}_*.webp"), *thumb_dir.glob(f"{db_fp}_*.jpg")]
+                    for th in stale:
+                        try:
+                            th.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                app.state.pii.clear()
             app.state.last_analyzed_ids = set()
             progress_mgr.reset()
             # The library files stay on disk but no row knows them; forgetting the folder lets the
             # first-run popup ask again, and the old folder can then be scanned like any other.
             from ..library import library_root_source
             from ..services import save_settings
-            cleared = library_root_source(dbp, app.state.cfg) == "settings"
+            cleared = (effective_stage == "all") and (library_root_source(dbp, app.state.cfg) == "settings")
             if cleared:
                 save_settings(dbp, {"library_root": None}, force=True)
             return {"ok": True, "deleted": counts, "library_root_cleared": cleared}

@@ -7011,10 +7011,15 @@
   }
 
   async function resetLibrary() {
+    const isFullReset = state.tab === "settings";
     const okReset = await showConfirmDialog({
-      title: "Clear the indexed library?",
-      message: "This removes every indexed photo, AI analysis, burst and plan from the Photocure database. Your original photo files are not deleted or modified. A library folder chosen in the app is forgotten too (its files stay on disk), so you will be asked for one again.",
-      confirmText: "Clear library", variant: "danger" });
+      title: isFullReset ? "Reset everything?" : "Clear New queue?",
+      message: isFullReset
+        ? "This removes all indexed photos across New and Library sections, clusters, and plans from the database. Your photo files on disk are never deleted."
+        : "This only removes unfinalized photos in the New section and clears pending analysis. All photos in your finalized Library remain completely safe and untouched.",
+      confirmText: isFullReset ? "Reset everything" : "Clear New section",
+      variant: "danger",
+    });
     if (!okReset) return;
     const btns = [$("#btn-reset-library"), $("#btn-import-reset")];
     const saved = btns.map((b) => b && b.innerHTML);
@@ -7025,11 +7030,11 @@
       }
     });
     try {
-      const resetRes = await post("/api/reset");
-      toast("Library cleared successfully", "ok");
-      libLog("Library cleared: all indexed images and metadata removed.", "warn");
+      const resetRes = isFullReset ? await post("/api/reset") : await post("/api/reset?stage=new");
+      toast(isFullReset ? "Library cleared successfully" : "New queue cleared successfully", "ok");
+      libLog(isFullReset ? "Library reset: all indexed photos removed." : "New queue reset: unfinalized photos removed, Library preserved.", "warn");
       const pathInput = $("#scan-path");
-      if (pathInput) {
+      if (pathInput && isFullReset) {
         pathInput.value = "";
         if (window.__syncScanPathDisplay) window.__syncScanPathDisplay();
       }
@@ -7044,7 +7049,7 @@
       await refreshSettings(true);
       if (resetRes && resetRes.library_root_cleared) maybeFirstRun();  // the folder was forgotten: ask again
     } catch (e) {
-      toast("Failed to reset library: " + e.message, "err");
+      toast("Failed to reset: " + e.message, "err");
     } finally {
       btns.forEach((b, i) => {
         if (b) {
