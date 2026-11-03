@@ -51,6 +51,24 @@ class FaceInfo:
         return max(0.0, self.y2 - self.y1)
 
 
+ARCFACE_REF_5PTS = np.array([
+    [38.2946, 51.6963],
+    [73.5318, 51.5014],
+    [56.0252, 71.7366],
+    [41.5493, 92.3655],
+    [70.7299, 92.2041],
+], dtype=np.float32)
+
+
+def align_face_112(bgr: np.ndarray, landmarks_px: Sequence[tuple[float, float]]) -> np.ndarray:
+    """Align and crop face to standard ArcFace 112x112 using 5 facial landmarks."""
+    dst = np.array(landmarks_px, dtype=np.float32)
+    M, _ = cv2.estimateAffinePartial2D(dst, ARCFACE_REF_5PTS)
+    if M is None:
+        return cv2.resize(bgr, (112, 112))
+    return cv2.warpAffine(bgr, M, (112, 112), borderValue=0.0)
+
+
 def crop_face(bgr: np.ndarray, box: tuple[float, float, float, float], margin: float) -> np.ndarray:
     """Crop a normalized box from ``bgr`` with ``margin`` (a fraction of the box size) on each side."""
     h, w = bgr.shape[:2]
@@ -163,6 +181,8 @@ class FaceEngine:
             except Exception:
                 pass
         self._yunet = self._landmarker = self._recognizer = None
+        if hasattr(self, "_aura_sess"):
+            self._aura_sess = None
         self._landmarker_failed = False
         self._recognizer_failed = False
         empty_cuda_cache(self.bs)
@@ -240,6 +260,27 @@ class FaceEngine:
     def _ensure_recognizer_loaded(self):
         if self._recognizer is not None or self._recognizer_failed:
             return self._recognizer
+        # Check cpu_light preference or explicit model choice
+        face_model_pref = getattr(self.cfg.face, "model", "auto")
+        cpu_light = getattr(self.cfg.face, "cpu_light", False)
+        prefer_sface = (face_model_pref == "sface") or (cpu_light and getattr(self.bs, "device", "cpu") == "cpu")
+
+        if not prefer_sface:
+            aura_path = models.model_path(models.AURAFACE)
+            if aura_path is not None and aura_path.is_file():
+                try:
+                    import onnxruntime as ort
+                    providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if getattr(self.bs, "device", "cpu") == "cuda" else ["CPUExecutionProvider"]
+                    avail = ort.get_available_providers()
+                    providers = [p for p in providers if p in avail]
+                    self._aura_sess = ort.InferenceSession(str(aura_path), providers=providers)
+                    self._recognizer = "auraface"
+                    log.info("Using AuraFace v1 (512-dim ArcFace) for face recognition")
+                    return self._recognizer
+                except Exception as e:
+                    log.warning("Could not load AuraFace (%s); falling back to SFace", e)
+
+        # 2. Bundled SFace (128-dim) fallback
         path = models.model_path(models.SFACE)
         if path is None or not hasattr(cv2, "FaceRecognizerSF"):
             self._recognizer_failed = True
@@ -257,17 +298,33 @@ class FaceEngine:
         H, W = full_bgr.shape[:2]
         # Clear blur measures under ~10% of the "fully sharp" reference (30 of 300).
         min_sharp = 0.1 * self.cfg.burst.face_sharp_ref
+        min_emb_px = getattr(self.cfg.face, "min_embedding_px", 48)
         for face in faces:
+            # Quality & size gate before embedding: don't run heavy ResNet-100 on tiny background faces (< 48px)
+            if min(face.w * W, face.h * H) < min_emb_px:
+                continue
             # None: too small (analyze_faces said so); below min_sharp: blurred, would seed junk clusters.
             if face.face_sharpness is None or face.face_sharpness < min_sharp:
                 continue
-            x, y = face.x1 * W, face.y1 * H
-            w, h = face.w * W, face.h * H
-            landmarks_px = [c for lx, ly in face.landmarks for c in (lx * W, ly * H)]
-            row = np.array([[x, y, w, h, *landmarks_px, face.confidence]], dtype=np.float32)
-            aligned = recognizer.alignCrop(full_bgr, row)
-            feature = recognizer.feature(aligned)
-            face.embedding = feature.flatten().tolist()
+            if recognizer == "auraface":
+                landmarks_px = [(lx * W, ly * H) for lx, ly in face.landmarks]
+                aligned = align_face_112(full_bgr, landmarks_px)
+                rgb = cv2.cvtColor(aligned, cv2.COLOR_BGR2RGB).astype(np.float32)
+                blob = (rgb - 127.5) / 127.5
+                blob = np.transpose(blob, (2, 0, 1))[np.newaxis, ...]
+                feature = self._aura_sess.run(None, {"data": blob})[0][0]
+                norm = float(np.linalg.norm(feature))
+                if norm > 1e-6:
+                    feature = feature / norm
+                face.embedding = feature.tolist()
+            else:
+                x, y = face.x1 * W, face.y1 * H
+                w, h = face.w * W, face.h * H
+                landmarks_px = [c for lx, ly in face.landmarks for c in (lx * W, ly * H)]
+                row = np.array([[x, y, w, h, *landmarks_px, face.confidence]], dtype=np.float32)
+                aligned = recognizer.alignCrop(full_bgr, row)
+                feature = recognizer.feature(aligned)
+                face.embedding = feature.flatten().tolist()
 
     def _eye_closed_score(self, crop: np.ndarray) -> float | None:
         lm = self._load_landmarker()

@@ -41,6 +41,7 @@ from ..clustering.face_identity import (
     assign_cluster,
     remap_person_ids,
     update_centroid,
+    update_temporal_medoid,
 )
 from ..config import CuratorConfig
 from ..db.models import (
@@ -416,8 +417,21 @@ class InferencePipeline:
         chunks = [c[i:i + cap] for c in chunks for i in range(0, len(c), cap)]
         # Loaded once so a cluster created or grown earlier in this run is visible to later
         # images, without re-reading every centroid from the DB on each face.
+        cluster_images: dict[int, set[int]] = {}
+        try:
+            for p_id, img_id in repo.s.exec(
+                sselect(FaceDetection.person_id, FaceDetection.image_id).where(FaceDetection.person_id.is_not(None))
+            ).all():
+                cluster_images.setdefault(p_id, set()).add(img_id)
+        except Exception:
+            pass
         centroids: dict[int, ClusterCentroid] = {
-            c.id: ClusterCentroid(c.id, dequantize_embedding(c.centroid_json) or [], c.face_count)
+            c.id: ClusterCentroid(
+                c.id,
+                dequantize_embedding(c.centroid_json) or [],
+                c.face_count,
+                image_ids=cluster_images.get(c.id, set()),
+            )
             for c in repo.all_person_clusters()
             if c.centroid_json and c.face_count > 0 and c.stage == self._cluster_stage
         }
@@ -483,7 +497,8 @@ class InferencePipeline:
                             active_faces = [f for f, ign in zip(faces, ignored_flags) if not ign]
                             if emb_ok:
                                 active_pids = self._assign_people(
-                                    repo, centroids, fr.image_id, active_faces, undo)
+                                    repo, centroids, fr.image_id, active_faces, undo,
+                                    taken_at=getattr(rec, "taken_at", None))
                             else:
                                 active_pids = self._keep_people(repo, fr.image_id, active_faces)
 
@@ -693,7 +708,8 @@ class InferencePipeline:
 
     def _assign_people(self, repo: PhotoRepository, centroids: dict[int, ClusterCentroid],
                        image_id: int, faces: Sequence,
-                       undo: _PeopleUndo | None = None) -> list[int | None]:
+                       undo: _PeopleUndo | None = None,
+                       taken_at: datetime | None = None) -> list[int | None]:
         """Resolve a person for each face (same order as ``faces``), mutating ``centroids``.
 
         A face that remaps to one of this same photo's previous faces keeps that person's
@@ -719,6 +735,7 @@ class InferencePipeline:
         result: list[int | None] = [None] * len(faces)
         claimed_in_image: set[int] = set()
         resolved_person_ids: set[int] = set()
+        time_bucket = str(taken_at.year) if taken_at and hasattr(taken_at, "year") else None
         # Faces that continue an earlier identity are resolved first, so a face that merely clusters
         # nearby cannot take that person and push the true continuation onto someone else.
         for i in sorted(range(len(faces)), key=lambda k: 0 if k in remap else 1):
@@ -731,7 +748,8 @@ class InferencePipeline:
             else:
                 while True:
                     candidates = [c for c in centroids.values() if c.person_id not in claimed_in_image]
-                    pid = assign_cluster(f.embedding, candidates, self.cfg.face.cluster_join_threshold)
+                    pid = assign_cluster(f.embedding, candidates, self.cfg.face.cluster_join_threshold,
+                                         image_id=image_id, time_bucket=time_bucket)
                     # A cluster merged or deleted mid-run is dropped from the cache and skipped.
                     if pid is None or self._live_cluster(repo, centroids, pid) is not None:
                         break
@@ -739,7 +757,10 @@ class InferencePipeline:
                     created = repo.create_person_cluster(f.embedding, stage=self._cluster_stage)
                     pid = created.id
                     undo.created.append(pid)
-                    centroids[pid] = ClusterCentroid(pid, list(f.embedding), 1)
+                    meds = {time_bucket: list(f.embedding)} if time_bucket else {}
+                    centroids[pid] = ClusterCentroid(pid, list(f.embedding), 1,
+                                                     temporal_medoids=meds,
+                                                     image_ids={image_id})
                 else:
                     c = centroids[pid]
                     undo.restore.setdefault(pid, (c.centroid, c.face_count))
@@ -749,7 +770,11 @@ class InferencePipeline:
                     # second one. Only a person new to this photo grows the cluster.
                     new_count = c.face_count if pid in old_person_ids else c.face_count + 1
                     repo.update_person_cluster(pid, new_centroid, new_count)
-                    centroids[pid] = ClusterCentroid(pid, new_centroid, new_count)
+                    new_meds = update_temporal_medoid(c.temporal_medoids, time_bucket, f.embedding)
+                    c_imgs = (c.image_ids or set()) | {image_id}
+                    centroids[pid] = ClusterCentroid(pid, new_centroid, new_count,
+                                                     temporal_medoids=new_meds,
+                                                     image_ids=c_imgs)
             result[i] = pid
             claimed_in_image.add(pid)
             resolved_person_ids.add(pid)

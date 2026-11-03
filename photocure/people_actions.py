@@ -1,6 +1,7 @@
 """People actions: list/rename clusters and reassign a single face. Shared by the web app and MCP."""
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from sqlmodel import col, func, select
@@ -673,35 +674,60 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
         satellite_faces.sort(key=lambda item: item[0].face_sharpness or 0.0, reverse=True)
 
         def assign_face_item(f, u, allow_new_cluster: bool):
+            dim = len(u)
+            # Calibrate threshold for 512-D ArcFace vectors vs 128-D SFace
+            base_thresh = min(threshold, 0.38) if dim >= 512 and threshold >= 0.50 else threshold
+            diversity_thresh = 0.78 if dim >= 512 else 0.88
+
             best_c = None
-            best_sim = threshold
+            best_sim = base_thresh
             f_meta = img_info.get(f.image_id, {})
             f_burst = f_meta.get("burst_id")
             f_ts = f_meta.get("timestamp")
+            f_year = str(datetime.fromtimestamp(f_ts).year) if f_ts else None
 
             for c in clusters:
+                # 1. Co-occurrence Veto (cannot-link constraint): siblings in same photo NEVER merge
                 if f.image_id in c["image_ids"]:
-                    continue  # Can never have the same person twice in the same photo
+                    continue
 
-                # Multi-exemplar matching: max similarity against centroid or exemplars
+                # 2. Score against mean centroid
                 sim = float(np.dot(u, c["centroid"]))
+
+                # 3. Multi-exemplar matching
                 for ex in c.get("exemplars", []):
                     ex_sim = float(np.dot(u, ex))
                     if ex_sim > sim:
                         sim = ex_sim
 
-                # Burst & temporal co-occurrence boost
+                # 4. Chronological medoid chaining (growth bridging across years)
+                c_medoids = c.setdefault("yearly_medoids", {})
+                if f_year and c_medoids:
+                    for y_key in [f_year, str(int(f_year) - 1), str(int(f_year) + 1)]:
+                        if y_key in c_medoids:
+                            med_sim = float(np.dot(u, c_medoids[y_key]))
+                            if med_sim > sim:
+                                sim = med_sim
+                elif c_medoids:
+                    for y_med in c_medoids.values():
+                        med_sim = float(np.dot(u, y_med))
+                        if med_sim > sim:
+                            sim = med_sim
+
+                # 5. Burst & temporal co-occurrence boost (safe under co-occurrence veto)
                 c_bursts = {img_info.get(img_id, {}).get("burst_id") for img_id in c["image_ids"]}
                 c_bursts.discard(None)
                 if f_burst and f_burst in c_bursts:
                     sim += 0.08  # Same burst bonus
                 elif f_ts is not None:
-                    # Check temporal closeness (within 120 seconds of this cluster's photos)
-                    for img_id in c["image_ids"]:
-                        ts = img_info.get(img_id, {}).get("timestamp")
-                        if ts is not None and abs(ts - f_ts) <= 120.0:
-                            sim += 0.05
-                            break
+                    # Check temporal closeness (within 180 days for child growth tolerance, or 120s burst)
+                    min_dt = min((abs(ts - f_ts) for img_id in c["image_ids"]
+                                  if (ts := img_info.get(img_id, {}).get("timestamp")) is not None), default=None)
+                    if min_dt is not None:
+                        if min_dt <= 120.0:
+                            sim += 0.06
+                        elif min_dt <= 86400 * 180:  # within 6 months
+                            sim += 0.04
 
                 if sim >= best_sim:
                     best_sim = sim
@@ -720,8 +746,17 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
                 # Update exemplars
                 exemplars = best_c.setdefault("exemplars", [])
                 if len(exemplars) < 5:
-                    if not any(float(np.dot(u, ex)) > 0.88 for ex in exemplars):
+                    if not any(float(np.dot(u, ex)) > diversity_thresh for ex in exemplars):
                         exemplars.append(u)
+                # Update chronological medoid
+                if f_year:
+                    c_meds = best_c.setdefault("yearly_medoids", {})
+                    if f_year not in c_meds:
+                        c_meds[f_year] = u
+                    else:
+                        blended = c_meds[f_year] * 0.7 + u * 0.3
+                        blended /= float(np.linalg.norm(blended))
+                        c_meds[f_year] = blended
             elif allow_new_cluster:
                 clusters.append({
                     "cluster_obj": None,

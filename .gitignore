@@ -26,6 +26,10 @@ Organized_Drive/
 # Model weights (open_clip caches)
 ~/.cache/
 *.gguf
+*.onnx
+photocure/models/*.onnx
+photocure/models/*.task
+data/
 
 # OS noise
 .DS_Store

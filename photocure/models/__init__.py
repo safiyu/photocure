@@ -14,6 +14,7 @@ MODELS_DIR = Path(__file__).resolve().parent
 YUNET = "face_detection_yunet_2023mar.onnx"
 LANDMARKER = "face_landmarker.task"
 SFACE = "face_recognition_sface_2021dec.onnx"
+AURAFACE = "auraface.onnx"
 AESTHETIC = "aesthetic_laion_sa_v1_vit_b_16.npz"
 ESPCN = "super_resolution_espcn.onnx"
 
@@ -52,6 +53,19 @@ def verify_model(name: str, models_dir: Path = MODELS_DIR) -> bool:
 
 def model_path(name: str, models_dir: Path = MODELS_DIR) -> Path | None:
     """Path of a verified model, or None."""
+    if name == AURAFACE:
+        # Check explicit environment variable or cache/container paths
+        candidates = [
+            Path(os.environ.get("PCUR_AURAFACE_PATH", "")),
+            models_dir / AURAFACE,
+            Path("/data/models/auraface.onnx"),
+            Path.home() / ".cache/photocure/models/auraface.onnx",
+            Path("/home/safiyu/Photocure/data/models/auraface.onnx"),
+        ]
+        for c in candidates:
+            if str(c) and c.is_file():
+                return c
+        return None
     return models_dir / name if verify_model(name, models_dir) else None
 
 
@@ -67,10 +81,11 @@ def downloaded_models(models_dir: Path = MODELS_DIR) -> list[dict]:
     except (OSError, ValueError):
         return []
     home = Path(os.environ.get("U2NET_HOME") or Path(os.environ.get("XDG_DATA_HOME", "~")) / ".u2net").expanduser()
+    cache_roots = [home, Path("/data/models"), Path.home() / ".cache/photocure/models", Path("/home/safiyu/Photocure/data/models")]
     found = []
     for m in entries:
         if m.get("cache_file"):
-            present = (home / m["cache_file"]).is_file()
+            present = any((r / m["cache_file"]).is_file() for r in cache_roots)
         else:
             present = bool(m.get("module")) and importlib.util.find_spec(m["module"]) is not None
         if present:

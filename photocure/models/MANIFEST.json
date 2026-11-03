@@ -44,6 +44,13 @@
   ],
   "downloaded": [
     {
+      "name": "AuraFace v1 face recognizer",
+      "purpose": "High-accuracy 512-dim ArcFace embedding model for faces across varied angles, lighting, and expressions",
+      "license": "Apache-2.0",
+      "cache_file": "auraface.onnx",
+      "upstream_url": "https://huggingface.co/fal/AuraFace-v1/resolve/main/glintr100.onnx"
+    },
+    {
       "name": "BiRefNet background removal",
       "purpose": "Cuts the subject out in the editor's Remove BG tool",
       "license": "MIT",

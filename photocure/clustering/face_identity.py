@@ -28,33 +28,88 @@ class ClusterCentroid:
     centroid: list[float]
     face_count: int
     exemplars: list[list[float]] | None = None  # Diverse member embeddings for multi-exemplar matching
+    temporal_medoids: dict[str, list[float]] | None = None  # Chronological/yearly medoid vectors
+    image_ids: set[int] | None = None  # Set of image_ids already in this cluster (co-occurrence veto)
 
 
 def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
                    threshold: float,
-                   similarity_boosts: dict[int, float] | None = None) -> int | None:
+                   similarity_boosts: dict[int, float] | None = None,
+                   image_id: int | None = None,
+                   time_bucket: str | None = None) -> int | None:
     """Id of the closest centroid/exemplars at or above ``threshold``, else ``None``.
 
     Supports:
-    - Multi-exemplar matching (checks cluster centroid and any stored diverse exemplars).
-    - Similarity boosts (e.g. temporal/burst co-occurrence bonus per cluster).
+    - Sibling Protection / Cannot-Link Veto: strictly forbids assigning if image_id is already in the cluster.
+    - Chronological Medoid Chaining: compares against adjacent yearly medoids for childhood growth bridging.
+    - Calibrated Operating Point: scales threshold from 0.55 down to 0.38 for 512-D ArcFace vectors.
     """
-    best_id, best_score = None, threshold
+    dim = len(embedding)
+    # Calibrate threshold for 512-D ArcFace vectors vs 128-D SFace
+    if dim >= 512:
+        # Standard ArcFace operating point: strangers are < 0.20, same person is > 0.38
+        eff_threshold = min(threshold, 0.38) if threshold >= 0.50 else threshold
+    else:
+        eff_threshold = threshold
+
+    best_id, best_score = None, eff_threshold
     boosts = similarity_boosts or {}
+
     for c in centroids:
-        # Score against mean centroid
+        # 1. Co-occurrence Veto (cannot-link constraint)
+        if image_id is not None and c.image_ids and image_id in c.image_ids:
+            continue
+
+        # 2. Score against mean centroid
         score = cosine(embedding, c.centroid)
-        # Multi-exemplar comparison: check closest exemplar if available
+
+        # 3. Multi-exemplar comparison
         if c.exemplars:
             for ex in c.exemplars:
                 ex_score = cosine(embedding, ex)
                 if ex_score > score:
                     score = ex_score
-        # Add potential temporal / burst / event boost
+
+        # 4. Chronological medoid chaining (yearly / developmental bucket)
+        if c.temporal_medoids:
+            if time_bucket and time_bucket in c.temporal_medoids:
+                med_score = cosine(embedding, c.temporal_medoids[time_bucket])
+                if med_score > score:
+                    score = med_score
+            else:
+                for med in c.temporal_medoids.values():
+                    med_score = cosine(embedding, med)
+                    if med_score > score:
+                        score = med_score
+
+        # 5. Add potential temporal / burst / event boost
         effective_score = score + boosts.get(c.person_id, 0.0)
         if effective_score >= best_score:
             best_id, best_score = c.person_id, effective_score
+
     return best_id
+
+
+def update_temporal_medoid(current_medoids: dict[str, list[float]] | None,
+                           time_bucket: str | None,
+                           new_embedding: list[float]) -> dict[str, list[float]]:
+    """Update or add a yearly/chronological medoid vector for a cluster."""
+    import numpy as np
+
+    if not time_bucket:
+        return current_medoids or {}
+    meds = dict(current_medoids or {})
+    if time_bucket not in meds:
+        meds[time_bucket] = list(new_embedding)
+    else:
+        old_vec = np.array(meds[time_bucket], dtype=np.float32)
+        new_vec = np.array(new_embedding, dtype=np.float32)
+        blended = old_vec * 0.7 + new_vec * 0.3
+        norm = float(np.linalg.norm(blended))
+        if norm > 1e-6:
+            blended /= norm
+        meds[time_bucket] = blended.tolist()
+    return meds
 
 
 def update_centroid(old_centroid: list[float], old_count: int,

@@ -435,6 +435,8 @@ def infer(
         help="new analyzes unfinished photos; trash redoes the trashed ones."),
     faces: bool = typer.Option(True, "--faces/--no-faces",
                                help="Find faces and blinks. --no-faces skips face analysis entirely."),
+    fast_faces: bool = typer.Option(False, "--fast-faces", "--cpu-light",
+                                    help="Use lightweight SFace recognizer instead of high-accuracy AuraFace (faster on low-power CPUs)."),
     quiet: bool = typer.Option(False, "--quiet", "-q"),
 ):
     """Analyze photos: quality, faces and what each photo shows."""
@@ -450,6 +452,9 @@ def infer(
         raise typer.Exit(2)
     cfg = _config(db)
     cfg.face.enabled = faces
+    if fast_faces:
+        cfg.face.cpu_light = True
+        cfg.face.model = "sface"
     if device:
         cfg.device.device = device
     if device_index is not None:

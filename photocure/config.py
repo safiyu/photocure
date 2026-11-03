@@ -179,6 +179,10 @@ class FaceSettings(BaseSettings):
     detect_score_min: float = 0.55     # (tune) minimum detector score (0.55 catches angled, tilted, or expressive faces)
     nms_threshold: float = 0.3         # (tune)
     max_faces: int = 200
+    # Face recognition model & performance
+    model: str = "auto"                # "auto", "auraface" (512-dim ArcFace), "sface" (128-dim lightweight)
+    cpu_light: bool = False            # When True, use lightweight SFace on CPU rather than ResNet-100
+    min_embedding_px: int = 48         # Don't embed tiny background faces (< 48px min side) with heavy ResNet-100
     # Stage 2 crops come from the full-resolution frame.
     crop_margin: float = 0.20          # (tune) margin added around the box
     min_px: int = 60                   # (tune) narrower crops get eye_status "unknown"
