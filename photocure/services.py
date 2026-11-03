@@ -80,7 +80,7 @@ def describe_backends(cfg: CuratorConfig) -> dict:
 
 # Settings store. Precedence: CLI flag > this settings file > environment > defaults.
 SETTINGS_KEYS = ("device", "device_index", "decode_workers", "torch_threads", "scan_workers",
-                 "collision_policy", "library_root", "default_operation")
+                 "collision_policy", "library_root", "default_operation", "post_apply_hook")
 COLLISION_POLICIES = ("sequence", "date_suffix", "skip")
 OPERATIONS = ("move", "copy")
 
@@ -116,6 +116,8 @@ def _validate_settings(data: dict, allow_none: bool = False) -> dict:
             out[key] = v
         elif key == "library_root":
             out[key] = str(Path(value).expanduser().resolve()) if value else None
+        elif key == "post_apply_hook":
+            out[key] = str(value).strip() if value else None
         else:
             if isinstance(value, bool):
                 raise ValueError(f"'{key}' must be a whole number.")
@@ -190,6 +192,8 @@ def apply_settings(cfg: CuratorConfig, settings: dict) -> CuratorConfig:
         new.library_root = Path(checked["library_root"]) if checked["library_root"] else None
     if "default_operation" in checked:
         new.default_operation = checked["default_operation"]
+    if "post_apply_hook" in checked:
+        new.post_apply_hook = checked["post_apply_hook"]
     return new
 
 
@@ -207,6 +211,7 @@ def effective_settings(db_path: Path | str, cfg: CuratorConfig | None = None,
         "collision_policy": base.collision_policy,
         "library_root": str(base.library_root) if base.library_root else None,
         "default_operation": base.default_operation,
+        "post_apply_hook": base.post_apply_hook,
     }
     return {
         "values": values,
@@ -622,6 +627,16 @@ class Planner:
                     plan.input_hash = fresh
             if not partial:
                 plan.applied_transaction = rep.transaction_id
+            from .engine.hooks import dispatch_post_apply_hook
+            dispatch_post_apply_hook(self.cfg.post_apply_hook, {
+                "transaction_id": rep.transaction_id,
+                "organize_root": str(plan.organize_root),
+                "executed": rep.executed,
+                "skipped": rep.skipped,
+                "failures": rep.failures,
+                "collisions": rep.collisions,
+                "duration_s": rep.duration_s,
+            })
         return rep
 
     def dry_run(self, plan: Plan | str) -> ExecutionReport:

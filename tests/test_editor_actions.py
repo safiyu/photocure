@@ -237,6 +237,11 @@ def test_api_full_and_edit_save(env):
     assert ocr_r.status_code == 200
     assert "text" in ocr_r.json()
 
+    # 5. POST /api/images/{id}/ocr (preview extraction)
+    img_ocr_r = env.client.post(f"/api/images/{iid}/ocr")
+    assert img_ocr_r.status_code == 200
+    assert "text" in img_ocr_r.json()
+
 
 def test_png_alpha_preservation(env):
     # Create RGBA PNG with semi-transparent pixels

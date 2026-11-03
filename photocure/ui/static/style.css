@@ -4820,6 +4820,35 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
   font-size: 13px; font-family: var(--font-mono); line-height: 1.5;
 }
 
+.lb-ocr-box {
+  margin: 10px 0;
+  padding: 10px 12px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 8px);
+}
+.lb-ocr-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.lb-ocr-header h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.lb-ocr-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.lb-ocr-box textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .pcur-saveback {
   position: fixed; inset: 0; z-index: 10; display: grid; place-items: center;
   background: var(--scrim);
@@ -5034,3 +5063,124 @@ button.pcur-hist, button.pcur-tool, button.chip, button.pcur-fil, button.pcur-st
 @media (prefers-reduced-motion: reduce) {
   .pcur-ed, .pcur-cg, .pcur-tool, .pcur-cg-frame { transition: none; }
 }
+
+/* Synchronized Burst Loupe Overlay */
+.loupe-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: var(--bg, #0d1117); display: flex; flex-direction: column;
+}
+.loupe-header {
+  height: 52px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--line, #30363d); background: var(--well, #161b22);
+}
+.loupe-title-group { display: flex; align-items: center; gap: 12px; }
+.loupe-title-group h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.loupe-count { font-size: 12px; color: var(--muted, #8b949e); }
+.loupe-controls { display: flex; align-items: center; gap: 8px; }
+.loupe-body {
+  flex: 1; display: grid; gap: 8px; padding: 8px; overflow: hidden; background: #000;
+}
+.loupe-grid-1 { grid-template-columns: 1fr; }
+.loupe-grid-2 { grid-template-columns: 1fr 1fr; }
+.loupe-grid-3 { grid-template-columns: 1fr 1fr 1fr; }
+.loupe-grid-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.loupe-pane {
+  position: relative; display: flex; flex-direction: column;
+  background: #111; border: 1px solid #222; border-radius: 6px; overflow: hidden;
+}
+.loupe-pane-bar {
+  position: absolute; top: 8px; left: 8px; right: 8px; z-index: 10;
+  display: flex; align-items: center; justify-content: space-between; pointer-events: none;
+}
+.loupe-pane-bar > * { pointer-events: auto; }
+.loupe-pane-info {
+  display: flex; gap: 6px; align-items: center; background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px); padding: 4px 8px; border-radius: 4px; font-size: 12px; color: #fff;
+}
+.loupe-viewport {
+  flex: 1; width: 100%; height: 100%; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  cursor: grab; user-select: none;
+}
+.loupe-viewport.is-dragging { cursor: grabbing; }
+.loupe-img {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+  transform-origin: center center; will-change: transform; pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   INSIGHTS & TARGET KEEPER BUDGET
+   -------------------------------------------------------------------------- */
+.insights-container {
+  display: flex; flex-direction: column; gap: 24px; padding: 24px; max-width: 1200px; margin: 0 auto;
+}
+.insights-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px;
+}
+.insight-card {
+  display: flex; flex-direction: column; gap: 6px; padding: 18px 20px;
+  background: var(--sheet); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+.insight-card.highlight {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--line));
+  background: color-mix(in srgb, var(--primary) 6%, var(--sheet));
+}
+.insight-label {
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--mut);
+}
+.insight-value {
+  font-size: 26px; font-weight: 800; color: var(--ink); line-height: 1.1;
+}
+.insight-card.highlight .insight-value {
+  color: var(--primary);
+}
+.insight-sub {
+  font-size: 13px; color: var(--mut); font-weight: 500;
+}
+
+.storage-bar {
+  display: flex; height: 28px; width: 100%; border-radius: 8px; overflow: hidden;
+  background: var(--well); margin: 12px 0 14px; border: 1px solid var(--line);
+}
+.storage-seg {
+  height: 100%; transition: width var(--mo-std) var(--ease-soft);
+}
+.seg-keepers { background: var(--ok, #10b981); }
+.seg-bursts { background: #3b82f6; }
+.seg-dupes { background: #f59e0b; }
+.seg-junk { background: var(--err, #ef4444); }
+.seg-util { background: #8b5cf6; }
+
+.storage-legend {
+  display: flex; flex-wrap: wrap; gap: 18px; font-size: 13px; color: var(--mut);
+}
+.leg-item { display: inline-flex; align-items: center; gap: 6px; }
+.leg-item b { color: var(--ink); font-weight: 700; margin-left: 2px; }
+.dot-keepers { background: var(--ok, #10b981) !important; }
+.dot-bursts { background: #3b82f6 !important; }
+.dot-dupes { background: #f59e0b !important; }
+.dot-junk { background: var(--err, #ef4444) !important; }
+.dot-util { background: #8b5cf6 !important; }
+
+.insights-columns {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;
+}
+.insights-table {
+  display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  background: var(--sheet);
+}
+.insights-row {
+  display: flex; justify-content: space-between; align-items: center; padding: 10px 14px;
+  border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.insights-row:last-child { border-bottom: none; }
+.insights-row span { color: var(--ink); font-weight: 600; }
+.insights-row em { color: var(--mut); font-style: normal; font-weight: 500; }
+
+.budget-summary-box {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px;
+  background: var(--well); border-radius: 8px; border: 1px solid var(--line); margin: 16px 0;
+}
+.budget-stat { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--mut); }
+.budget-stat b { font-size: 16px; font-weight: 700; color: var(--ink); }

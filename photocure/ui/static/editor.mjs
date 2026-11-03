@@ -143,7 +143,7 @@
     ["blur", "Detail", "eye", "adjust"], ["redeye", "Red-Eye", "face", "adjust"],
     ["bg", "Remove BG", "layers", "adjust"],
     ["draw", "Draw", "pen", "annotate"], ["stickers", "Stickers", "star", "annotate"],
-    ["idcard", "ID Card", "cal", "tools"], ["qr", "QR Code", "copy", "tools"], ["ocr", "OCR", "search", "tools"],
+    ["qr", "QR Code", "copy", "tools"],
   ];
   const TOOL_GROUPS = [["adjust", "Adjust"], ["annotate", "Annotate"], ["tools", "Tools"]];
 
@@ -1634,101 +1634,6 @@
         add(pEl("p", "pcur-hint", "Click a sticker to drop it in the middle. Then drag to move, the corner handle to resize, the top handle to rotate."));
       }
 
-      else if (T === "idcard") {
-        S.idc = S.idc || { dpi: 150, front: null, back: null, fscale: 1, bscale: 1 };
-        add(chipRow([[150, "150 DPI (1240×1754)"], [300, "300 DPI (2480×3508)"]], S.idc.dpi,
-          (v) => { S.idc.dpi = v; renderID(); }));
-        const slot = (which, label) => {
-          const r = pEl("div", "pcur-row");
-          r.appendChild(pEl("span", "pcur-lbl", esc(label)));
-          const r2 = pEl("div", "pcur-btns");
-          r2.append(
-            pBtn(which === "front" ? "Front photo…" : "Back photo…", "ghost", () => pick(which)),
-            pBtn("Use current", "ghost", () => {
-              const tmp = makeCanvas(workC.width, workC.height);
-              ctx2d(tmp).drawImage(workC, 0, 0);
-              createImageBitmap(tmp).then((b) => { (which === "front" ? (S.idc.front = b) : (S.idc.back = b)); renderID(); }).catch(() => toast("Could not capture the current image", "err"));
-            }, "Use the current edited photo"),
-          );
-          r.appendChild(r2);
-          return r;
-        };
-        function pick(which) {
-          const inp = document.createElement("input");
-          inp.type = "file"; inp.accept = "image/*";
-          inp.onchange = () => {
-            const f = inp.files && inp.files[0];
-            if (!f) return;
-            const url = URL.createObjectURL(f);
-            loadImage(url).then((img) => {
-              createImageBitmap(img).then((b) => { (which === "front" ? (S.idc.front = b) : (S.idc.back = b)); renderID(); }).catch(() => toast("Could not read that image", "err"));
-            }).catch((e) => toast(e.message, "err"));
-          };
-          inp.click();
-        }
-        add(slot("front", "Front"));
-        add(slot("back", "Back"));
-        add(pSlider("Front scale", 50, 140, Math.round(S.idc.fscale * 100), (v) => { S.idc.fscale = v / 100; renderID(); }, null, (v) => v + "%"));
-        add(pSlider("Back scale", 50, 140, Math.round(S.idc.bscale * 100), (v) => { S.idc.bscale = v / 100; renderID(); }, null, (v) => v + "%"));
-        const pc = makeCanvas(465, 657);
-        pc.className = "pcur-idc";
-        const pw = pEl("div", "pcur-idprev");
-        pw.appendChild(pc);
-        add(pw);
-        const apply = pBtn(icon("check") + "<span>Apply ID card</span>", "primary", async () => {
-          if (!S.idc.front && !S.idc.back) { toast("Choose a front and/or back photo first", "err"); return; }
-          const c = buildIDCard();
-          if (!c) return;
-          let cw = c.width, ch = c.height;
-          if (Math.max(cw, ch) > MAX_PX) { const f = MAX_PX / Math.max(cw, ch); cw = Math.round(cw * f); ch = Math.round(ch * f); }
-          workC.width = cw; workC.height = ch;
-          ctx2d(workC).drawImage(c, 0, 0, cw, ch);
-          relayout();
-          await commit();
-          toast("ID card layout applied", "ok");
-        });
-        add(btnRow(apply));
-
-        function idDims() {
-          return { w: Math.round(1240 * S.idc.dpi / 150), h: Math.round(1754 * S.idc.dpi / 150) };
-        }
-        function drawID(x, Wc, Hc) {
-          const margin = Wc * 0.032, gap = Hc * 0.02;
-          const availW = Wc - margin * 2;
-          const availH = (Hc - margin * 2 - gap) / 2;
-          x.fillStyle = "#fff";
-          x.fillRect(0, 0, Wc, Hc);
-          const drawHalf = (img, y0, scale) => {
-            if (!img) return;
-            const d = fitArea(img.width, img.height, availW * scale, availH * scale);
-            x.drawImage(img, margin + (availW - d.w) / 2, y0 + (availH - d.h) / 2, d.w, d.h);
-          };
-          drawHalf(S.idc.front, margin, S.idc.fscale);
-          drawHalf(S.idc.back, margin + availH + gap, S.idc.bscale);
-          x.fillStyle = "#666";
-          x.font = `bold ${Math.round(Wc * 0.016)}px Arial`;
-          x.textAlign = "center";
-          x.fillText("FRONT", Wc / 2, margin + availH + gap / 2 + Wc * 0.006);
-          x.fillText("BACK", Wc / 2, Hc - margin + Wc * 0.02);
-          x.strokeStyle = "#e0e0e0";
-          x.lineWidth = 1;
-          x.strokeRect(margin, margin, availW, availH);
-          x.strokeRect(margin, margin + availH + gap, availW, availH);
-        }
-        function renderID() {
-          const d = idDims();
-          pc.width = Math.round(d.w / 2.67); pc.height = Math.round(d.h / 2.67);
-          drawID(ctx2d(pc), pc.width, pc.height);
-        }
-        function buildIDCard() {
-          const d = idDims();
-          const c = makeCanvas(d.w, d.h);
-          drawID(ctx2d(c), d.w, d.h);
-          return c;
-        }
-        renderID();
-      }
-
       else if (T === "qr") {
         S.qr = S.qr || { type: "url", fields: {} };
         add(chipRow([["url", "URL"], ["text", "Text"], ["phone", "Phone"], ["email", "Email"], ["sms", "SMS"], ["wifi", "Wi-Fi"], ["vcard", "vCard"], ["geo", "Geo"]],
@@ -1823,43 +1728,6 @@
           toast("QR added — drag it into place", "ok");
         });
         add(btnRow(addBtn));
-      }
-
-      else if (T === "ocr") {
-        const b = pBtn(icon("search") + "<span>Extract text</span>", "primary", async () => {
-          busy(b, true, "Extracting text…");
-          try {
-            const b2 = await canvasToBlob(workC, "image/png");
-            const fd = new FormData();
-            fd.append("file", b2, "ocr.png");
-            const res = await fetch("/api/editor/ocr", { method: "POST", body: fd });
-            if (!res.ok) throw new Error(((await res.json().catch(() => ({}))).detail) || "HTTP " + res.status);
-            const j = await res.json();
-            ta.value = j.text || "(no text found)";
-            ta.hidden = false;
-            copyB.hidden = !j.text;
-          } catch (e) { toast("OCR failed: " + e.message, "err"); }
-          busy(b, false);
-        });
-        const ta = document.createElement("textarea");
-        ta.className = "pcur-ocr";
-        ta.rows = 7;
-        ta.placeholder = "Extracted text appears here.";
-        ta.hidden = true;
-        add(btnRow(b));
-        add(ta);
-        const copyB = pBtn(icon("copy") + "<span>Copy to clipboard</span>", "secondary", async () => {
-          try {
-            await navigator.clipboard.writeText(ta.value);
-            toast("Copied to clipboard", "ok");
-          } catch (e) {
-            ta.select();
-            document.execCommand("copy");
-            toast("Copied to clipboard", "ok");
-          }
-        });
-        copyB.hidden = true;
-        add(copyB);
       }
     }
 

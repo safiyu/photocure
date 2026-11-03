@@ -55,6 +55,8 @@
     <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19zM12 10v4M12 17h.01"/></symbol>
     <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2 12h4l2.5-7 4 14 2.5-7H22"/></symbol>
     <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 13 6 5h12l2 8M4 13v6h16v-6M4 13h5l1 2h4l1-2h5"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7m0-4V3m8 18v-9m0-4V3m8 18v-5m0-4V3M1 14h6m2-6h6m2 8h6"/></symbol>
     <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></symbol>
     <symbol id="i-gear" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
     <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L20 8l-4-4L4 16v4z"/><path d="m14 6 4 4"/></symbol>
@@ -91,6 +93,7 @@
           <button class="tab navitem" data-tab="duplicates" data-stages="new"><svg class="ic" aria-hidden="true"><use href="#i-copy"/></svg><span>Duplicates</span><em class="count" data-count="duplicates"></em></button>
           <button class="tab navitem" data-tab="junk" data-stages="new"><svg class="ic" aria-hidden="true"><use href="#i-trash"/></svg><span>Junk</span><em class="count" data-count="junk"></em></button>
           <button class="tab navitem" data-tab="actions" data-stages="new"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg><span>Apply and undo</span><em class="count" data-count="actions"></em></button>
+          <button class="tab navitem" data-tab="insights" data-stages="new library trash"><svg class="ic" aria-hidden="true"><use href="#i-chart"/></svg><span>Insights</span></button>
         </div>
       </nav>
 
@@ -561,6 +564,7 @@
             <label class="inline-num" title="Filters on the AI appeal score, in both views">Minimum appeal <input id="minaes" type="number" step="0.1" placeholder="any"></label>
             <select id="hl-year" aria-label="Year in review"><option value="">Year in review</option></select>
             <button id="btn-hl-export" class="btn secondary" type="button" disabled>Download page</button>
+            <button id="btn-cull-budget-hl" class="btn secondary" type="button" title="Target Keeper Budget"><svg class="ic sm" aria-hidden="true"><use href="#i-sliders"/></svg><span>Cull Budget</span></button>
             <span class="grow"></span>
             <label class="density">Size <input type="range" class="density-slider" min="220" max="340" step="10" value="220" aria-label="Thumbnail size"></label>
             <span id="highlightcount" class="rowcount"></span>
@@ -608,6 +612,7 @@
             <label class="inline-num">Gap between events <input id="ev-gap" type="number" step="0.5" value="2"> hours</label>
             <label class="inline-num">Distance <input id="ev-km" type="number" step="0.5" value="1"> km</label>
             <button id="btn-events" class="btn primary" data-busy>Find events</button>
+            <button id="btn-cull-budget-ev" class="btn secondary" type="button" title="Target Keeper Budget for Event"><svg class="ic sm" aria-hidden="true"><use href="#i-sliders"/></svg><span>Cull Budget</span></button>
             <span class="grow"></span>
             <label class="density">Size <input type="range" class="density-slider" min="220" max="340" step="10" value="220" aria-label="Thumbnail size"></label>
             <span id="eventcount" class="rowcount"></span>
@@ -687,6 +692,69 @@
           </section>
         </section>
 
+        <!-- INSIGHTS -->
+        <section id="tab-insights" class="panel">
+          <div class="toolbar">
+            <button id="btn-refresh-insights" class="btn secondary" type="button"><svg class="ic sm" aria-hidden="true"><use href="#i-pulse"/></svg><span>Refresh</span></button>
+            <span class="grow"></span>
+            <button id="btn-insights-cull" class="btn primary" type="button"><svg class="ic sm" aria-hidden="true"><use href="#i-sliders"/></svg><span>Target Keeper Budget</span></button>
+          </div>
+          <div class="insights-container">
+            <div class="insights-grid">
+              <div class="insight-card">
+                <span class="insight-label">Library Size</span>
+                <span id="ins-total-size" class="insight-value">--</span>
+                <span id="ins-total-count" class="insight-sub">-- photos</span>
+              </div>
+              <div class="insight-card highlight">
+                <span class="insight-label">Reclaimable Space</span>
+                <span id="ins-reclaim-size" class="insight-value">--</span>
+                <span id="ins-reclaim-pct" class="insight-sub">--% reclaimable</span>
+              </div>
+              <div class="insight-card">
+                <span class="insight-label">Duplicates & Junk</span>
+                <span id="ins-junk-size" class="insight-value">--</span>
+                <span id="ins-junk-count" class="insight-sub">-- files</span>
+              </div>
+              <div class="insight-card">
+                <span class="insight-label">Burst Reduction</span>
+                <span id="ins-burst-ratio" class="insight-value">--</span>
+                <span id="ins-burst-sub" class="insight-sub">-- burst groups</span>
+              </div>
+            </div>
+
+            <div class="sect">
+              <h2>Storage Breakdown</h2>
+              <p class="lede">Visual composition of disk space across keepers, burst alternates, duplicates, and reference shots.</p>
+              <div class="storage-bar" id="ins-storage-bar" aria-label="Storage allocation bar">
+                <div class="storage-seg seg-keepers" id="bar-keepers" title="Keepers" style="width: 50%;"></div>
+                <div class="storage-seg seg-bursts" id="bar-bursts" title="Burst alternates" style="width: 20%;"></div>
+                <div class="storage-seg seg-dupes" id="bar-dupes" title="Duplicates" style="width: 15%;"></div>
+                <div class="storage-seg seg-junk" id="bar-junk" title="Junk Review" style="width: 10%;"></div>
+                <div class="storage-seg seg-util" id="bar-util" title="Utility" style="width: 5%;"></div>
+              </div>
+              <div class="storage-legend" id="ins-storage-legend">
+                <span class="leg-item"><i class="dot dot-keepers"></i>Keepers <b id="leg-keepers">--</b></span>
+                <span class="leg-item"><i class="dot dot-bursts"></i>Burst Alternates <b id="leg-bursts">--</b></span>
+                <span class="leg-item"><i class="dot dot-dupes"></i>Duplicates <b id="leg-dupes">--</b></span>
+                <span class="leg-item"><i class="dot dot-junk"></i>Junk Review <b id="leg-junk">--</b></span>
+                <span class="leg-item"><i class="dot dot-util"></i>Utility <b id="leg-util">--</b></span>
+              </div>
+            </div>
+
+            <div class="insights-columns">
+              <div class="sect">
+                <h2>Top Storage by Camera</h2>
+                <div id="ins-camera-table" class="insights-table"></div>
+              </div>
+              <div class="sect">
+                <h2>Date Sources & Sidecars</h2>
+                <div id="ins-dates-table" class="insights-table"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- SETTINGS -->
         <section id="tab-settings" class="panel">
           <div class="sect" id="sect-library">
@@ -702,6 +770,7 @@
             </div>
             <div class="btn-row">
               <button id="btn-move-library" class="btn secondary" type="button" hidden>Move library to another folder</button>
+              <button id="btn-audit-dates" class="btn secondary" type="button">Audit & repair photo dates</button>
             </div>
             <div class="field">
               <label for="set-default-op">New plans start with</label>
@@ -710,6 +779,11 @@
                 <option value="copy">Copy the photos</option>
               </select>
               <p class="help">Copy leaves your originals where they are, which suits read-only folders.</p>
+            </div>
+            <div class="field wide">
+              <label for="set-post-apply-hook">Post-apply hook (optional)</label>
+              <input id="set-post-apply-hook" type="text" placeholder="https://immich/api/... or /usr/local/bin/notify.sh" autocomplete="off" spellcheck="false">
+              <p class="help">Webhook URL (HTTP POST) or shell command to run automatically after an Apply completes.</p>
             </div>
           </div>
 
@@ -864,6 +938,16 @@
         <div id="lb-guesses" class="bars"></div>
         <p class="help">Choose a category below. Then use Learn from my choices on the Finalize page.</p>
       </section>
+      <section id="lb-ocr-section" class="lb-ocr-box" hidden aria-label="Extracted text">
+        <div class="lb-ocr-header">
+          <h3>Extracted text</h3>
+          <div class="lb-ocr-actions">
+            <button type="button" class="btn sm secondary" id="lb-ocr-copy" title="Copy text to clipboard"><svg class="ic sm" aria-hidden="true"><use href="#i-copy"/></svg><span>Copy</span></button>
+            <button type="button" class="btn sm ghost" id="lb-ocr-close" title="Close" aria-label="Close"><svg class="ic sm" aria-hidden="true"><use href="#i-x"/></svg></button>
+          </div>
+        </div>
+        <textarea id="lb-ocr-text" class="pcur-ocr" rows="5" readonly placeholder="Extracted text..."></textarea>
+      </section>
       <div class="lb-rate" id="lb-rate" role="group" aria-label="Rating">
         <button type="button" class="star" data-star="1" aria-label="1 star"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">1</span></button>
         <button type="button" class="star" data-star="2" aria-label="2 stars"><span aria-hidden="true">&#9733;</span><span class="star-n" aria-hidden="true">2</span></button>
@@ -879,6 +963,8 @@
       </div>
       <div class="lb-actions">
         <button class="btn sm secondary" id="lb-lock"><svg class="ic sm" aria-hidden="true"><use href="#i-lock"/></svg><span>Lock</span></button>
+        <button class="btn sm secondary" id="lb-ocr" title="Extract text (OCR)" aria-label="Extract text (OCR)" hidden><svg class="ic sm" aria-hidden="true"><use href="#i-search"/></svg><span>Extract text</span></button>
+        <button class="btn sm secondary" id="lb-fix-date" title="Write inferred date to XMP sidecar" aria-label="Write inferred date to XMP sidecar" hidden><svg class="ic sm" aria-hidden="true"><use href="#i-check"/></svg><span>Fix date</span></button>
         <button class="btn sm secondary" id="lb-faces" title="Inspect faces" aria-label="Inspect faces" hidden><svg class="ic sm" aria-hidden="true"><use href="#i-face"/></svg><span>Faces</span></button>
         <button class="btn sm secondary" id="lb-similar"><svg class="ic sm" aria-hidden="true"><use href="#i-copy"/></svg><span>Find similar</span></button>
         <button class="btn sm secondary" id="lb-edit"><svg class="ic sm" aria-hidden="true"><use href="#i-pen"/></svg><span>Edit</span></button>
@@ -888,6 +974,24 @@
       <div class="lb-count" id="lb-count"></div>
       <div class="keys"><span><kbd>&larr;</kbd> <kbd>&rarr;</kbd> browse</span><span><kbd>1</kbd>-<kbd>5</kbd> rate</span><span><kbd>0</kbd> clear</span><span><kbd>x</kbd> reject</span><span><kbd>f</kbd> favourite</span><span><kbd>l</kbd> lock</span><span><kbd>e</kbd> edit</span><span><kbd>d</kbd> delete</span><span><kbd>Esc</kbd> close</span></div>
     </aside>
+  </div>
+
+  <!-- burst synchronized 1:1 compare loupe -->
+  <div id="burst-loupe-overlay" class="loupe-overlay" hidden role="dialog" aria-modal="true" aria-label="Synchronized Burst Loupe">
+    <div class="loupe-header">
+      <div class="loupe-title-group">
+        <h2 id="loupe-title">Synchronized Loupe</h2>
+        <span class="loupe-count" id="loupe-count"></span>
+      </div>
+      <div class="loupe-controls">
+        <button type="button" class="btn sm secondary" id="loupe-zoom-fit" title="Fit to viewport">Fit</button>
+        <button type="button" class="btn sm secondary" id="loupe-zoom-100" title="100% actual size (1:1)">100%</button>
+        <button type="button" class="btn sm secondary" id="loupe-zoom-200" title="200% zoom">200%</button>
+        <button type="button" class="btn sm" id="loupe-sync-toggle" aria-pressed="true" title="Lock pan and zoom across all frames">Sync Pan/Zoom</button>
+        <button type="button" class="icon-btn" id="loupe-close" aria-label="Close loupe (Esc)"><svg class="ic" aria-hidden="true"><use href="#i-x"/></svg></button>
+      </div>
+    </div>
+    <div class="loupe-body" id="loupe-grid"></div>
   </div>
 
   <!-- similar images -->
@@ -1124,6 +1228,54 @@
     <div class="confirm-content restart-box">
       <div id="restart-spinner" class="spinner" aria-hidden="true"></div>
       <p id="restart-text">Restarting Photocure...</p>
+    </div>
+  </div>
+
+  <div id="cull-budget-modal" class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="budget-modal-title" hidden>
+    <div class="confirm-backdrop"></div>
+    <div class="confirm-content" style="max-width:540px">
+      <h2 id="budget-modal-title">Target Keeper Budget</h2>
+      <p class="lede">Cull down to a target keeper count. Combines aesthetic scoring, burst winners, and photographic scale diversity.</p>
+      
+      <div class="field">
+        <label for="budget-target-mode">Target Mode</label>
+        <select id="budget-target-mode">
+          <option value="count">Fixed Number of Keepers</option>
+          <option value="percent">Percentage of Photos (Top %)</option>
+        </select>
+      </div>
+
+      <div class="field" id="budget-count-wrap">
+        <label for="budget-target-count">Target Keeper Count: <output id="budget-count-val">50</output></label>
+        <input type="range" id="budget-target-count" min="5" max="500" step="5" value="50">
+      </div>
+
+      <div class="field" id="budget-percent-wrap" hidden>
+        <label for="budget-target-percent">Target Percentage: <output id="budget-percent-val">25%</output></label>
+        <input type="range" id="budget-target-percent" min="5" max="80" step="5" value="25">
+      </div>
+
+      <div class="field">
+        <label for="budget-action">Action to Apply</label>
+        <select id="budget-action">
+          <option value="stage_delete">Mark Cull Candidates for Delete (Stages to Trash)</option>
+          <option value="star_keepers">Star Keepers (Set 5★ on Winners)</option>
+          <option value="preview">Preview Selection Only</option>
+        </select>
+      </div>
+
+      <div class="budget-summary-box" id="budget-summary-box">
+        <div class="budget-stat"><span>Total candidates:</span><b id="bs-total">--</b></div>
+        <div class="budget-stat"><span>Keepers to retain:</span><b id="bs-keepers" style="color:var(--c-accent)">--</b></div>
+        <div class="budget-stat"><span>Cull candidates:</span><b id="bs-culls" style="color:var(--c-danger,#e53e3e)">--</b></div>
+        <div class="budget-stat"><span>Estimated reclaimable:</span><b id="bs-reclaim">--</b></div>
+      </div>
+
+      <div class="confirm-buttons">
+        <button type="button" id="budget-modal-cancel" class="btn">Cancel</button>
+        <button type="button" id="budget-modal-calc" class="btn secondary">Recalculate</button>
+        <button type="button" id="budget-modal-apply" class="btn primary">Apply Budget</button>
+      </div>
     </div>
   </div>
 

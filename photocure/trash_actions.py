@@ -176,6 +176,14 @@ def _delete_locked(dbp: Path, ids: list[int], root: Path, cancel_check, on_progr
                     sidecar.unlink()
                 except OSError:
                     pass
+            for ext in (".mov", ".MOV", ".mp4", ".MP4"):
+                vid = path.with_suffix(ext)
+                if vid.exists() and vid.resolve() != path.resolve():
+                    try:
+                        freed += vid.stat().st_size
+                        vid.unlink()
+                    except OSError:
+                        pass
             _prune_empty_dirs(path.parent, trash_root)
             rec.route_status, rec.scan_status = "purged", "missing"
             for e in s.exec(select(M.ActionLedger).where(M.ActionLedger.image_id == rec.id,

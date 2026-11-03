@@ -57,7 +57,7 @@
     },
     {
       "name": "RapidOCR text reader",
-      "purpose": "Reads text in the editor's OCR tool",
+      "purpose": "Reads text in utility photo previews with OCR",
       "license": "Apache-2.0",
       "module": "rapidocr_onnxruntime"
     }

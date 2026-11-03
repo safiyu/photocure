@@ -294,6 +294,8 @@ class CuratorConfig(BaseSettings):
     # Offline reverse geocoding of GPS positions (installed with Photocure).
     geocode: bool = True
     geocode_batch: int = 500
+    # Post-apply hook: webhook URL (starts with http:// or https://) or shell command.
+    post_apply_hook: str | None = None
 
     @field_validator("collision_policy", mode="before")
     @classmethod

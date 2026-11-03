@@ -18,6 +18,7 @@ tagged UTC so the calendar date is preserved.
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -89,11 +90,77 @@ class ExifInfo:
     rating: int | None = None
     xmp_label: str = ""
     xmp_keywords: list = field(default_factory=list)
+    is_favorite: bool = False
+    description: str = ""
     error: str = field(default="")
 
     @property
     def has_date(self) -> bool:
         return self.taken_at is not None
+
+
+def find_takeout_sidecar(path: Path | str) -> Path | None:
+    """Locate a Google Takeout JSON metadata sidecar if present."""
+    p = Path(path)
+    parent = p.parent
+    name = p.name
+    stem = p.stem
+    candidates = [
+        p.with_name(name + ".json"),
+        p.with_name(name + ".supplemental-metadata.json"),
+        p.with_name(stem + ".json"),
+        p.with_name(stem + ".supplemental-metadata.json"),
+    ]
+    m = re.match(r"^(.*?)\((\d+)\)(\.[^.]+)$", name)
+    if m:
+        base, num, ext = m.groups()
+        candidates.append(parent / f"{base}{ext}({num}).json")
+        candidates.append(parent / f"{base}({num}).json")
+    for c in candidates:
+        if c.exists() and c.is_file():
+            return c
+    return None
+
+
+def read_takeout_sidecar(path: Path | str) -> dict | None:
+    """Parse Google Takeout JSON sidecar for photoTakenTime, geoData, and favorited."""
+    sidecar = find_takeout_sidecar(path)
+    if not sidecar:
+        return None
+    try:
+        data = json.loads(sidecar.read_text(encoding="utf-8", errors="replace"))
+        if not isinstance(data, dict):
+            return None
+        res: dict = {"sidecar_path": str(sidecar)}
+        ptt = data.get("photoTakenTime") or data.get("creationTime")
+        if isinstance(ptt, dict) and ptt.get("timestamp"):
+            try:
+                ts = int(ptt["timestamp"])
+                if ts > 0:
+                    utc_dt = dt.datetime.fromtimestamp(ts, tz=dt.timezone.utc)
+                    local_dt = utc_dt.astimezone()
+                    res["taken_at"] = local_dt.replace(tzinfo=None)
+                    off = local_dt.utcoffset()
+                    res["tz_offset_minutes"] = int(off.total_seconds() // 60) if off else 0
+            except (ValueError, OverflowError, OSError):
+                pass
+        geo = data.get("geoData") or data.get("geoDataExif")
+        if isinstance(geo, dict):
+            try:
+                lat = float(geo.get("latitude") or 0.0)
+                lon = float(geo.get("longitude") or 0.0)
+                if abs(lat) > 1e-5 or abs(lon) > 1e-5:
+                    res["gps"] = (lat, lon)
+            except (ValueError, TypeError):
+                pass
+        if data.get("favorited") is True:
+            res["is_favorite"] = True
+        desc = data.get("description")
+        if desc and isinstance(desc, str):
+            res["description"] = desc.strip()
+        return res
+    except Exception:
+        return None
 
 
 def _plausible(d: dt.datetime) -> bool:
@@ -308,6 +375,19 @@ class ExifReader:
             if not info.taken_at and xmp.taken_at and _plausible(xmp.taken_at):
                 info.taken_at, info.taken_at_source = xmp.taken_at, "xmp:dtoriginal"
                 info.tz_offset_minutes = xmp.tz_offset_minutes
+
+        # ---- Google Takeout JSON sidecar
+        takeout = read_takeout_sidecar(path)
+        if takeout:
+            if not info.taken_at and takeout.get("taken_at") and _plausible(takeout["taken_at"]):
+                info.taken_at, info.taken_at_source = takeout["taken_at"], "google_takeout"
+                info.tz_offset_minutes = takeout.get("tz_offset_minutes")
+            if info.gps_lat is None and takeout.get("gps"):
+                info.gps_lat, info.gps_lon = takeout["gps"]
+            if takeout.get("is_favorite"):
+                info.is_favorite = True
+            if takeout.get("description"):
+                info.description = takeout["description"]
 
         # ---- Tier: filename
         if not info.taken_at:

@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="2.2.0" type="stable" date="2026-11-03">
+      <description>
+        <p>Photocure release 2.2.0: Synchronized 1:1 Loupe in burst review, Live Photo companion video pairing, Google Takeout JSON sidecar ingest, multi-camera clock drift sync, Target Keeper Budget culling, Library Insights disk space analytics, and post-apply webhook triggers.</p>
+      </description>
+    </release>
     <release version="2.1.0" type="stable" date="2026-11-02">
       <description>
         <p>Photocure release 2.1.0: redesigned photo editor (grouped tools, one Apply bar, split compare, zoom control), eight portrait-safe Looks, model license declarations, and fixes for finalize, burst clustering, reanalyse cancel and the lightbox.</p>

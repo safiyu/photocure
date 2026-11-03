@@ -474,6 +474,8 @@ class FileScanner:
             rec.camera_model = exif.camera_model
             if exif.rating is not None:
                 rec.rating = exif.rating
+            if getattr(exif, "is_favorite", False):
+                rec.is_favorite = True
             rec.phash = wr.phash
             rec.file_mtime = wr.mtime
 

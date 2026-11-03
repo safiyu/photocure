@@ -22,12 +22,22 @@ def _category_enum(cfg: CuratorConfig, category: str) -> CategoryType:
 
 
 def _move_sidecar(src: Path, dst: Path) -> None:
-    xmp = src.with_suffix(".xmp")
-    if xmp.exists():
-        try:
-            shutil.move(xmp, dst.with_suffix(".xmp"))
-        except OSError:
-            pass
+    # Standard XMP sidecars
+    for ext in (".xmp", ".XMP"):
+        xmp = src.with_suffix(ext)
+        if xmp.exists():
+            try:
+                shutil.move(xmp, dst.with_suffix(ext.lower()))
+            except OSError:
+                pass
+    # Live Photo companion video files (.mov, .mp4)
+    for ext in (".mov", ".MOV", ".mp4", ".MP4"):
+        vid = src.with_suffix(ext)
+        if vid.exists() and vid.resolve() != src.resolve():
+            try:
+                shutil.move(vid, dst.with_suffix(ext.lower()))
+            except OSError:
+                pass
 
 
 def _effective_category(rec: M.ImageRecord) -> str:

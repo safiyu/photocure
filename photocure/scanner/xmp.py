@@ -134,6 +134,7 @@ def read_xmp(path: Path | str) -> XmpInfo | None:
 # ---------------------------------------------------------------- writer
 _RDF = "{http://www.w3.org/1999/02/22-rdf-syntax-ns#}"
 _XMP = "{http://ns.adobe.com/xap/1.0/}"
+_EXIF = "{http://ns.adobe.com/exif/1.0/}"
 _DC = "{http://purl.org/dc/elements/1.1/}"
 OWNED_TAG_PREFIX = "photocure-"
 _XPACKET_BEGIN = re.compile(rb"<\?xpacket begin=[^?]*\?>")
@@ -198,9 +199,10 @@ def get_on_disk_owned_tags(photo_path: Path | str) -> set[str]:
 
 
 def update_xmp_sidecar(photo_path: Path | str, *, rating: int | None = None,
+                       date: dt.datetime | None = None,
                        add_tags: tuple[str, ...] = (), remove_tags: tuple[str, ...] = (),
                        label: str | None = None) -> tuple[bool, str]:
-    """Modify only xmp:Rating, xmp:Label and photocure-* dc:subject tags.
+    """Modify xmp:Rating, xmp:Label, date timestamps and photocure-* dc:subject tags.
 
     Returns (ok, path or reason). Unparsable or ambiguous sidecars are left untouched.
     """
@@ -227,10 +229,25 @@ def update_xmp_sidecar(photo_path: Path | str, *, rating: int | None = None,
             return False, "sidecar_skipped"
     else:
         root = etree.Element(f"{_RDF}RDF", nsmap={"rdf": _RDF[1:-1]})
-        desc = etree.SubElement(root, f"{_RDF}Description", nsmap={"xmp": _XMP[1:-1], "dc": _DC[1:-1]})
+        desc = etree.SubElement(root, f"{_RDF}Description", nsmap={"xmp": _XMP[1:-1], "exif": _EXIF[1:-1], "dc": _DC[1:-1]})
         desc.set(f"{_RDF}about", "")
         descs = [desc]
     first = descs[0]
+
+    if date is not None:
+        iso_str = date.strftime("%Y-%m-%dT%H:%M:%S")
+        found = False
+        for d in descs:
+            for tag in (f"{_EXIF}DateTimeOriginal", f"{_XMP}CreateDate"):
+                if tag in d.attrib:
+                    d.set(tag, iso_str)
+                    found = True
+                for el in d.findall(tag):
+                    el.text = iso_str
+                    found = True
+        if not found:
+            _sub(first, f"{_EXIF}DateTimeOriginal", "exif").text = iso_str
+            _sub(first, f"{_XMP}CreateDate", "xmp").text = iso_str
 
     if rating is not None:
         found = False

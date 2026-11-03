@@ -978,6 +978,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 "library_root": str(root) if root else None,
                 "library_root_source": library_root_source(dbp, app.state.cfg),
                 "default_operation": eff_cfg.default_operation,
+                "post_apply_hook": saved.get("post_apply_hook") or eff_cfg.post_apply_hook,
                 "selected": selected,
                 "requested": info.get("requested") or eff_cfg.device.device,
                 "fallback_reason": info.get("fallback_reason", "")}
@@ -1372,6 +1373,27 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return Response(page, media_type="text/html; charset=utf-8", headers={
             "Content-Disposition": f'attachment; filename="highlights-{year}.html"'})
 
+    @app.post("/api/curate/budget", dependencies=auth)
+    def curate_budget(payload: dict = Body(default={})):
+        from ..curate_budget import budget_curate
+        target_count = payload.get("target_count")
+        target_percent = payload.get("target_percent")
+        event_id = payload.get("event_id")
+        stage = payload.get("stage", "new")
+        action = payload.get("action", "preview")
+
+        with get_session(dbp) as s:
+            res = budget_curate(
+                session=s,
+                cfg=app.state.cfg,
+                target_count=int(target_count) if target_count is not None else None,
+                target_percent=float(target_percent) if target_percent is not None else None,
+                event_id=int(event_id) if event_id is not None else None,
+                stage=stage,
+                action=action,
+            )
+            return res
+
     @app.get("/api/facets")
     def facets(stage: StageFilter = Query("all")):
         """What the photos in one stage contain, for the filter controls and the date scrubber."""
@@ -1400,6 +1422,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "taken_min": str(lo)[:10] if lo else None, "taken_max": str(hi)[:10] if hi else None,
         }
 
+    @app.get("/api/insights")
+    def get_insights(stage: StageFilter = Query("all")):
+        from ..insights import get_library_insights
+        with get_session(dbp) as s:
+            return get_library_insights(s, stage=stage)
+
     def _set_rating(image_id: int, value: int | None, overwrite: bool):
         """Change a photo's rating. Over a sidecar edited outside Photocure this asks first."""
         from ..sidecar_sync import foreign_state
@@ -1421,6 +1449,112 @@ def create_app(db_path: str | None = None) -> FastAPI:
             app.state.sidecars.schedule(image_id, overwrite)
         with get_session(dbp) as s:
             return {"ok": True, "item": _load_items(s, [image_id], app.state.cfg)[0]}
+
+    @app.get("/api/images/date-audit")
+    def get_date_audit():
+        from ..scanner.exif_reader import find_takeout_sidecar
+        with get_session(dbp) as s:
+            recs = s.exec(select(M.ImageRecord).where(M.ImageRecord.scan_status != "missing")).all()
+            counts = {"exif": 0, "xmp:dtoriginal": 0, "google_takeout": 0, "filename": 0, "mtime": 0, "repaired": 0, "unknown": 0}
+            camera_counts: dict[str, int] = {}
+            candidates = []
+            takeout_available_count = 0
+
+            for r in recs:
+                src = r.taken_at_source or "unknown"
+                counts[src] = counts.get(src, 0) + 1
+                cam = r.camera_model.strip() if r.camera_model else "Unknown camera"
+                camera_counts[cam] = camera_counts.get(cam, 0) + 1
+
+                has_takeout = False
+                if src in ("filename", "mtime", "unknown"):
+                    if find_takeout_sidecar(r.path):
+                        has_takeout = True
+                        takeout_available_count += 1
+
+                if src in ("filename", "mtime", "unknown"):
+                    candidates.append({
+                        "id": r.id,
+                        "filename": r.filename,
+                        "camera": r.camera_model or "",
+                        "source": src,
+                        "taken_at": r.taken_at.isoformat() if r.taken_at else None,
+                        "has_takeout": has_takeout,
+                    })
+
+            sorted_cameras = [{"name": k, "count": v} for k, v in sorted(camera_counts.items(), key=lambda x: -x[1])]
+            return {
+                "counts": counts,
+                "total": len(recs),
+                "takeout_available": takeout_available_count,
+                "cameras": sorted_cameras,
+                "candidates": candidates[:100],
+            }
+
+    @app.post("/api/images/fix-dates", dependencies=auth)
+    def post_fix_dates(payload: dict = Body(default={})):
+        from ..scanner.exif_reader import read_takeout_sidecar
+        from ..scanner.xmp import update_xmp_sidecar
+        ids = payload.get("ids")
+        shift_hours = payload.get("shift_hours")
+        shift_minutes = payload.get("shift_minutes")
+        shift_seconds = payload.get("shift_seconds")
+        camera_model = payload.get("camera_model")
+        ingest_takeout = bool(payload.get("ingest_takeout", False))
+        write_sidecar = payload.get("write_sidecar", True)
+
+        total_offset_sec = 0.0
+        if shift_hours is not None:
+            total_offset_sec += float(shift_hours) * 3600.0
+        if shift_minutes is not None:
+            total_offset_sec += float(shift_minutes) * 60.0
+        if shift_seconds is not None:
+            total_offset_sec += float(shift_seconds)
+
+        with get_session(dbp) as s:
+            query = select(M.ImageRecord).where(M.ImageRecord.scan_status != "missing")
+            if ids:
+                query = query.where(col(M.ImageRecord.id).in_(ids))
+            elif camera_model:
+                query = query.where(M.ImageRecord.camera_model == camera_model)
+            elif not ingest_takeout:
+                query = query.where(col(M.ImageRecord.taken_at_source).in_(("filename", "mtime", "unknown")))
+
+            recs = s.exec(query).all()
+            repaired = []
+            for r in recs:
+                new_date = r.taken_at
+                source = r.taken_at_source or "repaired"
+
+                if ingest_takeout:
+                    takeout = read_takeout_sidecar(r.path)
+                    if takeout:
+                        if takeout.get("taken_at"):
+                            new_date = takeout["taken_at"].replace(tzinfo=timezone.utc)
+                            source = "google_takeout"
+                        if takeout.get("gps"):
+                            r.gps_lat, r.gps_lon = takeout["gps"]
+                        if takeout.get("is_favorite"):
+                            r.is_favorite = True
+
+                if total_offset_sec != 0.0 and new_date:
+                    new_date = new_date + timedelta(seconds=total_offset_sec)
+                    source = "repaired"
+                elif not ingest_takeout:
+                    source = "repaired"
+
+                if new_date:
+                    r.taken_at = new_date
+                    r.taken_at_source = source
+                    if write_sidecar and Path(r.path).exists():
+                        try:
+                            update_xmp_sidecar(r.path, date=new_date, add_tags=("photocure-date-repaired:true",))
+                        except Exception as e:
+                            logging.getLogger("photocure.ui").warning("sidecar date sync failed (%s): %s", r.path, e)
+                    repaired.append({"id": r.id, "filename": r.filename, "taken_at": new_date.isoformat(), "source": source})
+
+            s.commit()
+            return {"ok": True, "repaired_count": len(repaired), "repaired": repaired}
 
     @app.get("/api/images/{image_id}")
     def get_image(image_id: int):
@@ -1730,6 +1864,21 @@ def create_app(db_path: str | None = None) -> FastAPI:
         try:
             text = extract_text(image_bytes)
             return {"ok": True, "text": text}
+        except Exception as e:
+            logging.getLogger("photocure.ui").exception("ocr failed")
+            raise HTTPException(500, f"OCR failed: {e}")
+
+    @app.post("/api/images/{image_id}/ocr", dependencies=auth)
+    def image_ocr(image_id: int):
+        from ..editor_actions import ActionError, extract_text, get_oriented_image_stream
+        try:
+            data, _ = get_oriented_image_stream(dbp, image_id)
+            text = extract_text(data)
+            return {"ok": True, "text": text}
+        except ActionError as e:
+            raise HTTPException(e.status, str(e))
+        except FileNotFoundError as e:
+            raise HTTPException(404, str(e))
         except Exception as e:
             logging.getLogger("photocure.ui").exception("ocr failed")
             raise HTTPException(500, f"OCR failed: {e}")

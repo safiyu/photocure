@@ -33,6 +33,29 @@ from .locks import LEDGER_WRITING
 log = logging.getLogger("photocure.action")
 
 
+def find_companion_files(source_path: Path) -> list[Path]:
+    """Find companion Live Photo videos (.mov, .mp4) and XMP sidecars."""
+    p = Path(source_path)
+    if not p.parent.exists():
+        return []
+    companions: list[Path] = []
+    parent = p.parent
+    stem = p.stem
+    name = p.name
+
+    for ext in (".mov", ".MOV", ".mp4", ".MP4"):
+        c = parent / f"{stem}{ext}"
+        if c.is_file() and c.resolve() != p.resolve() and c not in companions:
+            companions.append(c)
+
+    for sc in (parent / f"{stem}.xmp", parent / f"{stem}.XMP",
+               parent / f"{name}.xmp", parent / f"{name}.XMP"):
+        if sc.is_file() and sc.resolve() != p.resolve() and sc not in companions:
+            companions.append(sc)
+
+    return companions
+
+
 def new_transaction_id() -> str:
     """Human-friendly, sortable transaction id: ``TX_YYYYMMDD_HHMMSS_<rand>``."""
     from datetime import datetime
@@ -267,6 +290,36 @@ class ActionEngine:
                             img.path = str(target)
                             img.relative_path = _rel(target, root)
                         session.commit()
+
+                        # 5. Move/copy companion files (Live Photo .mov/.mp4 and .xmp sidecars).
+                        for comp in find_companion_files(action.source):
+                            try:
+                                comp_sha = file_sha256(comp)
+                                comp_size = file_size(comp)
+                                if comp.name.lower() == f"{action.source.name.lower()}.xmp":
+                                    comp_target = target.parent / f"{target.name}{comp.suffix.lower()}"
+                                else:
+                                    comp_target = target.parent / f"{target.stem}{comp.suffix.lower()}"
+                                if os.path.lexists(comp_target):
+                                    comp_target = self._resolve_collision(comp_target, comp_sha)
+                                comp_entry = repo.ledger_add(
+                                    txn, action.image_id, str(comp),
+                                    str(comp_target), action.operation, comp_sha, comp_size)
+                                session.commit()
+                                comp_action = PlannedAction(
+                                    source=comp,
+                                    target=comp_target,
+                                    operation=action.operation,
+                                    category=action.category,
+                                    image_id=action.image_id,
+                                    sha256=comp_sha,
+                                    file_size=comp_size,
+                                )
+                                comp_entry.actual_operation = self._apply(comp_action, comp_target, comp_sha)
+                                repo.ledger_commit(comp_entry)
+                                session.commit()
+                            except Exception as ce:
+                                log.warning("failed to process companion %s: %s", comp, ce)
                     except Exception as e:
                         # The file already moved: record that so rollback can reverse it.
                         session.rollback()

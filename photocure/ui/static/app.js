@@ -35,6 +35,7 @@
     uncertain: ["Finalize", "The analysis was not sure about these. Choose a category for each."],
     settings: ["Settings", "Choose what runs the analysis and how many workers it uses."],
     actions: ["Apply and undo", "Review the plan, then organize your files. Every change can be undone."],
+    insights: ["Library Insights", "Disk space analysis, reclaimable storage potential, and curation overview."],
   };
 
   const TRASH_SUB = "Photos you removed. Restore them, send them back where they came from, or delete them for good.";
@@ -504,6 +505,9 @@
     if (it.is_duplicate) add("bad", "\u29c9", "Status", "Duplicate");
     if (it.near_dup_of != null) add("bad", "\u29c9", "Status", "Near duplicate");
     if (it.is_alternate) add("", "\u2194", "Status", "Alternate");
+    if (it.taken_at_source === "filename") add("warn", "\u29d7", "Status", "Date from filename");
+    else if (it.taken_at_source === "mtime") add("warn", "\u29d7", "Status", "Date from file modified");
+    else if (it.taken_at_source === "repaired") add("good", "\u2714", "Status", "Date repaired");
     return out;
   }
 
@@ -570,6 +574,7 @@
         "data-overflow-tags": JSON.stringify(allFlags),
       }),
       el("span", { class: "sr-only", text: allFlags.map((f) => f.text).join(", ") })) : null;
+    const isUtilCard = state.tab === "utility" || state.utility.has(rawCat) || ["utility", "screenshot", "document", "slide"].includes(rawCat);
     const cap = el("figcaption", { class: "caption info" },
       el("div", { class: "fn name", title: it.relative_path || it.filename, text: it.filename }),
       showReason ? el("div", { class: "reason", title: it.uncertain_reason.text, text: shortReason(it) }) : null,
@@ -632,6 +637,14 @@
         "aria-label": "Inspect faces",
         tabindex: -1,
       }, el("span", { class: "btn-ic", html: icon("face", "sm") }), el("span", { class: "btn-lbl", text: "Faces" })) : null,
+      isUtilCard ? el("button", {
+        type: "button",
+        class: "btn btn-ocr",
+        "data-ocr": id,
+        title: "Extract text (OCR)",
+        "aria-label": "Extract text from " + (it.filename || ""),
+        tabindex: -1,
+      }, el("span", { class: "btn-ic", html: icon("search", "sm") }), el("span", { class: "btn-lbl", text: "OCR" })) : null,
       el("button", {
         type: "button",
         class: "btn btn-edit",
@@ -2283,7 +2296,7 @@
     delegatesBound = true;
     document.addEventListener("click", async (ev) => {
       const t = ev.target.closest && ev.target.closest(
-        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-purge],[data-similar],[data-faces],[data-edit],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-analyze-now],.thumb");
+        "[data-pick],[data-catpick],[data-clear],[data-lock],[data-approve-delete],[data-purge],[data-similar],[data-faces],[data-ocr],[data-edit],[data-more],[data-goto],[data-clearfilters],[data-cat],[data-sortnow],[data-copy],[data-copytext],[data-analyze-now],.thumb");
       if (!t) return;
       try {
         if (t.dataset.pick) await togglePick(num(t.dataset.pick), ev.shiftKey);
@@ -2301,6 +2314,12 @@
           await showSimilar(num(t.dataset.similar));
         } else if (t.dataset.faces) {
           await openBiometricProjection(t.dataset.burst ? num(t.dataset.burst) : null, num(t.dataset.faces));
+        } else if (t.dataset.ocr) {
+          const card = t.closest(".card");
+          if (card) {
+            openLightbox(card);
+            setTimeout(() => { const b = $("#lb-ocr"); if (b && !b.hidden) b.click(); }, 120);
+          }
         } else if (t.dataset.edit) {
           await openPhotoEditorFor(num(t.dataset.edit));
         } else if (t.dataset.more) {
@@ -2564,7 +2583,13 @@
     const rows = [];
     const add = (k, v) => { if (v != null && v !== "") rows.push(`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`); };
     if (it.width && it.height) add("Size", `${num(it.width)}×${num(it.height)}`);
-    if (it.taken_at) add("Taken", String(it.taken_at).slice(0, 19).replace("T", " "));
+    if (it.taken_at) {
+      let dStr = String(it.taken_at).slice(0, 19).replace("T", " ");
+      if (it.taken_at_source === "filename") dStr += " (from filename)";
+      else if (it.taken_at_source === "mtime") dStr += " (from file modified)";
+      else if (it.taken_at_source === "repaired") dStr += " (repaired)";
+      add("Taken", dStr);
+    }
     if (it.top1) add("Looks like", `${it.top1} (${Math.round(num(it.top1_score) * 100)}%)`);
     if (it.quality_score != null) add("Quality", num(it.quality_score).toFixed(2));
     if (it.aesthetic != null) add("Appeal", num(it.aesthetic).toFixed(2));
@@ -2598,6 +2623,13 @@
         facesBtn.hidden = true;
       }
     }
+    const isUtil = state.tab === "utility" || state.utility.has(eff(it)) || ["utility", "screenshot", "document", "slide"].includes(eff(it));
+    const ocrBtn = $("#lb-ocr");
+    if (ocrBtn) ocrBtn.hidden = !isUtil;
+    const fixDateBtn = $("#lb-fix-date");
+    if (fixDateBtn) fixDateBtn.hidden = !it.taken_at || !["filename", "mtime"].includes(it.taken_at_source);
+    const ocrSec = $("#lb-ocr-section");
+    if (ocrSec) ocrSec.hidden = true;
     const ap = $("#lb-approve");
     ap.disabled = id == null;
     ap.setAttribute("aria-pressed", String(!!it.delete_approved));
@@ -2693,6 +2725,79 @@
       const it = state.byId[id];
       openBiometricProjection(it ? it.burst_id : null, id);
     };
+    const fixDateBtn = $("#lb-fix-date");
+    if (fixDateBtn) {
+      fixDateBtn.onclick = async () => {
+        const id = lbIdAt(lb.i);
+        if (id == null) return;
+        const it = state.byId[id];
+        fixDateBtn.disabled = true;
+        try {
+          const res = await post("/api/images/fix-dates", { ids: [id], write_sidecar: true });
+          if (res && res.repaired_count) {
+            if (it) it.taken_at_source = "repaired";
+            toast("Date written to XMP sidecar", "ok");
+            lbRender();
+          } else {
+            toast("No date to repair", "info");
+          }
+        } catch (e) {
+          toast("Date repair failed: " + e.message, "err");
+        } finally {
+          fixDateBtn.disabled = false;
+        }
+      };
+    }
+    const ocrBtn = $("#lb-ocr");
+    if (ocrBtn) {
+      ocrBtn.onclick = async () => {
+        const id = lbIdAt(lb.i);
+        if (id == null) return;
+        const sec = $("#lb-ocr-section");
+        const txt = $("#lb-ocr-text");
+        ocrBtn.disabled = true;
+        const origText = ocrBtn.innerHTML;
+        ocrBtn.innerHTML = `<span class="spinner" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:4px;"></span><span>Reading…</span>`;
+        try {
+          const res = await post(`/api/images/${id}/ocr`);
+          const extracted = (res && res.text) ? res.text.trim() : "";
+          if (sec && txt) {
+            txt.value = extracted || "(No text detected in this photo)";
+            sec.hidden = false;
+            txt.focus();
+          }
+          if (extracted) toast("Text extracted", "ok");
+          else toast("No text detected", "info");
+        } catch (e) {
+          toast("OCR failed: " + e.message, "err");
+        } finally {
+          ocrBtn.disabled = false;
+          ocrBtn.innerHTML = origText;
+        }
+      };
+    }
+    const ocrCopy = $("#lb-ocr-copy");
+    if (ocrCopy) {
+      ocrCopy.onclick = async () => {
+        const txt = $("#lb-ocr-text");
+        if (!txt || !txt.value) return;
+        try {
+          await navigator.clipboard.writeText(txt.value);
+          toast("Copied to clipboard", "ok");
+        } catch {
+          txt.select();
+          document.execCommand("copy");
+          toast("Copied to clipboard", "ok");
+        }
+      };
+    }
+    const ocrClose = $("#lb-ocr-close");
+    if (ocrClose) {
+      ocrClose.onclick = () => {
+        const sec = $("#lb-ocr-section");
+        if (sec) sec.hidden = true;
+      };
+    }
     $("#lb-approve").onclick = () => (state.stage === "trash" ? purgePhotos([lbIdAt(lb.i)]) : toggleApproveDelete(lbIdAt(lb.i))).catch((e) => toast(e.message, "err"));
     $$("#lb-rate .star").forEach((b) => {
       b.onclick = () => {
@@ -2847,6 +2952,42 @@
       },
     });
     $("#btn-move-library").onclick = openMoveLibrary;
+    const auditBtn = $("#btn-audit-dates");
+    if (auditBtn) {
+      auditBtn.onclick = async () => {
+        try {
+          auditBtn.disabled = true;
+          const audit = await api("/api/images/date-audit");
+          const counts = audit.counts || {};
+          const needFix = (counts.filename || 0) + (counts.mtime || 0);
+          const takeoutCount = audit.takeout_available || 0;
+          if (needFix === 0 && takeoutCount === 0) {
+            toast("All photos already have valid dates and metadata", "ok");
+            return;
+          }
+          let message = `Found ${fmtN(counts.filename || 0)} photos with dates parsed from filename patterns (e.g. WhatsApp, camera prefixes) and ${fmtN(counts.mtime || 0)} from file modification times.`;
+          if (takeoutCount > 0) {
+            message += `\n\nFound ${fmtN(takeoutCount)} Google Takeout JSON metadata sidecars on disk. Ingesting them will restore true capture times, GPS coordinates, and favorite status.`;
+          }
+          message += "\n\nWould you like to sync dates and metadata into standard .xmp sidecars?";
+          const ok = await showConfirmDialog({
+            title: "Repair photo dates & metadata",
+            subtitle: `${fmtN(needFix + takeoutCount)} photos can be repaired or upgraded`,
+            message: message,
+            confirmText: "Sync dates & sidecars",
+            variant: "primary",
+          });
+          if (!ok) return;
+          const res = await post("/api/images/fix-dates", { write_sidecar: true, ingest_takeout: takeoutCount > 0 });
+          toast(`Successfully repaired ${fmtN(res.repaired_count || 0)} dates and sidecars`, "ok");
+          resetVisibleGrids();
+        } catch (e) {
+          toast("Date audit failed: " + e.message, "err");
+        } finally {
+          auditBtn.disabled = false;
+        }
+      };
+    }
     $("#btn-browse-library").onclick = () => openPicker({
       title: "Choose the library folder", mode: "output", initial: $("#set-library-root").value.trim(),
       okLabel: "Use this folder", info: "Your finished photos will be stored in this folder.",
@@ -2924,6 +3065,7 @@
 
     if (ev.key === "Escape") {
       if (open("#firstrun")) return;  // the first-run popup cannot be dismissed
+      if (open("#burst-loupe-overlay")) { closeBurstLoupe(); return; }
       if (open("#picker")) closePicker();
       else if (open("#movelib")) $("#movelib-cancel").click();
       else if (open("#cleanexport")) closeOverlay($("#cleanexport"));
@@ -2939,6 +3081,12 @@
     if (typing || anyModal()) return;
     if (ev.key === "?") { openHelp(); ev.preventDefault(); return; }
     const k = ev.key.toLowerCase();
+    if (k === "z" && (state.tab === "bursts" || open("#burst-loupe-overlay"))) {
+      if (open("#burst-loupe-overlay")) closeBurstLoupe();
+      else openBurstLoupe();
+      ev.preventDefault();
+      return;
+    }
 
     try {
       if (lb.open) {
@@ -5096,6 +5244,177 @@
   const GM_WORDS = { open: "eyes open", possible: "eyes may be closing", closed: "eyes closed",
     unknown: "eyes not measured", missing: "not seen in this frame" };
 
+  // ------------------------------------------------------------- burst loupe (1:1 compare)
+  const loupeState = {
+    open: false,
+    frames: [],
+    scale: 1.0,
+    panX: 0,
+    panY: 0,
+    sync: true,
+    dragging: false,
+    startX: 0,
+    startY: 0,
+    releaseTrap: null,
+  };
+
+  function updateLoupeTransforms() {
+    const panes = $$(".loupe-pane", $("#loupe-grid"));
+    panes.forEach((pane) => {
+      const img = pane.querySelector(".loupe-img");
+      if (!img) return;
+      img.style.transform = `translate(${loupeState.panX}px, ${loupeState.panY}px) scale(${loupeState.scale})`;
+    });
+  }
+
+  function setLoupeZoom(targetScale) {
+    loupeState.scale = Math.min(5.0, Math.max(0.25, targetScale));
+    loupeState.panX = 0;
+    loupeState.panY = 0;
+    updateLoupeTransforms();
+  }
+
+  function openBurstLoupe(customFrames = null) {
+    if (!state.burst || !state.burst.members || state.burst.members.length < 2) {
+      toast("Select a burst with 2 or more frames to compare", "info");
+      return;
+    }
+    let frames = customFrames;
+    if (!frames) {
+      if (state.picks.size >= 2) {
+        frames = state.burst.members.filter((m) => state.picks.has(m.id)).slice(0, 4);
+      } else {
+        frames = state.burst.members.slice(0, 4);
+      }
+    }
+    if (!frames.length) frames = state.burst.members.slice(0, 4);
+    loupeState.frames = frames;
+    loupeState.scale = 1.0;
+    loupeState.panX = 0;
+    loupeState.panY = 0;
+    loupeState.sync = true;
+    loupeState.open = true;
+
+    const overlay = $("#burst-loupe-overlay");
+    const grid = $("#loupe-grid");
+    $("#loupe-count").textContent = `${frames.length} frames`;
+    grid.className = `loupe-body loupe-grid-${frames.length}`;
+
+    grid.innerHTML = frames.map((m) => {
+      const sharp = m.sharpness_norm != null ? num(m.sharpness_norm).toFixed(2) : "1.00";
+      const eyeStatus = m.eye_closed > 0.2 || m.has_blinks ? "Blink" : "Eyes open";
+      return `<div class="loupe-pane" data-id="${num(m.id)}">
+        <div class="loupe-pane-bar">
+          <div class="loupe-pane-info">
+            <span class="file">${esc(m.filename)}</span>
+            <span class="stat">Sharp: <b>${sharp}</b></span>
+            <span class="stat">${eyeStatus}</span>
+          </div>
+          <div class="loupe-pane-actions">
+            ${m.is_best_shot ? '<span class="tag-badge best">Best shot</span>' : `<button type="button" class="btn sm secondary" data-loupe-best="${num(m.id)}">Make best</button>`}
+          </div>
+        </div>
+        <div class="loupe-viewport" data-id="${num(m.id)}">
+          <img class="loupe-img" src="${thumbUrl(m.id, 'preview')}" alt="${esc(m.filename)}" draggable="false">
+        </div>
+      </div>`;
+    }).join("");
+
+    $$("[data-loupe-best]", grid).forEach((btn) => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const id = num(btn.dataset.loupeBest);
+        await makeBestShot(currentBurstId, id);
+        openBurstLoupe();
+      };
+    });
+
+    openOverlay(overlay);
+    document.body.style.overflow = "hidden";
+    if (loupeState.releaseTrap) loupeState.releaseTrap();
+    loupeState.releaseTrap = trapFocus(overlay, closeBurstLoupe);
+    $("#loupe-close").focus();
+  }
+
+  function closeBurstLoupe() {
+    if (!loupeState.open) return;
+    loupeState.open = false;
+    closeOverlay($("#burst-loupe-overlay"));
+    document.body.style.overflow = "";
+    if (loupeState.releaseTrap) {
+      loupeState.releaseTrap();
+      loupeState.releaseTrap = null;
+    }
+  }
+
+  function bindBurstLoupeEvents() {
+    const closeBtn = $("#loupe-close");
+    if (closeBtn) closeBtn.onclick = closeBurstLoupe;
+    const fitBtn = $("#loupe-zoom-fit");
+    if (fitBtn) fitBtn.onclick = () => setLoupeZoom(1.0);
+    const z100 = $("#loupe-zoom-100");
+    if (z100) z100.onclick = () => setLoupeZoom(1.5);
+    const z200 = $("#loupe-zoom-200");
+    if (z200) z200.onclick = () => setLoupeZoom(2.5);
+    const syncBtn = $("#loupe-sync-toggle");
+    if (syncBtn) {
+      syncBtn.onclick = () => {
+        loupeState.sync = !loupeState.sync;
+        syncBtn.setAttribute("aria-pressed", String(loupeState.sync));
+        syncBtn.classList.toggle("secondary", !loupeState.sync);
+      };
+    }
+
+    const grid = $("#loupe-grid");
+    if (grid) {
+      grid.addEventListener("pointerdown", (e) => {
+        const vp = e.target.closest(".loupe-viewport");
+        if (!vp) return;
+        loupeState.dragging = true;
+        loupeState.startX = e.clientX;
+        loupeState.startY = e.clientY;
+        vp.classList.add("is-dragging");
+        vp.setPointerCapture(e.pointerId);
+      });
+
+      grid.addEventListener("pointermove", (e) => {
+        if (!loupeState.dragging) return;
+        const dx = e.clientX - loupeState.startX;
+        const dy = e.clientY - loupeState.startY;
+        loupeState.startX = e.clientX;
+        loupeState.startY = e.clientY;
+        loupeState.panX += dx;
+        loupeState.panY += dy;
+        updateLoupeTransforms();
+      });
+
+      const endDrag = (e) => {
+        if (!loupeState.dragging) return;
+        loupeState.dragging = false;
+        $$(".loupe-viewport", grid).forEach((vp) => vp.classList.remove("is-dragging"));
+      };
+      grid.addEventListener("pointerup", endDrag);
+      grid.addEventListener("pointercancel", endDrag);
+
+      grid.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? 1.15 : 0.88;
+        loupeState.scale = Math.min(5.0, Math.max(0.25, loupeState.scale * factor));
+        updateLoupeTransforms();
+      }, { passive: false });
+
+      grid.addEventListener("dblclick", (e) => {
+        const vp = e.target.closest(".loupe-viewport");
+        if (!vp) return;
+        if (Math.abs(loupeState.scale - 1.0) < 0.1) {
+          setLoupeZoom(2.0);
+        } else {
+          setLoupeZoom(1.0);
+        }
+      });
+    }
+  }
+
   let burstSeq = 0;
   async function showBurst(id) {
     const seq = ++burstSeq;
@@ -5216,6 +5535,7 @@
       addBtn(inspectGroup, '<svg class="ic sm" aria-hidden="true"><use href="#i-face"/></svg><span>Compare all faces (Matrix)</span>', () => openBiometricProjection(id, data.members[0].id, "matrix"), "secondary", "btn-compare-faces-matrix");
     }
     if (data.members.length >= 2) {
+      addBtn(inspectGroup, '<svg class="ic sm" aria-hidden="true"><use href="#i-search"/></svg><span>Compare Loupe (Z)</span>', () => openBurstLoupe(), "secondary", "btn-burst-loupe");
       const bestId = (group && group.best_id) || (data.members.find((m) => m.is_best_shot) || {}).id || data.members[0].id;
       addBtn(inspectGroup, '<svg class="ic sm" aria-hidden="true"><use href="#i-grid"/></svg><span>Make collage</span>', () => {
         if (!window.PCUR_COLLAGE) { toast("The collage builder did not load", "err"); return; }
@@ -6012,6 +6332,9 @@
         : "Not set yet. Choose where finished photos go.";
     $("#btn-move-library").hidden = !(root && rootSource === "settings");
     $("#set-default-op").value = st.default_operation || "move";
+    if ($("#set-post-apply-hook")) {
+      $("#set-post-apply-hook").value = (st && st.post_apply_hook) || (saved && saved.post_apply_hook) || "";
+    }
     const accs = st.accelerators || [];
     const active = accs.find((a) => a.id === st.selected);
     const activeLabel = active ? accShort(active) : String(st.selected || "CPU").toUpperCase();
@@ -6082,7 +6405,8 @@
       return;
     }
     const body = Object.assign({ device: state.draft.device, device_index: num(state.draft.device_index),
-      collision_policy: $("#set-collision").value, default_operation: $("#set-default-op").value }, workers);
+      collision_policy: $("#set-collision").value, default_operation: $("#set-default-op").value,
+      post_apply_hook: $("#set-post-apply-hook") ? ($("#set-post-apply-hook").value.trim() || null) : null }, workers);
     const chosenRoot = $("#set-library-root").value.trim();
     if (!$("#btn-browse-library").hidden && chosenRoot) body.library_root = chosenRoot;
     try {
@@ -6361,9 +6685,156 @@
       closeOverlay($("#people-savebar"));
     }
     if (name === "actions") loadTransactions().catch(() => {});
+    if (name === "insights") loadInsights().catch((e) => toast(e.message, "err"));
     if (name === "settings") { refreshSettings(true); refreshKeywords(); }
     if (name === "uncertain") renderLegend();
     if (state.overview) renderComp(state.overview);
+  }
+
+  // ------------------------------------------------------------- insights
+  async function loadInsights() {
+    try {
+      const data = await api(`/api/insights?stage=${encodeURIComponent(state.stage)}`);
+      $("#ins-total-size").textContent = fmtBytes(data.total_bytes || 0);
+      $("#ins-total-count").textContent = `${fmtN(data.total_photos || 0)} photos`;
+
+      $("#ins-reclaim-size").textContent = fmtBytes(data.reclaimable_bytes || 0);
+      $("#ins-reclaim-pct").textContent = `${data.reclaimable_percent || 0}% reclaimable`;
+
+      const junkBytes = (data.duplicates?.bytes || 0) + (data.junk?.bytes || 0);
+      const junkCount = (data.duplicates?.count || 0) + (data.junk?.count || 0);
+      $("#ins-junk-size").textContent = fmtBytes(junkBytes);
+      $("#ins-junk-count").textContent = `${fmtN(junkCount)} duplicates & junk`;
+
+      const b = data.bursts || {};
+      $("#ins-burst-ratio").textContent = b.avg_frames ? `${b.avg_frames}:1` : "--";
+      $("#ins-burst-sub").textContent = `${fmtN(b.total_bursts || 0)} burst groups (${fmtN(b.total_frames || 0)} frames)`;
+
+      // Storage breakdown bar
+      const tot = data.total_bytes || 1;
+      const bKeepers = Math.max(0, tot - (data.reclaimable_bytes || 0) - (data.utility?.bytes || 0));
+      const bBursts = data.burst_alternates?.bytes || 0;
+      const bDupes = data.duplicates?.bytes || 0;
+      const bJunk = data.junk?.bytes || 0;
+      const bUtil = data.utility?.bytes || 0;
+
+      const pKeepers = Math.max(2, Math.round(bKeepers / tot * 100));
+      const pBursts = Math.round(bBursts / tot * 100);
+      const pDupes = Math.round(bDupes / tot * 100);
+      const pJunk = Math.round(bJunk / tot * 100);
+      const pUtil = Math.round(bUtil / tot * 100);
+
+      $("#bar-keepers").style.width = pKeepers + "%";
+      $("#bar-bursts").style.width = pBursts + "%";
+      $("#bar-dupes").style.width = pDupes + "%";
+      $("#bar-junk").style.width = pJunk + "%";
+      $("#bar-util").style.width = pUtil + "%";
+
+      $("#leg-keepers").textContent = fmtBytes(bKeepers);
+      $("#leg-bursts").textContent = fmtBytes(bBursts);
+      $("#leg-dupes").textContent = fmtBytes(bDupes);
+      $("#leg-junk").textContent = fmtBytes(bJunk);
+      $("#leg-util").textContent = fmtBytes(bUtil);
+
+      // Camera table
+      const camHost = $("#ins-camera-table");
+      if (camHost) {
+        const cams = data.by_camera || [];
+        if (!cams.length) {
+          camHost.innerHTML = '<div class="insights-row"><span>No camera EXIF data found</span></div>';
+        } else {
+          camHost.innerHTML = cams.map((c) =>
+            `<div class="insights-row"><span>${esc(c.name)}</span><em>${fmtN(c.count)} photos · ${fmtBytes(c.bytes)}</em></div>`
+          ).join("");
+        }
+      }
+
+      // Date sources table
+      const datesHost = $("#ins-dates-table");
+      if (datesHost) {
+        const ds = data.date_sources || {};
+        const labels = {
+          exif: "Camera EXIF (DateTimeOriginal)",
+          google_takeout: "Google Takeout JSON sidecars",
+          "xmp:dtoriginal": "XMP Sidecars",
+          filename: "Inferred from Filenames",
+          mtime: "File Modification Times",
+          repaired: "Photocure Repaired Dates",
+          unknown: "Missing / Unknown",
+        };
+        datesHost.innerHTML = Object.entries(ds).map(([k, count]) =>
+          `<div class="insights-row"><span>${esc(labels[k] || k)}</span><em>${fmtN(count)} photos</em></div>`
+        ).join("");
+      }
+    } catch (e) {
+      toast("Failed to load insights: " + e.message, "err");
+    }
+  }
+
+  // ------------------------------------------------------------- cull budget
+  function openCullBudget(eventId = null) {
+    const modal = $("#cull-budget-modal");
+    if (!modal) return;
+    modal.hidden = false;
+    modal.dataset.eventId = eventId ? String(eventId) : "";
+
+    const modeSelect = $("#budget-target-mode");
+    const countWrap = $("#budget-count-wrap");
+    const pctWrap = $("#budget-percent-wrap");
+    const countInput = $("#budget-target-count");
+    const countVal = $("#budget-count-val");
+    const pctInput = $("#budget-target-percent");
+    const pctVal = $("#budget-percent-val");
+
+    countInput.oninput = () => { countVal.textContent = countInput.value; };
+    pctInput.oninput = () => { pctVal.textContent = pctInput.value + "%"; };
+
+    modeSelect.onchange = () => {
+      const isPct = modeSelect.value === "percent";
+      countWrap.hidden = isPct;
+      pctWrap.hidden = !isPct;
+    };
+
+    const calcBudget = async (action = "preview") => {
+      const isPct = modeSelect.value === "percent";
+      const payload = {
+        target_count: isPct ? null : num(countInput.value),
+        target_percent: isPct ? num(pctInput.value) : null,
+        event_id: modal.dataset.eventId ? num(modal.dataset.eventId) : null,
+        stage: state.stage,
+        action: action,
+      };
+      const res = await post("/api/curate/budget", payload);
+      $("#bs-total").textContent = fmtN(res.total);
+      $("#bs-keepers").textContent = fmtN(res.kept_count);
+      $("#bs-culls").textContent = fmtN(res.culled_count);
+      $("#bs-reclaim").textContent = fmtBytes(res.reclaimable_bytes);
+      return res;
+    };
+
+    $("#budget-modal-calc").onclick = () => calcBudget("preview").catch((e) => toast(e.message, "err"));
+
+    $("#budget-modal-apply").onclick = async () => {
+      const act = $("#budget-action").value;
+      try {
+        const res = await calcBudget(act);
+        modal.hidden = true;
+        if (act === "stage_delete") {
+          toast(`Marked ${fmtN(res.culled_count)} photos for delete. Click Finalize to move to Trash.`, "ok");
+        } else if (act === "star_keepers") {
+          toast(`Starred ${fmtN(res.kept_count)} keeper photos as 5★`, "ok");
+        } else {
+          toast(`Selection previewed: ${fmtN(res.kept_count)} keepers, ${fmtN(res.culled_count)} culls`, "ok");
+        }
+        resetVisibleGrids();
+        if (state.tab === "insights") loadInsights();
+      } catch (e) {
+        toast("Failed to apply budget: " + e.message, "err");
+      }
+    };
+
+    $("#budget-modal-cancel").onclick = () => { modal.hidden = true; };
+    calcBudget("preview").catch(() => {});
   }
 
   // ------------------------------------------------------------------- init
@@ -6658,6 +7129,7 @@
     bindFilters();
     bindDelegates();
     bindLightbox();
+    bindBurstLoupeEvents();
     bindPicker();
     document.addEventListener("keydown", onKey);
 
@@ -7089,6 +7561,16 @@
     $("#btn-save-settings").onclick = saveSettings;
     $("#btn-reset-settings").onclick = () => { renderSettings(); };
     $("#btn-stop-progress").onclick = stopProcess;
+
+    const refIns = $("#btn-refresh-insights");
+    if (refIns) refIns.onclick = () => loadInsights();
+    const insCull = $("#btn-insights-cull");
+    if (insCull) insCull.onclick = () => openCullBudget();
+    const hlCull = $("#btn-cull-budget-hl");
+    if (hlCull) hlCull.onclick = () => openCullBudget();
+    const evCull = $("#btn-cull-budget-ev");
+    if (evCull) evCull.onclick = () => openCullBudget();
+
     const btnResetLib = $("#btn-reset-library");
     if (btnResetLib) btnResetLib.onclick = resetLibrary;
     const btnImportReset = $("#btn-import-reset");
