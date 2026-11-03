@@ -73,3 +73,18 @@ def test_settings_save_and_apply_post_apply_hook(tmp_path):
     applied = apply_settings(cfg, stored)
     assert applied.post_apply_hook == "https://example.com/webhook"
 
+    # Reject shell commands in settings
+    with pytest.raises(ValueError, match="HTTP or HTTPS URL"):
+        save_settings(db_path, {"post_apply_hook": "rm -rf /"})
+
+    with pytest.raises(ValueError, match="HTTP or HTTPS URL"):
+        save_settings(db_path, {"post_apply_hook": "/usr/local/bin/my_script.sh"})
+
+
+def test_post_apply_hook_shell_disabled(tmp_path):
+    out_file = tmp_path / "never_created.txt"
+    cmd = f'touch "{out_file}"'
+    dispatch_post_apply_hook(cmd, {"transaction_id": "T1"}, block=True, allow_shell=False)
+    assert not out_file.exists()
+
+

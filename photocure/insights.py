@@ -14,11 +14,6 @@ def get_library_insights(session: Session, stage: str = "all") -> dict:
     """Compute comprehensive library metrics and storage reclamation potential."""
     I = ImageRecord
 
-    # Base query for active images
-    base_q = select(I).where(I.scan_status != "missing")
-    if stage and stage != "all":
-        base_q = base_q.where(I.stage == stage)
-
     # 1. Total storage and count
     total_count, total_bytes = session.exec(
         select(func.count(I.id), func.coalesce(func.sum(I.file_size), 0)).where(I.scan_status != "missing")
@@ -85,36 +80,48 @@ def get_library_insights(session: Session, stage: str = "all") -> dict:
     by_stage = {stg: {"count": int(c), "bytes": int(b)} for stg, c, b in stage_rows}
 
     # 9. By Category
+    cat_q = select(eff_cat, func.count(I.id), func.coalesce(func.sum(I.file_size), 0)).where(
+        I.scan_status != "missing", eff_cat.is_not(None), eff_cat != ""
+    )
+    if stage != "all":
+        cat_q = cat_q.where(I.stage == stage)
     cat_rows = session.exec(
-        select(eff_cat, func.count(I.id), func.coalesce(func.sum(I.file_size), 0))
-        .where(I.scan_status != "missing", eff_cat.is_not(None))
-        .group_by(eff_cat)
+        cat_q.group_by(eff_cat)
         .order_by(func.count(I.id).desc())
         .limit(10)
     ).all()
     by_category = [{"name": c or "unassigned", "count": int(cnt), "bytes": int(b)} for c, cnt, b in cat_rows]
 
     # 10. By Camera
+    cam_q = select(I.camera_model, func.count(I.id), func.coalesce(func.sum(I.file_size), 0)).where(
+        I.scan_status != "missing", I.camera_model != ""
+    )
+    if stage != "all":
+        cam_q = cam_q.where(I.stage == stage)
     cam_rows = session.exec(
-        select(I.camera_model, func.count(I.id), func.coalesce(func.sum(I.file_size), 0))
-        .where(I.scan_status != "missing", I.camera_model != "")
-        .group_by(I.camera_model)
+        cam_q.group_by(I.camera_model)
         .order_by(func.count(I.id).desc())
         .limit(8)
     ).all()
     by_camera = [{"name": c, "count": int(cnt), "bytes": int(b)} for c, cnt, b in cam_rows]
 
     # 11. Date Sources
+    date_q = select(I.taken_at_source, func.count(I.id)).where(I.scan_status != "missing")
+    if stage != "all":
+        date_q = date_q.where(I.stage == stage)
     date_rows = session.exec(
-        select(I.taken_at_source, func.count(I.id))
-        .where(I.scan_status != "missing")
-        .group_by(I.taken_at_source)
+        date_q.group_by(I.taken_at_source)
     ).all()
     date_sources = {src or "unknown": int(cnt) for src, cnt in date_rows}
 
     # 12. Bursts Summary
-    total_bursts = session.exec(select(func.count(BurstGroup.id))).one()
-    burst_frames = session.exec(select(func.count(I.id)).where(I.scan_status != "missing", I.burst_id.is_not(None))).one()
+    tb_q = select(func.count(func.distinct(I.burst_id))).where(I.scan_status != "missing", I.burst_id.is_not(None))
+    bf_q = select(func.count(I.id)).where(I.scan_status != "missing", I.burst_id.is_not(None))
+    if stage != "all":
+        tb_q = tb_q.where(I.stage == stage)
+        bf_q = bf_q.where(I.stage == stage)
+    total_bursts = session.exec(tb_q).one()
+    burst_frames = session.exec(bf_q).one()
     avg_burst_len = (burst_frames / total_bursts) if total_bursts > 0 else 0.0
 
     return {

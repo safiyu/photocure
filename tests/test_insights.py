@@ -71,3 +71,12 @@ def test_library_insights_calculation_and_endpoint(tmp_path):
     assert data["reclaimable_bytes"] == 7000
     assert len(data["by_camera"]) == 1
     assert data["by_camera"][0]["name"] == "Sony A7"
+
+    # Test stage filtering: stage="library" should have 0 photos
+    r_lib = c.get("/api/insights?stage=library")
+    assert r_lib.status_code == 200
+    data_lib = r_lib.json()
+    assert data_lib["total_photos"] == 0
+    assert len(data_lib["by_camera"]) == 0
+    assert len(data_lib["by_category"]) == 0
+    assert data_lib["bursts"]["total_bursts"] == 0

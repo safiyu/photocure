@@ -6,18 +6,21 @@ to keep a diverse, appealing cut of keepers and stage the rest for review or del
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
-from sqlmodel import Session, col, select
+from sqlmodel import Session, col, func, select
 
-from .clustering.events import UNRELIABLE_TIME_SOURCES
 from .config import CuratorConfig
 from .db.models import ImageRecord, SemanticScore
 from .highlights import HighlightWeights, highlight_score
 from .narrative import SCALES, balance_selection, scale_labels
+from .rules.taxonomy import CategoryType
 
 log = logging.getLogger("photocure.curate_budget")
+
+JUNK_VALUES = tuple(c.value for c in CategoryType if c.is_junk)
+UTILITY_VALUES = tuple(c.value for c in CategoryType if c.is_utility)
 
 
 @dataclass
@@ -58,8 +61,14 @@ def budget_curate(
         q = q.where(ImageRecord.stage == stage)
     if event_id is not None:
         q = q.where(ImageRecord.event_id == event_id)
-    # Exclude exact duplicates and existing junk
+    # Exclude exact duplicates, rejected photos (rating == -1), and junk/utility
     q = q.where(ImageRecord.is_duplicate == False)  # noqa: E712
+    q = q.where((ImageRecord.rating.is_(None)) | (ImageRecord.rating != -1))
+    eff_cat = func.coalesce(ImageRecord.manual_bucket, ImageRecord.category, "")
+    if JUNK_VALUES:
+        q = q.where(~eff_cat.in_(JUNK_VALUES))
+    if UTILITY_VALUES:
+        q = q.where(~eff_cat.in_(UTILITY_VALUES))
 
     records = session.exec(q).all()
     if not records:
@@ -78,9 +87,15 @@ def budget_curate(
 
     rec_ids = [r.id for r in records if r.id is not None]
 
-    # 2. Fetch semantic scores for candidates
-    scores_stmt = select(SemanticScore).where(col(SemanticScore.image_id).in_(rec_ids))
-    scores_by_id = {s.image_id: s for s in session.exec(scores_stmt).all()}
+    # 2. Fetch semantic scores for candidates in chunks of 500
+    scores_by_id: dict[int, SemanticScore] = {}
+    CHUNK_SIZE = 500
+    for i in range(0, len(rec_ids), CHUNK_SIZE):
+        chunk = rec_ids[i:i + CHUNK_SIZE]
+        scores_stmt = select(SemanticScore).where(col(SemanticScore.image_id).in_(chunk))
+        for s in session.exec(scores_stmt).all():
+            if s.image_id is not None:
+                scores_by_id[s.image_id] = s
 
     # 3. Fetch scale labels for candidates if available
     scales_by_id: dict[int, str] = {}

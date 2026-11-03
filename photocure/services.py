@@ -117,7 +117,13 @@ def _validate_settings(data: dict, allow_none: bool = False) -> dict:
         elif key == "library_root":
             out[key] = str(Path(value).expanduser().resolve()) if value else None
         elif key == "post_apply_hook":
-            out[key] = str(value).strip() if value else None
+            v = str(value).strip() if value else None
+            if v and not (v.startswith("http://") or v.startswith("https://")):
+                raise ValueError(
+                    "post_apply_hook in settings must be an HTTP or HTTPS URL. "
+                    "To run a shell command, configure the PCUR_POST_APPLY_HOOK environment variable."
+                )
+            out[key] = v
         else:
             if isinstance(value, bool):
                 raise ValueError(f"'{key}' must be a whole number.")

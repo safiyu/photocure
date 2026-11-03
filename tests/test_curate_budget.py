@@ -77,3 +77,35 @@ def test_budget_curate_preview_and_stage_delete(tmp_path):
                 assert fresh.delete_approved is False
             else:
                 assert fresh.delete_approved is True
+
+
+def test_budget_curate_excludes_rejects_junk_utility(tmp_path):
+    db_path = tmp_path / "budget_filter.db"
+    init_db(db_path, drop=True)
+
+    img_good = make_image(tmp_path / "good.jpg")
+    img_rejected = make_image(tmp_path / "rejected.jpg")
+    img_junk = make_image(tmp_path / "junk.jpg")
+    img_util = make_image(tmp_path / "util.jpg")
+
+    with get_session(db_path) as s:
+        r_good = ImageRecord(path=str(img_good), filename=img_good.name, file_size=500, quick_hash="qg", stage="new")
+        r_rej = ImageRecord(path=str(img_rejected), filename=img_rejected.name, file_size=500, rating=-1, quick_hash="qr", stage="new")
+        r_junk = ImageRecord(path=str(img_junk), filename=img_junk.name, file_size=500, category="accidental", quick_hash="qj", stage="new")
+        r_util = ImageRecord(path=str(img_util), filename=img_util.name, file_size=500, category="document", quick_hash="qu", stage="new")
+        s.add_all([r_good, r_rej, r_junk, r_util])
+        s.commit()
+        s.refresh(r_good)
+        good_id = r_good.id
+
+    app = create_app(str(db_path))
+    c = TestClient(app)
+    c.headers["X-PCUR-Token"] = app.state.token
+
+    res = c.post("/api/curate/budget", json={"target_count": 5, "action": "preview"})
+    assert res.status_code == 200
+    data = res.json()
+    # Only good photo should be considered
+    assert data["total"] == 1
+    assert data["kept_ids"] == [good_id]
+

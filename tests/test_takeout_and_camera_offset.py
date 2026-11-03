@@ -119,5 +119,6 @@ def test_multi_camera_clock_offset_endpoint(tmp_path):
     with get_session(db_path) as s:
         rec = s.get(ImageRecord, rt_id)
         assert rec.taken_at_source == "google_takeout"
+        assert rec.taken_at == datetime.fromtimestamp(1650000000, tz=timezone.utc)
         assert rec.gps_lat == 40.7128
         assert rec.is_favorite is True

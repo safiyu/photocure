@@ -12,10 +12,16 @@ from typing import Any
 log = logging.getLogger("photocure.hooks")
 
 
-def dispatch_post_apply_hook(hook: str | None, payload: dict[str, Any], block: bool = False) -> None:
+def dispatch_post_apply_hook(
+    hook: str | None,
+    payload: dict[str, Any],
+    block: bool = False,
+    allow_shell: bool = True,
+) -> None:
     """Dispatches a post-apply hook (HTTP POST or shell command).
 
     If ``block`` is False (default), the dispatch runs asynchronously in a daemon thread.
+    Shell execution requires ``allow_shell=True``.
     """
     if not hook or not str(hook).strip():
         return
@@ -35,6 +41,8 @@ def dispatch_post_apply_hook(hook: str | None, payload: dict[str, Any], block: b
                 with urllib.request.urlopen(req, timeout=15) as resp:
                     status = getattr(resp, "status", getattr(resp, "code", 200))
                     log.info("post_apply_hook HTTP %s -> status %s", hook_str, status)
+            elif not allow_shell:
+                log.warning("post_apply_hook shell execution disabled for untrusted input: %s", hook_str)
             else:
                 env = os.environ.copy()
                 env["PCUR_TRANSACTION_ID"] = str(payload.get("transaction_id", ""))

@@ -3015,7 +3015,7 @@
 
   const isTriage = (g) => g === grids.uncertain || g === grids.junk;
   const MODALS = ["#picker", "#help", "#facepanel", "#person-photos-overlay", "#similar-panel",
-    "#firstrun", "#movelib", "#cleanexport"];
+    "#firstrun", "#movelib", "#cleanexport", "#cull-budget-modal"];
   const SELF_MANAGED = ["#confirm-modal", "#auth-modal", "#restart-overlay"];  // they handle their own keys
   const open = (sel) => { const e = $(sel); return !!(e && !e.hidden); };
   const anyModal = () => MODALS.some(open) || !!catPicker;
@@ -3066,6 +3066,7 @@
     if (ev.key === "Escape") {
       if (open("#firstrun")) return;  // the first-run popup cannot be dismissed
       if (open("#burst-loupe-overlay")) { closeBurstLoupe(); return; }
+      if (open("#cull-budget-modal")) { $("#budget-modal-cancel")?.click(); return; }
       if (open("#picker")) closePicker();
       else if (open("#movelib")) $("#movelib-cancel").click();
       else if (open("#cleanexport")) closeOverlay($("#cleanexport"));
@@ -5253,25 +5254,44 @@
     panY: 0,
     sync: true,
     dragging: false,
+    activePaneId: null,
     startX: 0,
     startY: 0,
+    paneState: {},
     releaseTrap: null,
   };
 
-  function updateLoupeTransforms() {
+  function updateLoupeTransforms(targetId = null) {
     const panes = $$(".loupe-pane", $("#loupe-grid"));
     panes.forEach((pane) => {
+      const id = num(pane.dataset.id);
+      if (targetId != null && id !== targetId) return;
       const img = pane.querySelector(".loupe-img");
       if (!img) return;
-      img.style.transform = `translate(${loupeState.panX}px, ${loupeState.panY}px) scale(${loupeState.scale})`;
+      const s = loupeState.sync
+        ? { scale: loupeState.scale, panX: loupeState.panX, panY: loupeState.panY }
+        : (loupeState.paneState[id] || { scale: 1.0, panX: 0, panY: 0 });
+      img.style.transform = `translate(${s.panX}px, ${s.panY}px) scale(${s.scale})`;
     });
   }
 
-  function setLoupeZoom(targetScale) {
-    loupeState.scale = Math.min(5.0, Math.max(0.25, targetScale));
-    loupeState.panX = 0;
-    loupeState.panY = 0;
-    updateLoupeTransforms();
+  function setLoupeZoom(targetScale, paneId = null) {
+    const clamped = Math.min(5.0, Math.max(0.25, targetScale));
+    if (loupeState.sync || paneId == null) {
+      loupeState.scale = clamped;
+      loupeState.panX = 0;
+      loupeState.panY = 0;
+      Object.keys(loupeState.paneState).forEach((k) => {
+        loupeState.paneState[k] = { scale: clamped, panX: 0, panY: 0 };
+      });
+      updateLoupeTransforms();
+    } else {
+      if (!loupeState.paneState[paneId]) loupeState.paneState[paneId] = { scale: 1.0, panX: 0, panY: 0 };
+      loupeState.paneState[paneId].scale = clamped;
+      loupeState.paneState[paneId].panX = 0;
+      loupeState.paneState[paneId].panY = 0;
+      updateLoupeTransforms(paneId);
+    }
   }
 
   function openBurstLoupe(customFrames = null) {
@@ -5294,6 +5314,10 @@
     loupeState.panY = 0;
     loupeState.sync = true;
     loupeState.open = true;
+    loupeState.paneState = {};
+    frames.forEach((m) => {
+      loupeState.paneState[m.id] = { scale: 1.0, panX: 0, panY: 0 };
+    });
 
     const overlay = $("#burst-loupe-overlay");
     const grid = $("#loupe-grid");
@@ -5353,15 +5377,21 @@
     const fitBtn = $("#loupe-zoom-fit");
     if (fitBtn) fitBtn.onclick = () => setLoupeZoom(1.0);
     const z100 = $("#loupe-zoom-100");
-    if (z100) z100.onclick = () => setLoupeZoom(1.5);
+    if (z100) z100.onclick = () => setLoupeZoom(1.0);
     const z200 = $("#loupe-zoom-200");
-    if (z200) z200.onclick = () => setLoupeZoom(2.5);
+    if (z200) z200.onclick = () => setLoupeZoom(2.0);
     const syncBtn = $("#loupe-sync-toggle");
     if (syncBtn) {
       syncBtn.onclick = () => {
         loupeState.sync = !loupeState.sync;
         syncBtn.setAttribute("aria-pressed", String(loupeState.sync));
         syncBtn.classList.toggle("secondary", !loupeState.sync);
+        if (loupeState.sync) {
+          Object.keys(loupeState.paneState).forEach((k) => {
+            loupeState.paneState[k] = { scale: loupeState.scale, panX: loupeState.panX, panY: loupeState.panY };
+          });
+          updateLoupeTransforms();
+        }
       };
     }
 
@@ -5370,6 +5400,8 @@
       grid.addEventListener("pointerdown", (e) => {
         const vp = e.target.closest(".loupe-viewport");
         if (!vp) return;
+        const pane = e.target.closest(".loupe-pane");
+        loupeState.activePaneId = pane ? num(pane.dataset.id) : null;
         loupeState.dragging = true;
         loupeState.startX = e.clientX;
         loupeState.startY = e.clientY;
@@ -5383,14 +5415,22 @@
         const dy = e.clientY - loupeState.startY;
         loupeState.startX = e.clientX;
         loupeState.startY = e.clientY;
-        loupeState.panX += dx;
-        loupeState.panY += dy;
-        updateLoupeTransforms();
+        if (loupeState.sync) {
+          loupeState.panX += dx;
+          loupeState.panY += dy;
+          updateLoupeTransforms();
+        } else if (loupeState.activePaneId != null) {
+          const ps = loupeState.paneState[loupeState.activePaneId] || (loupeState.paneState[loupeState.activePaneId] = { scale: 1.0, panX: 0, panY: 0 });
+          ps.panX += dx;
+          ps.panY += dy;
+          updateLoupeTransforms(loupeState.activePaneId);
+        }
       });
 
       const endDrag = (e) => {
         if (!loupeState.dragging) return;
         loupeState.dragging = false;
+        loupeState.activePaneId = null;
         $$(".loupe-viewport", grid).forEach((vp) => vp.classList.remove("is-dragging"));
       };
       grid.addEventListener("pointerup", endDrag);
@@ -5399,17 +5439,33 @@
       grid.addEventListener("wheel", (e) => {
         e.preventDefault();
         const factor = e.deltaY < 0 ? 1.15 : 0.88;
-        loupeState.scale = Math.min(5.0, Math.max(0.25, loupeState.scale * factor));
-        updateLoupeTransforms();
+        const pane = e.target.closest(".loupe-pane");
+        const paneId = pane ? num(pane.dataset.id) : null;
+        if (loupeState.sync || paneId == null) {
+          loupeState.scale = Math.min(5.0, Math.max(0.25, loupeState.scale * factor));
+          Object.keys(loupeState.paneState).forEach((k) => {
+            loupeState.paneState[k].scale = loupeState.scale;
+          });
+          updateLoupeTransforms();
+        } else {
+          const ps = loupeState.paneState[paneId] || (loupeState.paneState[paneId] = { scale: 1.0, panX: 0, panY: 0 });
+          ps.scale = Math.min(5.0, Math.max(0.25, ps.scale * factor));
+          updateLoupeTransforms(paneId);
+        }
       }, { passive: false });
 
       grid.addEventListener("dblclick", (e) => {
         const vp = e.target.closest(".loupe-viewport");
         if (!vp) return;
-        if (Math.abs(loupeState.scale - 1.0) < 0.1) {
-          setLoupeZoom(2.0);
+        const pane = e.target.closest(".loupe-pane");
+        const paneId = pane ? num(pane.dataset.id) : null;
+        if (loupeState.sync || paneId == null) {
+          const next = Math.abs(loupeState.scale - 1.0) < 0.1 ? 2.0 : 1.0;
+          setLoupeZoom(next);
         } else {
-          setLoupeZoom(1.0);
+          const ps = loupeState.paneState[paneId] || { scale: 1.0 };
+          const next = Math.abs(ps.scale - 1.0) < 0.1 ? 2.0 : 1.0;
+          setLoupeZoom(next, paneId);
         }
       });
     }
@@ -6772,11 +6828,28 @@
   }
 
   // ------------------------------------------------------------- cull budget
+  let cullBudgetReleaseTrap = null;
+  function closeCullBudget() {
+    const modal = $("#cull-budget-modal");
+    if (!modal || modal.hidden) return;
+    modal.hidden = true;
+    if (cullBudgetReleaseTrap) {
+      cullBudgetReleaseTrap();
+      cullBudgetReleaseTrap = null;
+    }
+  }
+
   function openCullBudget(eventId = null) {
     const modal = $("#cull-budget-modal");
     if (!modal) return;
     modal.hidden = false;
     modal.dataset.eventId = eventId ? String(eventId) : "";
+
+    if (cullBudgetReleaseTrap) cullBudgetReleaseTrap();
+    cullBudgetReleaseTrap = trapFocus(modal, closeCullBudget);
+
+    const backdrop = modal.querySelector(".confirm-backdrop");
+    if (backdrop) backdrop.onclick = closeCullBudget;
 
     const modeSelect = $("#budget-target-mode");
     const countWrap = $("#budget-count-wrap");
@@ -6818,7 +6891,7 @@
       const act = $("#budget-action").value;
       try {
         const res = await calcBudget(act);
-        modal.hidden = true;
+        closeCullBudget();
         if (act === "stage_delete") {
           toast(`Marked ${fmtN(res.culled_count)} photos for delete. Click Finalize to move to Trash.`, "ok");
         } else if (act === "star_keepers") {
@@ -6833,7 +6906,7 @@
       }
     };
 
-    $("#budget-modal-cancel").onclick = () => { modal.hidden = true; };
+    $("#budget-modal-cancel").onclick = closeCullBudget;
     calcBudget("preview").catch(() => {});
   }
 

@@ -1530,7 +1530,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     takeout = read_takeout_sidecar(r.path)
                     if takeout:
                         if takeout.get("taken_at"):
-                            new_date = takeout["taken_at"].replace(tzinfo=timezone.utc)
+                            off = takeout.get("tz_offset_minutes") or 0
+                            new_date = (takeout["taken_at"] - timedelta(minutes=off)).replace(tzinfo=timezone.utc)
+                            r.tz_offset_minutes = takeout.get("tz_offset_minutes")
                             source = "google_takeout"
                         if takeout.get("gps"):
                             r.gps_lat, r.gps_lon = takeout["gps"]
