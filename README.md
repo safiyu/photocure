@@ -17,7 +17,7 @@ Photocure analyzes your photos locally, identifies subject matter, picks the sha
 
 ## What it does
 
-- **Smart categorization:** Sorts photos by scene and subject—people, food, animals, landscapes, vehicles, architecture, art, and more—without manual tagging.
+- **Smart categorization:** Sorts photos by scene and subject (people, food, animals, landscapes, vehicles, architecture, art, and more) without manual tagging.
 - **Burst culling & face inspection:** Identifies the best shot in every burst or retake. Detects closed eyes and blinks, and can blend open eyes across group frames into a composite photo.
 - **Duplicate detection:** Catches exact matches and similar retakes, recommending the best copy to keep.
 - **Utility triage:** Automatically separates receipts, whiteboards, screenshots, and labels from your memories.
@@ -98,7 +98,7 @@ To relocate your organized library later, use **Move library to another folder**
 - **Highlights:** Surface your best shots using an aesthetic scoring engine combined with your star ratings and favorites. Includes event story views, an exportable **Year in review** web page, and a **Target Keeper Budget** ("Cull to $N$ Photos" or Top %) that selects a visually balanced cut across narrative scales.
 - **Events:** Automatically clusters photos into discrete events by time and GPS proximity.
 - **Insights:** Visual disk space analytics: live reclaimable storage meters (duplicates, non-winning burst retakes, junk), camera and category breakdowns, burst reduction efficiency, and date resolution audits.
-- **Utility:** Isolates functional documents—receipts, whiteboards, notes, screenshots, package labels—so they don't clutter your photographic memories. Features one-click text extraction (OCR) directly in photo previews.
+- **Utility:** Isolates functional documents (receipts, whiteboards, notes, screenshots, package labels) so they don't clutter your photographic memories. Features one-click text extraction (OCR) directly in photo previews.
 - **Finalize:** Swiftly triage edge cases and uncertain classifications with numeric hotkeys; the classifier learns from your adjustments.
 - **Duplicates:** Side-by-side comparison of duplicate and near-duplicate images with one-click resolution.
 - **Junk:** Central review for confirmed duplicates, memes, severely blurred shots, and unreadable files.
