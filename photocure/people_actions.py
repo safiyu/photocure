@@ -147,11 +147,23 @@ def _arrange_by_similarity(clusters: list[M.PersonCluster], s=None) -> list[tupl
 def list_people(db_path: Path | str, sort: str = "similarity", stage: str = "all") -> list[dict]:
     with get_session(db_path) as s:
         # Prune any empty unnamed ghost clusters
-        empty_unnamed = s.exec(
-            select(M.PersonCluster)
-            .where(M.PersonCluster.face_count <= 0)
-            .where(M.PersonCluster.name.is_(None))
-        ).all()
+        has_any_face = s.exec(select(M.FaceDetection.id).limit(1)).first() is not None
+        if has_any_face:
+            active_pids = select(M.FaceDetection.person_id).where(
+                M.FaceDetection.person_id.is_not(None),
+                M.FaceDetection.ignored == False,
+            )
+            empty_unnamed = s.exec(
+                select(M.PersonCluster)
+                .where(M.PersonCluster.name.is_(None))
+                .where((M.PersonCluster.face_count <= 0) | col(M.PersonCluster.id).not_in(active_pids))
+            ).all()
+        else:
+            empty_unnamed = s.exec(
+                select(M.PersonCluster)
+                .where(M.PersonCluster.face_count <= 0)
+                .where(M.PersonCluster.name.is_(None))
+            ).all()
         if empty_unnamed:
             for p in empty_unnamed:
                 s.delete(p)
@@ -194,12 +206,12 @@ def list_people(db_path: Path | str, sort: str = "similarity", stage: str = "all
                 scoped_counts = dict(s.exec(counts_q).all())
                 clusters = []
                 for c in library_clusters:
-                    if s.exec(select(M.FaceDetection.id).where(M.FaceDetection.person_id == c.id).limit(1)).first() is not None:
-                        cnt = scoped_counts.get(c.id, 0)
-                    else:
-                        cnt = c.face_count
+                    cnt = scoped_counts.get(c.id, 0)
                     if cnt > 0:
                         c.face_count = cnt
+                        clusters.append(c)
+                    elif c.name:
+                        c.face_count = 0
                         clusters.append(c)
             else:
                 clusters = [c for c in library_clusters if c.face_count > 0]
@@ -802,11 +814,23 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
                 created_count += 1
 
         # Prune any empty unnamed ghost clusters
-        empty_unnamed = s.exec(
-            select(M.PersonCluster)
-            .where(M.PersonCluster.face_count <= 0)
-            .where(M.PersonCluster.name.is_(None))
-        ).all()
+        has_any_face = s.exec(select(M.FaceDetection.id).limit(1)).first() is not None
+        if has_any_face:
+            active_pids = select(M.FaceDetection.person_id).where(
+                M.FaceDetection.person_id.is_not(None),
+                M.FaceDetection.ignored == False,
+            )
+            empty_unnamed = s.exec(
+                select(M.PersonCluster)
+                .where(M.PersonCluster.name.is_(None))
+                .where((M.PersonCluster.face_count <= 0) | col(M.PersonCluster.id).not_in(active_pids))
+            ).all()
+        else:
+            empty_unnamed = s.exec(
+                select(M.PersonCluster)
+                .where(M.PersonCluster.face_count <= 0)
+                .where(M.PersonCluster.name.is_(None))
+            ).all()
         for p in empty_unnamed:
             s.delete(p)
 

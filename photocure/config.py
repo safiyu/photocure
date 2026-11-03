@@ -176,7 +176,7 @@ class FaceSettings(BaseSettings):
     # False turns face analysis off completely (infer --no-faces): no faces, no blink flags.
     enabled: bool = True
     # YuNet.
-    detect_score_min: float = 0.7      # (tune) minimum detector score
+    detect_score_min: float = 0.55     # (tune) minimum detector score (0.55 catches angled, tilted, or expressive faces)
     nms_threshold: float = 0.3         # (tune)
     max_faces: int = 200
     # Stage 2 crops come from the full-resolution frame.

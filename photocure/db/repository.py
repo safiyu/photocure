@@ -553,15 +553,37 @@ class PhotoRepository:
             .group_by(ImageRecord.burst_id).having(func.count() >= (1 if stage == "trash" else 2)).subquery()
         )
         bursts = self.s.exec(sselect(func.count()).select_from(live_bursts)).one()
-        people_where = [PersonCluster.face_count > 0, PersonCluster.stage != "trash"]
-        if stage and stage != "all":
-            # New and Library share one set of people (see people_actions._cluster_stage).
-            cluster_stage = "trash" if stage == "trash" else "library"
-            people_where.append(PersonCluster.stage == cluster_stage)
-        people = self.s.exec(
-            sselect(func.count()).select_from(PersonCluster)
-            .where(*people_where)
-        ).one()
+        # People: count distinct clusters that have active, non-ignored faces in this stage's photos
+        has_any_face = self.s.exec(sselect(FaceDetection.id).limit(1)).first() is not None
+        if has_any_face:
+            face_scope = [
+                FaceDetection.person_id.is_not(None),
+                FaceDetection.ignored == False,
+            ]
+            if stage and stage != "all":
+                face_scope.append(ImageRecord.stage == stage)
+                if stage != "trash":
+                    face_scope.append(ImageRecord.scan_status != "missing")
+                    face_scope.append(col(ImageRecord.route_status).not_in(["trashed", "purged"]))
+            else:
+                face_scope.append(ImageRecord.stage != "trash")
+                face_scope.append(ImageRecord.scan_status != "missing")
+                face_scope.append(col(ImageRecord.route_status).not_in(["trashed", "purged"]))
+
+            people = self.s.exec(
+                sselect(func.count(func.distinct(FaceDetection.person_id)))
+                .join(ImageRecord, ImageRecord.id == FaceDetection.image_id)
+                .where(*face_scope)
+            ).one()
+        else:
+            people_where = [PersonCluster.face_count > 0, PersonCluster.stage != "trash"]
+            if stage and stage != "all":
+                cluster_stage = "trash" if stage == "trash" else "library"
+                people_where.append(PersonCluster.stage == cluster_stage)
+            people = self.s.exec(
+                sselect(func.count()).select_from(PersonCluster)
+                .where(*people_where)
+            ).one()
         stage_rows = self.s.exec(
             sselect(ImageRecord.stage, func.count()).where(active).group_by(ImageRecord.stage)
         ).all()

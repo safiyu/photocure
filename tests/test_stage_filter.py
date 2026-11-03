@@ -110,6 +110,10 @@ def test_people_listing_follows_stage(staged):
     assert people("?stage=library") == {p_lib}
     assert people("?stage=trash") == {p_trash}
     assert people() == {p_new, p_lib}
+    assert e.client.get("/api/overview?stage=new").json()["stats"]["people"] == 1
+    assert e.client.get("/api/overview?stage=library").json()["stats"]["people"] == 1
+    assert e.client.get("/api/overview?stage=trash").json()["stats"]["people"] == 1
+    assert e.client.get("/api/overview?stage=all").json()["stats"]["people"] == 2
 
 
 def test_person_photos_respect_stage(staged):

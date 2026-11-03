@@ -189,11 +189,36 @@ class FaceEngine:
         def clip(v: float) -> float:
             return float(min(1.0, max(0.0, v)))
 
+        candidates: list[FaceInfo] = []
         for r in rows:
             x, y, bw, bh = (float(v) for v in r[:4])
             lm = [(clip(float(r[4 + 2 * i]) / w), clip(float(r[5 + 2 * i]) / h)) for i in range(5)]
-            out.append(FaceInfo(clip(x / w), clip(y / h), clip((x + bw) / w), clip((y + bh) / h),
-                                confidence=float(r[14]), landmarks=lm))
+            candidates.append(FaceInfo(clip(x / w), clip(y / h), clip((x + bw) / w), clip((y + bh) / h),
+                                       confidence=float(r[14]), landmarks=lm))
+
+        # Suppress duplicate / overlapping boxes on the same face (IoU or containment)
+        candidates.sort(key=lambda f: f.confidence, reverse=True)
+        for c in candidates:
+            cb = (c.x1, c.y1, c.x2, c.y2)
+            dup = False
+            for k in out:
+                kb = (k.x1, k.y1, k.x2, k.y2)
+                inter_w = max(0.0, min(cb[2], kb[2]) - max(cb[0], kb[0]))
+                inter_h = max(0.0, min(cb[3], kb[3]) - max(cb[1], kb[1]))
+                inter = inter_w * inter_h
+                if inter > 0:
+                    ca = (cb[2] - cb[0]) * (cb[3] - cb[1])
+                    ka = (kb[2] - kb[0]) * (kb[3] - kb[1])
+                    union = ca + ka - inter
+                    min_a = min(ca, ka)
+                    iou = inter / union if union > 0 else 0.0
+                    containment = inter / min_a if min_a > 0 else 0.0
+                    if iou > 0.30 or containment > 0.40:
+                        dup = True
+                        break
+            if not dup:
+                out.append(c)
+
         return out
 
     # --------------------------------------------------- stage 2: crop + eyes
