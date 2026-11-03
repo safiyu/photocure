@@ -4806,14 +4806,6 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
 }
 .pcur-idprev canvas { max-width: 100%; max-height: 180px; display: block; }
 
-.pcur-qrf { display: grid; gap: 8px; }
-.pcur-qrf input, .pcur-qrf textarea {
-  width: 100%; border-radius: var(--r-sm); border: 1px solid var(--line);
-  background: var(--well); color: var(--ink); padding: 7px 9px; font-size: 13px;
-}
-.pcur-qrprev { display: grid; place-items: center; background: #fff; border-radius: var(--r-sm); border: 1px solid var(--line); padding: 10px; }
-.pcur-qrcv { width: 170px; height: 170px; image-rendering: pixelated; }
-
 .pcur-ocr {
   width: 100%; min-height: 110px; resize: vertical; border-radius: var(--r-sm);
   border: 1px solid var(--line); background: var(--well); color: var(--ink); padding: 8px 10px;

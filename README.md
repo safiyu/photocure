@@ -118,7 +118,6 @@ Once you've culled a burst or rescued a memory, you can polish it on the spot wi
 | | **Remaster** | AI denoise, low-light rescue, and super-resolution upscaling for older, grainy, or under-exposed shots |
 | **Quick Fun & Annotate** | **Remove BG** | AI subject isolation with fallback edge cutout |
 | | **Draw & Stickers** | Freehand pen, highlighter, eraser, and emoji stickers for family notes and quick sharing |
-| | **QR Code** | Embed scannable QR code stickers directly onto photos |
 
 - **Unified Apply bar:** Live previews for Crop, Light, Looks, and Detail with instant Undo/Redo (up to 10 steps).
 - **Split compare:** Press **Compare** (or shortcut **C**) for a draggable side-by-side view against the unedited original.

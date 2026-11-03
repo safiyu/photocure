@@ -143,9 +143,8 @@
     ["blur", "Detail", "eye", "adjust"], ["redeye", "Red-Eye", "face", "adjust"],
     ["bg", "Remove BG", "layers", "adjust"],
     ["draw", "Draw", "pen", "annotate"], ["stickers", "Stickers", "star", "annotate"],
-    ["qr", "QR Code", "copy", "tools"],
   ];
-  const TOOL_GROUPS = [["adjust", "Adjust"], ["annotate", "Annotate"], ["tools", "Tools"]];
+  const TOOL_GROUPS = [["adjust", "Adjust"], ["annotate", "Annotate"]];
 
   // --------------------------------------------------------------- small utils
   function makeCanvas(w, h) {
@@ -413,18 +412,6 @@
   }
   function dataUrlToBitmap(url) {
     return loadImage(url).then((img) => createImageBitmap(img).catch(() => img));
-  }
-  function qrToBitmap(matrix) {
-    const n = matrix.length, margin = 4, cell = 12;
-    const size = (n + margin * 2) * cell;
-    const c = makeCanvas(size, size);
-    const x = ctx2d(c);
-    x.fillStyle = "#fff"; x.fillRect(0, 0, size, size);
-    x.fillStyle = "#000";
-    for (let y = 0; y < n; y++)
-      for (let px = 0; px < n; px++)
-        if (matrix[y][px]) x.fillRect((px + margin) * cell, (y + margin) * cell, cell, cell);
-    return createImageBitmap(c).catch(() => c);
   }
   async function loadCustomStickers() {
     try {
@@ -895,12 +882,6 @@
       x.save();
       x.translate(cx, cy);
       if (sk.rot) x.rotate(sk.rot * Math.PI / 180);
-      if (sk.kind === "qr") {
-        const pad = w * 0.09;
-        x.fillStyle = "#fff";
-        roundRectPath(x, -w / 2 - pad, -h / 2 - pad, w + pad * 2, h + pad * 2, w * 0.05);
-        x.fill();
-      }
       x.drawImage(img, -w / 2, -h / 2, w, h);
       x.restore();
     }
@@ -1632,102 +1613,6 @@
         add(grid);
         showCat("fun");
         add(pEl("p", "pcur-hint", "Click a sticker to drop it in the middle. Then drag to move, the corner handle to resize, the top handle to rotate."));
-      }
-
-      else if (T === "qr") {
-        S.qr = S.qr || { type: "url", fields: {} };
-        add(chipRow([["url", "URL"], ["text", "Text"], ["phone", "Phone"], ["email", "Email"], ["sms", "SMS"], ["wifi", "Wi-Fi"], ["vcard", "vCard"], ["geo", "Geo"]],
-          S.qr.type, (v) => { S.qr.type = v; S.qr.fields = {}; buildFields(); }));
-        const fields = pEl("div", "pcur-qrf");
-        add(fields);
-        function qrText() {
-          const f = S.qr.fields;
-          switch (S.qr.type) {
-            case "url": return f.value || "";
-            case "text": return f.value || "";
-            case "phone": return f.value ? "tel:" + f.value : "";
-            case "email": return f.value ? `mailto:${f.value}${f.subject ? "?subject=" + encodeURIComponent(f.subject) : ""}` : "";
-            case "sms": return f.phone ? `SMSTO:${f.phone}:${f.message || ""}` : "";
-            case "wifi": return f.ssid ? `WIFI:T:${f.enc || "WPA"};S:${f.ssid};P:${f.password || ""};;` : "";
-            case "vcard": return f.name ? `BEGIN:VCARD\nVERSION:3.0\nFN:${f.name}\nTEL:${f.phone || ""}\nEMAIL:${f.email || ""}\nEND:VCARD` : "";
-            case "geo": return f.lat || f.long ? `geo:${f.lat || 0},${f.long || 0}` : "";
-          }
-          return "";
-        }
-        const qcv = makeCanvas(200, 200);
-        qcv.className = "pcur-qrcv";
-        const pw = pEl("div", "pcur-qrprev");
-        pw.appendChild(qcv);
-        add(pw);
-        function paintQR() {
-          const x = ctx2d(qcv);
-          const txt = qrText();
-          x.clearRect(0, 0, 200, 200);
-          if (!txt) {
-            x.fillStyle = "rgba(128,128,128,.25)";
-            x.fillRect(0, 0, 200, 200);
-            x.fillStyle = "#888"; x.font = "13px sans-serif"; x.textAlign = "center";
-            x.fillText("Type details to generate", 100, 104);
-            return;
-          }
-          try {
-            if (!root.PCUR_QR) throw new Error("QR module not loaded");
-            const m = root.PCUR_QR.encode(txt);
-            qrToBitmap(m).then((bmp) => {
-              const x2 = ctx2d(qcv);
-              x2.clearRect(0, 0, 200, 200);
-              x2.fillStyle = "#fff"; x2.fillRect(0, 0, 200, 200);
-              const s = Math.min(196 / bmp.width, 196 / bmp.height);
-              x2.drawImage(bmp, (200 - bmp.width * s) / 2, (200 - bmp.height * s) / 2, bmp.width * s, bmp.height * s);
-            });
-          } catch (e) {
-            const x2 = ctx2d(qcv);
-            x2.fillStyle = "rgba(128,128,128,.25)"; x2.fillRect(0, 0, 200, 200);
-            x2.fillStyle = "#a33"; x2.font = "12px sans-serif"; x2.textAlign = "center";
-            x2.fillText("Too much data for QR v10", 100, 104);
-          }
-        }
-        const DEFS = {
-          url: [["value", "URL"]], text: [["value", "Text"]], phone: [["value", "Number"]],
-          email: [["value", "Address"], ["subject", "Subject"]],
-          sms: [["phone", "Number"], ["message", "Message"]],
-          wifi: [["ssid", "Network name"], ["password", "Password"], ["enc", "Encryption (WPA/WEPA/nopass)"]],
-          vcard: [["name", "Full name"], ["phone", "Phone"], ["email", "Email"]],
-          geo: [["lat", "Latitude"], ["long", "Longitude"]],
-        };
-        function buildFields() {
-          fields.innerHTML = "";
-          for (const [k, lab] of DEFS[S.qr.type]) {
-            const fldId = "pcur-qr-" + k;
-            const r = pEl("div", "pcur-row");
-            const lbl = pEl("label", "pcur-lbl", esc(lab));
-            lbl.setAttribute("for", fldId);
-            r.appendChild(lbl);
-            const inp = document.createElement("input");
-            inp.id = fldId;
-            inp.setAttribute("aria-label", lab);
-            inp.type = "text";
-            inp.value = S.qr.fields[k] || "";
-            inp.placeholder = lab;
-            inp.addEventListener("input", () => { S.qr.fields[k] = inp.value; paintQR(); });
-            r.appendChild(inp);
-            fields.appendChild(r);
-          }
-          paintQR();
-        }
-        buildFields();
-        const addBtn = pBtn(icon("plus") + "<span>Add to photo</span>", "primary", async () => {
-          const txt = qrText();
-          if (!txt) { toast("Fill in the QR details first", "err"); return; }
-          if (!root.PCUR_QR) { toast("QR module not loaded", "err"); return; }
-          let m;
-          try { m = root.PCUR_QR.encode(txt); } catch (e) { toast("Too much data for a QR code", "err"); return; }
-          const bmp = await qrToBitmap(m);
-          placeSticker(bmp, "qr");
-          selectTool("stickers");
-          toast("QR added — drag it into place", "ok");
-        });
-        add(btnRow(addBtn));
       }
     }
 
