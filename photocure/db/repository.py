@@ -629,7 +629,24 @@ class PhotoRepository:
             if not new_ids:
                 return counts
 
-            # 2. Delete child records for new images
+            # 2. Break foreign key references pointing to new images to prevent constraint violations
+            self.s.exec(
+                supdate(BurstGroup)
+                .where(col(BurstGroup.best_shot_id).in_(new_ids))
+                .values(best_shot_id=None)
+            )
+            self.s.exec(
+                supdate(ImageRecord)
+                .where(col(ImageRecord.duplicate_of).in_(new_ids))
+                .values(duplicate_of=None)
+            )
+            self.s.exec(
+                supdate(ActionLedger)
+                .where(col(ActionLedger.image_id).in_(new_ids))
+                .values(image_id=None)
+            )
+
+            # 3. Delete child records for new images
             for model in (SemanticScore, FaceDetection, QualityMetric, PlanActionRow):
                 res = self.s.exec(
                     sdelete(model).where(col(model.image_id).in_(new_ids))
@@ -638,13 +655,13 @@ class PhotoRepository:
                     res.rowcount if res.rowcount is not None and res.rowcount >= 0 else 0
                 )
 
-            # 3. Delete un-applied plans
+            # 4. Delete un-applied plans
             res = self.s.exec(sdelete(PlanRecord).where(PlanRecord.applied_transaction.is_(None)))
             counts[PlanRecord.__tablename__] = int(
                 res.rowcount if res.rowcount is not None and res.rowcount >= 0 else 0
             )
 
-            # 4. Delete the new ImageRecord rows themselves
+            # 5. Delete the new ImageRecord rows themselves
             res = self.s.exec(
                 sdelete(ImageRecord).where(col(ImageRecord.id).in_(new_ids))
             )
@@ -652,7 +669,7 @@ class PhotoRepository:
                 res.rowcount if res.rowcount is not None and res.rowcount >= 0 else 0
             )
 
-            # 5. Clean up any empty orphan burst groups or person clusters with 0 faces
+            # 6. Clean up any empty orphan burst groups or person clusters with 0 faces
             orphan_bursts = list(self.s.exec(
                 sselect(BurstGroup.id)
                 .where(~col(BurstGroup.id).in_(sselect(ImageRecord.burst_id).where(ImageRecord.burst_id.isnot(None))))
@@ -693,6 +710,8 @@ class PhotoRepository:
 
         if keep_ledger:
             self.s.exec(supdate(ActionLedger).values(image_id=None))
+        self.s.exec(supdate(BurstGroup).values(best_shot_id=None))
+        self.s.exec(supdate(ImageRecord).values(duplicate_of=None))
 
         for model in models:
             res = self.s.exec(sdelete(model))

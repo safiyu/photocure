@@ -159,3 +159,25 @@ def test_reapplying_an_applied_photo_keeps_it_in_library(world):
     assert rep.in_place == 1
     row = _row(w, iid)
     assert row["stage"] == "library" and row["path"] == str(lib_path)
+
+
+def test_reset_stage_new_breaks_burst_foreign_keys(world):
+    from photocure.db.repository import PhotoRepository
+    from photocure.db.session import get_session
+    from photocure.db import models as M
+    w = world
+    iid, _ = w.rows[0]
+
+    with get_session(w.db) as s:
+        bg = M.BurstGroup(name="burst_test_1", best_shot_id=iid, image_count=1)
+        s.add(bg)
+        s.commit()
+        s.refresh(bg)
+        rec = s.get(M.ImageRecord, iid)
+        rec.burst_id = bg.id
+        s.commit()
+
+        repo = PhotoRepository(s)
+        counts = repo.clear_library(keep_ledger=True, stage="new")
+        assert counts.get("images", 0) >= 1
+        assert s.get(M.ImageRecord, iid) is None
