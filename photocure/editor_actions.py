@@ -305,24 +305,33 @@ def save_edited_image(db_path: Path | str, cfg: CuratorConfig, image_id: int, im
 _REMBG_SESSIONS: dict[str, object] = {}
 _SR_SESSION: object | None = None
 _RAPIDOCR_ENGINE: object | None = None
+_MIGAN_SESSION: object | None = None
+_DEPTH_SESSION: object | None = None
 
 
-def _get_rembg_session(model_name: str = "birefnet-general"):
+def _get_rembg_session(model_name: str = "birefnet-general-lite"):
     """Load and cache an MIT / Apache-2.0 rembg session (never uses non-commercial bria-rmbg)."""
     import rembg
-    allowed = ("birefnet-general", "isnet-general-use", "u2net", "u2netp")
+    allowed = (
+        "birefnet-general-lite",
+        "birefnet-general",
+        "birefnet-portrait",
+        "isnet-general-use",
+        "u2net",
+        "u2netp",
+    )
     if model_name not in allowed:
-        model_name = "birefnet-general"
+        model_name = "birefnet-general-lite"
     if model_name not in _REMBG_SESSIONS:
         _REMBG_SESSIONS[model_name] = rembg.new_session(model_name)
     return _REMBG_SESSIONS[model_name]
 
 
-def remove_background(image_bytes: bytes, model_name: str = "birefnet-general") -> bytes:
-    """Remove background from image bytes using BiRefNet (MIT) / U2-Net (Apache-2.0) or OpenCV GrabCut fallback."""
+def remove_background(image_bytes: bytes, model_name: str = "birefnet-general-lite") -> bytes:
+    """Remove background from image bytes using BiRefNet-Lite (MIT) / U2-Net (Apache-2.0) or OpenCV GrabCut fallback."""
     # 1. Try rembg with strictly permissive MIT / Apache-2.0 models (primary -> U2-Net fallback)
     tried: set[str] = set()
-    for candidate in (model_name, "u2net"):
+    for candidate in (model_name, "birefnet-general", "u2net"):
         if candidate in tried:
             continue
         tried.add(candidate)
@@ -624,3 +633,211 @@ def extract_text(image_bytes: bytes) -> str:
     except Exception as e:
         log.info("OCR not available or failed: %s", e)
         return ""
+
+
+def _get_migan_session():
+    """Load and cache the MI-GAN ONNX inpainting session (MIT) if model weights exist."""
+    global _MIGAN_SESSION
+    if _MIGAN_SESSION is not None:
+        return _MIGAN_SESSION
+    candidates = [
+        Path(__file__).resolve().parent / "models" / "migan_inpaint.onnx",
+        Path(__file__).resolve().parent / "models" / "inpaint.onnx",
+        Path.home() / ".cache" / "photocure" / "migan_inpaint.onnx",
+    ]
+    p = next((c for c in candidates if c.is_file()), None)
+    if not p:
+        return None
+    try:
+        import onnxruntime as ort
+        ort.set_default_logger_severity(3)
+        _MIGAN_SESSION = ort.InferenceSession(str(p), providers=["CPUExecutionProvider"])
+        return _MIGAN_SESSION
+    except Exception as exc:
+        log.warning("Failed to initialize MI-GAN inpaint session: %s", exc)
+        return None
+
+
+def inpaint_image(image_bytes: bytes, mask_bytes: bytes) -> tuple[bytes, int, int]:
+    """Inpaint an image using MI-GAN ONNX (MIT) or OpenCV INPAINT_TELEA fallback.
+
+    Returns (output_bytes, width, height).
+    """
+    arr_img = np.frombuffer(image_bytes, np.uint8)
+    bgr = cv2.imdecode(arr_img, cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise ActionError("Could not decode image for inpainting", 400)
+
+    arr_mask = np.frombuffer(mask_bytes, np.uint8)
+    mask = cv2.imdecode(arr_mask, cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        raise ActionError("Could not decode mask for inpainting", 400)
+
+    h, w = bgr.shape[:2]
+    if mask.shape[:2] != (h, w):
+        mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
+
+    _, mask_bin = cv2.threshold(mask, 10, 255, cv2.THRESH_BINARY)
+    if np.count_nonzero(mask_bin) == 0:
+        ok, out_buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        return out_buf.tobytes(), w, h
+
+    sess = _get_migan_session()
+    inpainted = None
+    if sess is not None:
+        try:
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            rgb_512 = cv2.resize(rgb, (512, 512), interpolation=cv2.INTER_AREA)
+            mask_512 = cv2.resize(mask_bin, (512, 512), interpolation=cv2.INTER_NEAREST)
+
+            img_t = ((rgb_512.astype(np.float32) / 127.5) - 1.0).transpose(2, 0, 1)[None, ...]
+            mask_t = (mask_512.astype(np.float32) / 255.0)[None, None, ...]
+
+            input_names = [i.name for i in sess.get_inputs()]
+            feed = {input_names[0]: img_t}
+            if len(input_names) > 1:
+                feed[input_names[1]] = mask_t
+
+            preds = sess.run(None, feed)[0]
+            out_512 = ((preds[0].transpose(1, 2, 0) + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
+            out_rgb = cv2.cvtColor(out_512, cv2.COLOR_RGB2BGR)
+            out_resized = cv2.resize(out_rgb, (w, h), interpolation=cv2.INTER_CUBIC)
+
+            feather = cv2.GaussianBlur(mask_bin.astype(np.float32) / 255.0, (7, 7), 2.0)[:, :, None]
+            inpainted = (out_resized.astype(np.float32) * feather + bgr.astype(np.float32) * (1.0 - feather)).clip(0, 255).astype(np.uint8)
+        except Exception as exc:
+            log.warning("MI-GAN inference failed (%s); using cv2.inpaint fallback", exc)
+            inpainted = None
+
+    if inpainted is None:
+        inpainted = cv2.inpaint(bgr, mask_bin, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+
+    ok, out_buf = cv2.imencode(".jpg", inpainted, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    if not ok:
+        raise RuntimeError("Failed to encode inpainted image")
+    return out_buf.tobytes(), w, h
+
+
+def _get_depth_session():
+    """Load and cache Depth Anything V2 Small ONNX model (Apache-2.0) if present."""
+    global _DEPTH_SESSION
+    if _DEPTH_SESSION is not None:
+        return _DEPTH_SESSION
+    candidates = [
+        Path(__file__).resolve().parent / "models" / "depth_anything_v2_vits.onnx",
+        Path(__file__).resolve().parent / "models" / "depth_anything.onnx",
+        Path.home() / ".cache" / "photocure" / "depth_anything_v2_vits.onnx",
+    ]
+    p = next((c for c in candidates if c.is_file()), None)
+    if not p:
+        return None
+    try:
+        import onnxruntime as ort
+        ort.set_default_logger_severity(3)
+        _DEPTH_SESSION = ort.InferenceSession(str(p), providers=["CPUExecutionProvider"])
+        return _DEPTH_SESSION
+    except Exception as exc:
+        log.warning("Failed to initialize Depth Anything V2 session: %s", exc)
+        return None
+
+
+def estimate_depth_map(bgr: np.ndarray) -> np.ndarray:
+    """Estimate a 0.0 (far background) to 1.0 (near subject) float32 depth map for an image.
+
+    Uses Depth Anything V2 Small ONNX if present, with edge-aware distance transform fallback.
+    """
+    h, w = bgr.shape[:2]
+    sess = _get_depth_session()
+    if sess is not None:
+        try:
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            in_h = 518
+            in_w = 518
+            rgb_resized = cv2.resize(rgb, (in_w, in_h), interpolation=cv2.INTER_CUBIC)
+            mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+            std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+            tensor = ((rgb_resized.astype(np.float32) / 255.0 - mean) / std).transpose(2, 0, 1)[None, ...]
+
+            input_name = sess.get_inputs()[0].name
+            depth_raw = sess.run(None, {input_name: tensor})[0]
+            depth_2d = depth_raw.squeeze()
+            d_min = float(depth_2d.min())
+            d_max = float(depth_2d.max())
+            if d_max > d_min:
+                depth_norm = (depth_2d - d_min) / (d_max - d_min)
+            else:
+                depth_norm = np.zeros_like(depth_2d)
+            return cv2.resize(depth_norm.astype(np.float32), (w, h), interpolation=cv2.INTER_CUBIC)
+        except Exception as exc:
+            log.warning("Depth Anything V2 inference failed (%s); using heuristic depth map", exc)
+
+    y_coords, x_coords = np.mgrid[0:h, 0:w]
+    grad = (y_coords / max(1, h)).astype(np.float32)
+    cx, cy = w / 2.0, h / 2.0
+    dist = np.sqrt(((x_coords - cx) / max(1, w)) ** 2 + ((y_coords - cy) / max(1, h)) ** 2)
+    center_bias = np.clip(1.0 - dist * 1.4, 0.0, 1.0).astype(np.float32)
+
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    dist_trans = cv2.distanceTransform(255 - edges, cv2.DIST_L2, 5)
+    dist_norm = cv2.normalize(dist_trans, None, 0.0, 1.0, cv2.NORM_MINMAX)
+
+    depth = 0.4 * grad + 0.4 * center_bias + 0.2 * dist_norm
+    depth_smooth = cv2.bilateralFilter(depth.astype(np.float32), 9, 75, 75)
+    return np.clip(depth_smooth, 0.0, 1.0)
+
+
+def apply_depth_bokeh(
+    image_bytes: bytes,
+    focus_x: float = 0.5,
+    focus_y: float = 0.5,
+    aperture: float = 0.5,
+) -> tuple[bytes, int, int]:
+    """Apply realistic progressive bokeh depth-of-field blur using Depth Anything V2.
+
+    focus_x, focus_y: normalized coordinates (0.0..1.0) of the tapped focus point.
+    aperture: strength of background/foreground bokeh blur (0.0 = sharp, 1.0 = heavy f/1.4 blur).
+    """
+    arr = np.frombuffer(image_bytes, np.uint8)
+    bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise ActionError("Could not decode image for bokeh effect", 400)
+
+    h, w = bgr.shape[:2]
+    aperture = float(np.clip(aperture, 0.0, 1.0))
+    if aperture <= 0.01:
+        ok, out_buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        return out_buf.tobytes(), w, h
+
+    depth_map = estimate_depth_map(bgr)
+
+    fx = int(np.clip(focus_x * w, 0, w - 1))
+    fy = int(np.clip(focus_y * h, 0, h - 1))
+    focus_depth = float(depth_map[fy, fx])
+
+    coc = np.abs(depth_map - focus_depth)
+    sharp_band = 0.08 * (1.0 - aperture * 0.5)
+    blur_weight = np.clip((coc - sharp_band) / (1.0 - sharp_band + 1e-6), 0.0, 1.0)
+    blur_weight = np.power(blur_weight, 1.2) * aperture
+
+    k1 = max(3, int(round(15 * aperture)) * 2 + 1)
+    k2 = max(5, int(round(35 * aperture)) * 2 + 1)
+    bgr_blur1 = cv2.GaussianBlur(bgr, (k1, k1), 0)
+    bgr_blur2 = cv2.GaussianBlur(bgr, (k2, k2), 0)
+
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    _, high_mask = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY)
+    high_blur = cv2.dilate(high_mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+    specular_boost = (high_blur.astype(np.float32) / 255.0)[:, :, None] * 0.15
+
+    w1 = np.clip(blur_weight * 2.0, 0.0, 1.0)[:, :, None]
+    w2 = np.clip((blur_weight - 0.5) * 2.0, 0.0, 1.0)[:, :, None]
+
+    stage1 = bgr.astype(np.float32) * (1.0 - w1) + bgr_blur1.astype(np.float32) * w1
+    stage2 = stage1 * (1.0 - w2) + bgr_blur2.astype(np.float32) * w2
+    result = np.clip(stage2 + stage2 * specular_boost * w1, 0, 255).astype(np.uint8)
+
+    ok, out_buf = cv2.imencode(".jpg", result, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    if not ok:
+        raise RuntimeError("Failed to encode bokeh image")
+    return out_buf.tobytes(), w, h

@@ -165,10 +165,25 @@ class SemanticEngine:
 
     # --------------------------------------------------------------- helpers
     @staticmethod
-    def _bgr_to_tensor(bgr: np.ndarray, preprocess) -> object:
-        """Run the open_clip val transform on a PIL image (works on all versions)."""
+    def _bgr_to_tensor(bgr: np.ndarray, preprocess, naflex: bool = True) -> object:
+        """Run the val transform on a PIL image (works on all versions).
+
+        When naflex is True (default for SigLIP 2 / NaFlex pipeline), preserves native
+        aspect ratios via letterbox padding instead of squashing or center-cropping,
+        ensuring vertical portraits, document receipts, and panoramic landscapes
+        retain full context without subject truncation.
+        """
         from PIL import Image
+        h, w = bgr.shape[:2]
         rgb = np.ascontiguousarray(bgr[:, :, ::-1])
+        if naflex and abs(h - w) > max(h, w) * 0.05:
+            max_dim = max(h, w)
+            padded = np.zeros((max_dim, max_dim, 3), dtype=np.uint8)
+            padded[:] = (128, 128, 128)
+            y_off = (max_dim - h) // 2
+            x_off = (max_dim - w) // 2
+            padded[y_off:y_off + h, x_off:x_off + w] = rgb
+            return preprocess(Image.fromarray(padded))
         return preprocess(Image.fromarray(rgb))
 
     # ------------------------------------------------------------ inference
@@ -188,7 +203,7 @@ class SemanticEngine:
         for start in range(0, len(images), batch_size):
             chunk = images[start:start + batch_size]
             tensors = torch.stack(
-                [self._bgr_to_tensor(b, self._preprocess) for b in chunk]
+                [self._bgr_to_tensor(b, self._preprocess, naflex=getattr(self.cfg, "naflex", True)) for b in chunk]
             ).to(self._device)
             ctx = self._autocast or torch.autocast(device_type="cpu", enabled=False)
             with torch.no_grad(), ctx:

@@ -290,3 +290,55 @@ def test_save_format_validation_and_raw_overwrite_guard(env):
         rec = s.get(M.ImageRecord, iid)
         rec.extension = old_ext
         s.commit()
+
+
+def test_inpaint_and_bokeh_actions_and_endpoints(env):
+    from photocure.editor_actions import inpaint_image, apply_depth_bokeh
+
+    # Create synthetic test image
+    img_buf = io.BytesIO()
+    Image.new("RGB", (60, 60), (120, 150, 180)).save(img_buf, format="JPEG")
+    img_bytes = img_buf.getvalue()
+
+    # Create synthetic test mask (black with white box)
+    mask_im = Image.new("L", (60, 60), 0)
+    for y in range(20, 40):
+        for x in range(20, 40):
+            mask_im.putpixel((x, y), 255)
+    mask_buf = io.BytesIO()
+    mask_im.save(mask_buf, format="PNG")
+    mask_bytes = mask_buf.getvalue()
+
+    # Direct inpaint function
+    healed, hw, hh = inpaint_image(img_bytes, mask_bytes)
+    assert len(healed) > 0
+    assert hw == 60 and hh == 60
+
+    # Direct bokeh function
+    bokeh, bw, bh = apply_depth_bokeh(img_bytes, focus_x=0.5, focus_y=0.5, aperture=0.6)
+    assert len(bokeh) > 0
+    assert bw == 60 and bh == 60
+
+    # API /api/editor/inpaint multipart
+    r_inp = env.client.post(
+        "/api/editor/inpaint",
+        files={
+            "file": ("test.jpg", img_bytes, "image/jpeg"),
+            "mask": ("mask.png", mask_bytes, "image/png"),
+        },
+    )
+    assert r_inp.status_code == 200
+    j_inp = r_inp.json()
+    assert j_inp["ok"] is True
+    assert j_inp["image"].startswith("data:image/jpeg;base64,")
+
+    # API /api/editor/bokeh multipart
+    r_bok = env.client.post(
+        "/api/editor/bokeh",
+        files={"file": ("test.jpg", img_bytes, "image/jpeg")},
+        data={"focus_x": "0.4", "focus_y": "0.4", "aperture": "0.5"},
+    )
+    assert r_bok.status_code == 200
+    j_bok = r_bok.json()
+    assert j_bok["ok"] is True
+    assert j_bok["image"].startswith("data:image/jpeg;base64,")

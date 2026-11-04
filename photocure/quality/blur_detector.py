@@ -68,6 +68,37 @@ def compute_blur_retained(bgr: np.ndarray, patch_side: int = 1024, sigma: float 
     return energy(cv2.GaussianBlur(p, (0, 0), sigma)) / base
 
 
+def compute_motion_anisotropy(bgr: np.ndarray, patch_side: int = 1024) -> float:
+    """Share of directional streak energy from camera shake or subject motion.
+
+    Computes eigenvalues of the gradient structure tensor on the resolution-normalized
+    patch. Isotropic textures and sharp photos have balanced eigenvalues (anisotropy < 0.4),
+    while motion-blurred frames have strong directional streak energy (anisotropy > 0.65).
+    """
+    if bgr is None or bgr.size == 0:
+        return 0.0
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY) if bgr.ndim == 3 else bgr
+    p = _center_crop_patch(gray, patch_side).astype(np.float32)
+    gx = cv2.Sobel(p, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(p, cv2.CV_32F, 0, 1, ksize=3)
+
+    jxx = float(np.sum(gx * gx))
+    jyy = float(np.sum(gy * gy))
+    jxy = float(np.sum(gx * gy))
+
+    trace = jxx + jyy
+    if trace < 1e-6:
+        return 0.0
+    det = jxx * jyy - jxy * jxy
+    disc = max(0.0, trace * trace - 4.0 * det)
+    sqrt_disc = np.sqrt(disc)
+    l1 = (trace + sqrt_disc) / 2.0
+    l2 = max(0.0, (trace - sqrt_disc) / 2.0)
+
+    aniso = (l1 - l2) / (l1 + l2 + 1e-6)
+    return float(np.clip(aniso, 0.0, 1.0))
+
+
 class BlurDetector:
     """Score image sharpness against :class:`QualityThresholds`."""
 
@@ -91,11 +122,22 @@ class BlurDetector:
         if blurry:
             retained = compute_blur_retained(bgr)
             blurry = retained >= float(getattr(self.t, "blur_retained_min", 0.58))
+
+        # Check directional motion blur (distinguishes motion blur from high-ISO noise)
+        aniso = compute_motion_anisotropy(bgr)
+        if aniso > 0.70 and lap_var < hi * 1.5:
+            if retained is None:
+                retained = compute_blur_retained(bgr)
+            if retained > 0.48:
+                blurry = True
+                norm = min(norm, 0.25)
+
         return {
             "laplacian_variance": lap_var,
             "sharpness_norm": round(norm, 4),
             "is_blurry": bool(blurry),
             "blur_retained": None if retained is None else round(retained, 4),
+            "motion_anisotropy": round(aniso, 4),
         }
 
 

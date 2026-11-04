@@ -143,8 +143,9 @@
     ["blur", "Detail", "eye", "adjust"], ["redeye", "Red-Eye", "face", "adjust"],
     ["bg", "Remove BG", "layers", "adjust"],
     ["draw", "Draw", "pen", "annotate"], ["stickers", "Stickers", "star", "annotate"],
+    ["heal", "Heal", "pen", "tools"], ["bokeh", "Bokeh", "camera", "tools"], ["ocr", "OCR", "search", "tools"],
   ];
-  const TOOL_GROUPS = [["adjust", "Adjust"], ["annotate", "Annotate"]];
+  const TOOL_GROUPS = [["adjust", "Adjust"], ["annotate", "Annotate"], ["tools", "Tools"]];
 
   // --------------------------------------------------------------- small utils
   function makeCanvas(w, h) {
@@ -462,6 +463,8 @@
       crop: null, cropAspect: null,
       drawMode: "pen", color: "#ff3b30", brush: 10,
       redRadius: 24,
+      healBrush: 25, healStrokes: [], _healLive: null,
+      bokehAperture: 40, bokehFocus: { x: 0.5, y: 0.5 },
       // One editable sticker at a time; `base` is the canvas state before it was added,
       // so moving/resizing/rotating re-bakes base + sticker (no dual-track replay).
       sticker: null,
@@ -972,6 +975,41 @@
         x.restore();
       }
       if (S._live) strokePath(x, S._live, Wc, Hc);
+      if (S.tool === "heal") {
+        const drawHSt = (st) => {
+          const pts = st.pts;
+          if (!pts || !pts.length) return;
+          const lw = Math.max(2, st.size * (Wc / 1000));
+          x.save();
+          x.lineCap = "round"; x.lineJoin = "round"; x.lineWidth = lw;
+          x.strokeStyle = "rgba(255, 60, 60, 0.55)";
+          x.fillStyle = "rgba(255, 60, 60, 0.55)";
+          x.beginPath();
+          x.moveTo(pts[0].x * Wc, pts[0].y * Hc);
+          for (let i = 1; i < pts.length; i++) x.lineTo(pts[i].x * Wc, pts[i].y * Hc);
+          if (pts.length === 1) { x.arc(pts[0].x * Wc, pts[0].y * Hc, lw / 2, 0, Math.PI * 2); x.fill(); }
+          else x.stroke();
+          x.restore();
+        };
+        (S.healStrokes || []).forEach(drawHSt);
+        if (S._healLive) drawHSt(S._healLive);
+      }
+      if (S.tool === "bokeh" && S.bokehFocus) {
+        const fx = S.bokehFocus.x * Wc, fy = S.bokehFocus.y * Hc;
+        x.save();
+        x.strokeStyle = "rgba(255, 255, 255, 0.9)";
+        x.lineWidth = 2;
+        x.shadowColor = "rgba(0,0,0,0.6)";
+        x.shadowBlur = 4;
+        x.beginPath();
+        x.arc(fx, fy, 22, 0, Math.PI * 2);
+        x.stroke();
+        x.beginPath();
+        x.arc(fx, fy, 3, 0, Math.PI * 2);
+        x.fillStyle = "#fff";
+        x.fill();
+        x.restore();
+      }
     }
 
     // ---- pointer interactions ----
@@ -1121,6 +1159,12 @@
       } else if (S.tool === "draw") {
         S._live = { mode: S.drawMode, color: S.color, size: S.brush, pts: [norm(p)] };
         renderOverlay();
+      } else if (S.tool === "heal") {
+        S._healLive = { size: S.healBrush || 25, pts: [norm(p)] };
+        renderOverlay();
+      } else if (S.tool === "bokeh") {
+        S.bokehFocus = norm(p);
+        renderOverlay();
       } else if (S.tool === "stickers" && S.sticker) {
         const h = hitStickerHandle(p);
         const m = stickerMetrics(S.sticker);
@@ -1213,6 +1257,10 @@
         const p = screenToCanvas(ev.clientX, ev.clientY);
         S._live.pts.push(norm(p));
         renderOverlay();
+      } else if (S._healLive) {
+        const p = screenToCanvas(ev.clientX, ev.clientY);
+        S._healLive.pts.push(norm(p));
+        renderOverlay();
       }
     }
     function onPointerUp() {
@@ -1246,6 +1294,16 @@
           syncDisp();
           commit();
         }
+        return;
+      }
+      if (S._healLive) {
+        const st = S._healLive;
+        S._healLive = null;
+        if (st.pts.length) {
+          S.healStrokes = S.healStrokes || [];
+          S.healStrokes.push(st);
+        }
+        renderOverlay();
         return;
       }
       if (d && (d.kind === "move" || d.kind === "resize" || d.kind === "rotate")) commit();
@@ -1613,6 +1671,130 @@
         add(grid);
         showCat("fun");
         add(pEl("p", "pcur-hint", "Click a sticker to drop it in the middle. Then drag to move, the corner handle to resize, the top handle to rotate."));
+      }
+
+      else if (T === "heal") {
+        add(pSlider("Eraser brush", 5, 80, S.healBrush || 25, (v) => { S.healBrush = v; }, null, (v) => v + "px"));
+        const clrBtn = pBtn("Clear marks", "ghost", () => {
+          S.healStrokes = [];
+          renderOverlay();
+        });
+        const eraseBtn = pBtn(icon("pen") + "<span>Erase distraction</span>", "primary", async () => {
+          if (!S.healStrokes || !S.healStrokes.length) {
+            toast("Paint over the object you want to erase first", "err");
+            return;
+          }
+          busy(eraseBtn, true, "Erasing…");
+          try {
+            const mC = makeCanvas(workC.width, workC.height);
+            const mx = ctx2d(mC);
+            mx.fillStyle = "#000";
+            mx.fillRect(0, 0, mC.width, mC.height);
+            for (const st of S.healStrokes) {
+              const pts = st.pts;
+              if (!pts || !pts.length) continue;
+              const lw = Math.max(3, st.size * (mC.width / 1000));
+              mx.save();
+              mx.lineCap = "round"; mx.lineJoin = "round"; mx.lineWidth = lw;
+              mx.strokeStyle = "#fff"; mx.fillStyle = "#fff";
+              mx.beginPath();
+              mx.moveTo(pts[0].x * mC.width, pts[0].y * mC.height);
+              for (let i = 1; i < pts.length; i++) mx.lineTo(pts[i].x * mC.width, pts[i].y * mC.height);
+              if (pts.length === 1) { mx.arc(pts[0].x * mC.width, pts[0].y * mC.height, lw / 2, 0, Math.PI * 2); mx.fill(); }
+              else mx.stroke();
+              mx.restore();
+            }
+            const imgBlob = await canvasToBlob(workC, "image/jpeg", 0.95);
+            const maskBlob = await canvasToBlob(mC, "image/png");
+            const fd = new FormData();
+            fd.append("file", imgBlob, "image.jpg");
+            fd.append("mask", maskBlob, "mask.png");
+            const res = await fetch("/api/editor/inpaint", { method: "POST", body: fd });
+            if (!res.ok) throw new Error(((await res.json().catch(() => ({}))).detail) || "HTTP " + res.status);
+            const j = await res.json();
+            const img = await loadImage(j.image);
+            ctx2d(workC).drawImage(img, 0, 0, workC.width, workC.height);
+            S.healStrokes = [];
+            syncDisp();
+            renderOverlay();
+            await commit();
+            toast("Distraction erased", "ok");
+          } catch (e) {
+            toast("Heal failed: " + e.message, "err");
+          } finally {
+            busy(eraseBtn, false);
+          }
+        });
+        add(btnRow(clrBtn, eraseBtn));
+        add(pEl("p", "pcur-hint", "Paint in red over power lines, photobombers, or trash. The AI inpainter fills in the background smoothly."));
+      }
+
+      else if (T === "bokeh") {
+        add(pSlider("Aperture blur", 0, 100, S.bokehAperture || 40, (v) => { S.bokehAperture = v; }, null, (v) => v + "%"));
+        const b = pBtn(icon("camera") + "<span>Apply portrait bokeh</span>", "primary", async () => {
+          busy(b, true, "Rendering bokeh…");
+          try {
+            const b2 = await canvasToBlob(workC, "image/jpeg", 0.95);
+            const fd = new FormData();
+            fd.append("file", b2, "bokeh.jpg");
+            const focus = S.bokehFocus || { x: 0.5, y: 0.5 };
+            fd.append("focus_x", String(focus.x));
+            fd.append("focus_y", String(focus.y));
+            fd.append("aperture", String((S.bokehAperture || 40) / 100));
+            const res = await fetch("/api/editor/bokeh", { method: "POST", body: fd });
+            if (!res.ok) throw new Error(((await res.json().catch(() => ({}))).detail) || "HTTP " + res.status);
+            const j = await res.json();
+            const img = await loadImage(j.image);
+            ctx2d(workC).drawImage(img, 0, 0, workC.width, workC.height);
+            syncDisp();
+            renderOverlay();
+            await commit();
+            toast("Portrait bokeh applied", "ok");
+          } catch (e) {
+            toast("Bokeh failed: " + e.message, "err");
+          } finally {
+            busy(b, false);
+          }
+        });
+        add(btnRow(b));
+        add(pEl("p", "pcur-hint", "Tap anywhere on the photo to set the focus point. Depth Anything generates an AI depth map to blur backgrounds optically."));
+      }
+
+      else if (T === "ocr") {
+        const b = pBtn(icon("search") + "<span>Extract text</span>", "primary", async () => {
+          busy(b, true, "Extracting text…");
+          try {
+            const b2 = await canvasToBlob(workC, "image/png");
+            const fd = new FormData();
+            fd.append("file", b2, "ocr.png");
+            const res = await fetch("/api/editor/ocr", { method: "POST", body: fd });
+            if (!res.ok) throw new Error(((await res.json().catch(() => ({}))).detail) || "HTTP " + res.status);
+            const j = await res.json();
+            ta.value = j.text || "(no text found)";
+            ta.hidden = false;
+            copyB.hidden = !j.text;
+          } catch (e) { toast("OCR failed: " + e.message, "err"); }
+          busy(b, false);
+        });
+        const ta = document.createElement("textarea");
+        ta.className = "pcur-ocr";
+        ta.rows = 7;
+        ta.placeholder = "Extracted text appears here.";
+        ta.hidden = true;
+        add(btnRow(b));
+        add(ta);
+        const copyB = pBtn(icon("copy") + "<span>Copy to clipboard</span>", "secondary", async () => {
+          try {
+            await navigator.clipboard.writeText(ta.value);
+            toast("Copied to clipboard", "ok");
+          } catch (e) {
+            ta.select();
+            document.execCommand("copy");
+            toast("Copied to clipboard", "ok");
+          }
+        });
+        copyB.hidden = true;
+        add(copyB);
       }
     }
 

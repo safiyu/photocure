@@ -27,8 +27,10 @@ class QualityEngine:
         low_contrast = bright["is_low_contrast"]
 
         # Composite 0..1 quality score: start from sharpness, penalize the
-        # pathological exposure/contrast cases.
+        # pathological exposure/contrast and blur cases.
         score = blur["sharpness_norm"]
+        if is_blurry:
+            score = min(score, 0.35)
         if is_dark:
             score *= 0.25
         if is_over:

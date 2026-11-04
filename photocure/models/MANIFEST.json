@@ -51,6 +51,13 @@
       "upstream_url": "https://huggingface.co/fal/AuraFace-v1/resolve/main/glintr100.onnx"
     },
     {
+      "name": "BiRefNet Lite background removal",
+      "purpose": "Cuts the subject out with studio-grade alpha mattes in the editor's Remove BG tool",
+      "license": "MIT",
+      "cache_file": "birefnet-general-lite.onnx",
+      "upstream_url": "https://github.com/ZhengPeng7/BiRefNet"
+    },
+    {
       "name": "BiRefNet background removal",
       "purpose": "Cuts the subject out in the editor's Remove BG tool",
       "license": "MIT",
@@ -67,6 +74,27 @@
       "purpose": "Reads text in utility photo previews with OCR",
       "license": "Apache-2.0",
       "module": "rapidocr_onnxruntime"
+    },
+    {
+      "name": "MI-GAN inpainting",
+      "purpose": "Fills erased regions seamlessly in the editor's Heal / Magic Eraser tool",
+      "license": "MIT",
+      "cache_file": "migan_inpaint.onnx",
+      "upstream_url": "https://github.com/Picsart-AI-Research/MI-GAN"
+    },
+    {
+      "name": "Depth Anything V2 Small",
+      "purpose": "Monocular depth estimation for Portrait Bokeh depth blur in the editor",
+      "license": "Apache-2.0",
+      "cache_file": "depth_anything_v2_vits.onnx",
+      "upstream_url": "https://github.com/DepthAnything/Depth-Anything-V2"
+    },
+    {
+      "name": "SigLIP 2 NaFlex",
+      "purpose": "Dynamic aspect ratio vision-language embeddings and multilingual zero-shot search",
+      "license": "Apache-2.0",
+      "cache_file": "siglip2_base_naflex.onnx",
+      "upstream_url": "https://huggingface.co/google/siglip2-base-patch16-naflex"
     }
   ]
 }

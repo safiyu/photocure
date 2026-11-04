@@ -50,14 +50,20 @@ def label_for(rating: int | None, favorite: bool) -> int | None:
 
 
 def highlight_score(aesthetic: float | None, preference: float | None, rating: int | None,
-                    favorite: bool, w: HighlightWeights) -> float | None:
+                    favorite: bool, w: HighlightWeights,
+                    quality: float | None = None) -> float | None:
     """The ranking score, or None when the photo cannot be a highlight (rejected or unscored).
 
     A photo with its own clear signal (a favourite or a good or bad rating) ignores the learned
     taste, because that signal is what the taste model was trained on and would count twice.
+    When technical quality is provided, blurry or degraded frames are tempered so blurry-but-colorful
+    shots do not float to the top of Highlights.
     """
     if aesthetic is None or rating == -1:
         return None
+    if quality is not None:
+        tech_factor = float(np.clip(0.35 + 0.65 * quality, 0.2, 1.0))
+        aesthetic = aesthetic * tech_factor
     use_taste = preference is not None and label_for(rating, favorite) is None
     base = (1.0 - w.preference) * aesthetic + w.preference * preference if use_taste else aesthetic
     if rating and 1 <= rating <= 5:

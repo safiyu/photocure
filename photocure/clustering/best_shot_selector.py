@@ -44,6 +44,7 @@ class ShotCandidate:
     width: int = 0
     height: int = 0
     has_face: bool = False
+    is_blurry: bool = False
     is_too_dark: bool = False
     is_overexposed: bool = False
     # Tie-breakers / diagnostics.
@@ -105,6 +106,11 @@ class BestShotSelector:
         s_eye = _eye_open_score(c.eye_open, w) if c.has_face else None
         s_res = _resolution_score(c.width, c.height)
         s_aes = None if c.aesthetic is None else float(np.clip(c.aesthetic, 0.0, 1.0))
+        # Joint technical + aesthetic safeguard: prevent motion-blurred shots with high
+        # semantic aesthetic ratings from dominating burst winner selection.
+        is_blurry = bool(getattr(c, "is_blurry", False)) or s_blur < 0.25
+        if is_blurry and s_aes is not None:
+            s_aes = s_aes * 0.45
 
         terms = [(w.weight_blur, s_blur), (w.weight_face_sharp, s_face),
                  (w.weight_resolution, s_res)]
@@ -188,6 +194,7 @@ def _candidate_from_record(rec, face_min: float = 0.65, face_sharp_ref: float = 
     has_face = best_face is not None and best_face.confidence > face_min
     sem = getattr(rec, "semantic", None)
     aesthetic = getattr(sem, "aesthetic", None) if sem is not None else None
+    is_blurry = bool(getattr(q, "is_blurry", False)) if q is not None else False
     is_dark = bool(getattr(q, "is_too_dark", False)) if q is not None else False
     is_over = bool(getattr(q, "is_overexposed", False)) if q is not None else False
     ts = 0.0
@@ -207,6 +214,7 @@ def _candidate_from_record(rec, face_min: float = 0.65, face_sharp_ref: float = 
         width=rec.width,
         height=rec.height,
         has_face=has_face,
+        is_blurry=is_blurry,
         is_too_dark=is_dark,
         is_overexposed=is_over,
         taken_ts=ts,

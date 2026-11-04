@@ -1760,7 +1760,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         import base64
         from ..editor_actions import ActionError, remove_background
         content_type = request.headers.get("content-type", "")
-        model_name = "birefnet-general"
+        model_name = "birefnet-general-lite"
         if content_type.startswith("multipart/form-data"):
             form = await request.form()
             file_item = form.get("file")
@@ -1870,6 +1870,94 @@ def create_app(db_path: str | None = None) -> FastAPI:
         except Exception as e:
             logging.getLogger("photocure.ui").exception("ocr failed")
             raise HTTPException(500, f"OCR failed: {e}")
+
+    @app.post("/api/editor/inpaint", dependencies=auth)
+    async def editor_inpaint(request: Request):
+        import base64
+        from ..editor_actions import ActionError, inpaint_image
+        content_type = request.headers.get("content-type", "")
+        if content_type.startswith("multipart/form-data"):
+            form = await request.form()
+            file_item = form.get("file")
+            mask_item = form.get("mask")
+            if not file_item or not mask_item:
+                raise HTTPException(400, "Missing 'file' or 'mask' in form data")
+            image_bytes = await file_item.read()
+            mask_bytes = await mask_item.read()
+        else:
+            try:
+                body = await request.json()
+            except Exception:
+                raise HTTPException(400, "Invalid JSON body")
+            img_str = body.get("image", "")
+            mask_str = body.get("mask", "")
+            if "," in img_str:
+                img_str = img_str.split(",", 1)[1]
+            if "," in mask_str:
+                mask_str = mask_str.split(",", 1)[1]
+            try:
+                image_bytes = base64.b64decode(img_str)
+                mask_bytes = base64.b64decode(mask_str)
+            except Exception:
+                raise HTTPException(400, "Invalid base64 data for image or mask")
+
+        try:
+            jpg_bytes, w, h = inpaint_image(image_bytes, mask_bytes)
+            b64_out = base64.b64encode(jpg_bytes).decode("ascii")
+            return {"ok": True, "image": f"data:image/jpeg;base64,{b64_out}", "width": w, "height": h}
+        except ActionError as e:
+            raise HTTPException(e.status, str(e))
+        except Exception as e:
+            logging.getLogger("photocure.ui").exception("inpaint failed")
+            raise HTTPException(500, f"Inpainting failed: {e}")
+
+    @app.post("/api/editor/bokeh", dependencies=auth)
+    async def editor_bokeh(request: Request):
+        import base64
+        from ..editor_actions import ActionError, apply_depth_bokeh
+        content_type = request.headers.get("content-type", "")
+        focus_x = 0.5
+        focus_y = 0.5
+        aperture = 0.5
+        if content_type.startswith("multipart/form-data"):
+            form = await request.form()
+            file_item = form.get("file")
+            if not file_item:
+                raise HTTPException(400, "Missing 'file' in form data")
+            image_bytes = await file_item.read()
+            if "focus_x" in form:
+                focus_x = float(form.get("focus_x"))
+            if "focus_y" in form:
+                focus_y = float(form.get("focus_y"))
+            if "aperture" in form:
+                aperture = float(form.get("aperture"))
+        else:
+            try:
+                body = await request.json()
+            except Exception:
+                raise HTTPException(400, "Invalid JSON body")
+            data_str = body.get("image", "")
+            if "," in data_str:
+                data_str = data_str.split(",", 1)[1]
+            try:
+                image_bytes = base64.b64decode(data_str)
+            except Exception:
+                raise HTTPException(400, "Invalid base64 image data")
+            focus_x = float(body.get("focus_x", 0.5))
+            focus_y = float(body.get("focus_y", 0.5))
+            aperture = float(body.get("aperture", 0.5))
+
+        try:
+            jpg_bytes, w, h = apply_depth_bokeh(
+                image_bytes, focus_x=focus_x, focus_y=focus_y, aperture=aperture
+            )
+            b64_out = base64.b64encode(jpg_bytes).decode("ascii")
+            return {"ok": True, "image": f"data:image/jpeg;base64,{b64_out}", "width": w, "height": h}
+        except ActionError as e:
+            raise HTTPException(e.status, str(e))
+        except Exception as e:
+            logging.getLogger("photocure.ui").exception("bokeh failed")
+            raise HTTPException(500, f"Bokeh depth blur failed: {e}")
 
     @app.post("/api/images/{image_id}/ocr", dependencies=auth)
     def image_ocr(image_id: int):
