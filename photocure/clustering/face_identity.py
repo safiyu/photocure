@@ -49,8 +49,8 @@ def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
     dim = len(embedding)
     # Calibrate threshold for 512-D ArcFace vectors vs 128-D SFace
     if dim >= 512:
-        # Standard ArcFace operating point: strangers are < 0.20, same person is > 0.38
-        eff_threshold = min(threshold, 0.38)
+        # Standard ArcFace operating point: strangers are < 0.20, same person is > 0.35
+        eff_threshold = min(threshold, 0.35)
     else:
         eff_threshold = threshold
 
@@ -178,10 +178,14 @@ def remap_person_ids(old_faces: Sequence[OldFace], new_faces: Sequence[NewFace],
     reused once claimed.
     """
     pairs = []
+    is_512 = any(len(f.embedding) >= 512 for f in new_faces if f.embedding is not None) or \
+             any(len(f.embedding) >= 512 for f in old_faces if f.embedding is not None)
+    eff_threshold = min(threshold, 0.42) if is_512 else threshold
+
     for oi, old in enumerate(old_faces):
         for new in new_faces:
             score = cosine(old.embedding, new.embedding)
-            if score >= threshold:
+            if score >= eff_threshold:
                 pairs.append((score, oi, new.index, old.person_id))
     pairs.sort(key=lambda p: p[0], reverse=True)
 

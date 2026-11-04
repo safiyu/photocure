@@ -165,13 +165,11 @@ class SemanticEngine:
 
     # --------------------------------------------------------------- helpers
     @staticmethod
-    def _bgr_to_tensor(bgr: np.ndarray, preprocess, naflex: bool = True) -> object:
+    def _bgr_to_tensor(bgr: np.ndarray, preprocess, naflex: bool = False) -> object:
         """Run the val transform on a PIL image (works on all versions).
 
-        When naflex is True (default for SigLIP 2 / NaFlex pipeline), preserves native
-        aspect ratios via letterbox padding instead of squashing or center-cropping,
-        ensuring vertical portraits, document receipts, and panoramic landscapes
-        retain full context without subject truncation.
+        OpenCLIP ViT-B-16 is trained on natural images resized/center-cropped without
+        artificial grey letterbox borders (which confuse CLIP into predicting screenshots/graphics).
         """
         from PIL import Image
         h, w = bgr.shape[:2]
@@ -203,7 +201,7 @@ class SemanticEngine:
         for start in range(0, len(images), batch_size):
             chunk = images[start:start + batch_size]
             tensors = torch.stack(
-                [self._bgr_to_tensor(b, self._preprocess, naflex=getattr(self.cfg, "naflex", True)) for b in chunk]
+                [self._bgr_to_tensor(b, self._preprocess, naflex=getattr(self.cfg, "naflex", False)) for b in chunk]
             ).to(self._device)
             ctx = self._autocast or torch.autocast(device_type="cpu", enabled=False)
             with torch.no_grad(), ctx:

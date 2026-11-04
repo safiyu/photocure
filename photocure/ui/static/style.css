@@ -4008,6 +4008,13 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
 .about-models { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
 .about-chip { font: 500 12px/1 var(--font-mono); padding: 5px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--pink-700); }
 :root[data-theme="dark"] .about-chip { color: var(--accent); }
+.about-section-heading { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin: 16px 0 8px; }
+.about-model-list { margin: 0 0 16px; background: var(--well); border-radius: 12px; padding: 4px 14px; }
+.about-model-item { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+.about-model-item:last-child { border-bottom: none; }
+.about-model-name { font-weight: 700; color: var(--text); }
+.about-model-purpose { color: var(--mut); margin-left: 8px; font-size: 12px; }
+.about-model-license { font-size: 11px; font-family: var(--font-mono); margin-left: 12px; }
 .about-links { display: flex; gap: 8px; flex-wrap: wrap; }
 .about-links a { text-decoration: none; }
 @media (max-width: 640px) { .about { flex-direction: column; } }

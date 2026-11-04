@@ -916,22 +916,22 @@ def create_app(db_path: str | None = None) -> FastAPI:
         info = backend_info()
         device = info.get("device", "unknown")
         models = []
+        seen = set()
         try:
             manifest_path = Path(__file__).parent.parent / "models" / "MANIFEST.json"
             if manifest_path.exists():
                 with open(manifest_path) as f:
                     manifest = json.load(f)
-                    models_dir = manifest_path.parent
-                    for m in manifest.get("models", []):
-                        file = m.get("file", "")
-                        if file and (models_dir / file).exists():
-                            models.append({"name": m.get("name", file), "file": file})
-        except Exception:
-            pass
-        try:
-            from .. import models as bundled
-            models += [{"name": m["name"], "file": m.get("cache_file") or m.get("module", "")}
-                       for m in bundled.downloaded_models()]
+                    for m in (manifest.get("models", []) + manifest.get("downloaded", [])):
+                        name = m.get("name", "")
+                        if name and name not in seen:
+                            seen.add(name)
+                            models.append({
+                                "name": name,
+                                "file": m.get("file") or m.get("cache_file") or m.get("module", ""),
+                                "purpose": m.get("purpose", ""),
+                                "license": m.get("license", ""),
+                            })
         except Exception:
             pass
         return {
@@ -2154,8 +2154,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
             cands = [p for p in (rec.path, rec.target_path) if p]
             orientation = rec.orientation
         faces_dir = cfg.cache_dir / "faces"
-        cache = faces_dir / f"{face_id}_{fp}.jpg"
-        headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+        box_sig = f"{box[0]:.3f}_{box[1]:.3f}_{box[2]:.3f}_{box[3]:.3f}"
+        cache = faces_dir / f"{face_id}_{box_sig}_{fp}.jpg"
+        headers = ({"Cache-Control": "public, max-age=31536000, immutable"}
+                   if v is not None
+                   else {"Cache-Control": "public, max-age=60, must-revalidate"})
         if cache.exists():
             return FileResponse(cache, media_type="image/jpeg", headers=headers)
         path = next((p for p in cands if os.path.exists(p)), None)

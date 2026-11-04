@@ -253,11 +253,11 @@ TAXONOMY: tuple[TaxonomyEntry, ...] = (
     _entry(
         CategoryType.SCENERY, "nature",
         "a landscape photo of mountains or hills",
-        "a photo of a beach, sea or lake",
-        "a photo of a sunset or sky with clouds",
-        "a photo of a forest, field or countryside",
-        "a photo of a waterfall, river or snowy mountains",
-        "a photo of a night sky with stars",
+        "a photo of a beach, sea, river or lake",
+        "a photo of a sunset or night sky with stars",
+        "a photo of a forest, park or meadow",
+        "an autumn landscape photo of nature and trees",
+        "a photo of a waterfall or snowy mountains",
     ),
     _entry(
         CategoryType.PLANT, "nature",

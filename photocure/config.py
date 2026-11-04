@@ -202,12 +202,12 @@ class FaceSettings(BaseSettings):
     # v2 adds SFace identity embeddings, so every already-analyzed photo is re-detected once
     # to backfill them.
     schema_version: int = 2
-    # SFace incremental clustering operating point:
-    # 0.55 prevents stranger centroid drift (strangers have cosine similarity < 0.45)
-    # while maintaining stability across varied angles and lighting.
-    cluster_join_threshold: float = 0.55
+    # Incremental clustering operating point:
+    # 0.35 calibrated for 512-D ArcFace embeddings (strangers < 0.20, profile/child > 0.35)
+    # with co-occurrence cannot-link sibling protection.
+    cluster_join_threshold: float = 0.35
     # Stricter remap threshold scoped to one photo's own prior faces on re-analysis.
-    cluster_remap_threshold: float = 0.64
+    cluster_remap_threshold: float = 0.42
 
 
 class TaxonomySettings(BaseSettings):

@@ -43,7 +43,10 @@ class ActionError(ValueError):
 
 
 def _as_dict(p: M.PersonCluster, sample_face_id: int | None = None, similar_to: dict | None = None) -> dict:
+    import hashlib
     d = {"id": p.id, "name": p.name, "face_count": p.face_count, "sample_face_id": sample_face_id}
+    if sample_face_id is not None:
+        d["face_v"] = hashlib.sha256(f"{p.id}:{p.face_count}:{sample_face_id}".encode()).hexdigest()[:16]
     if similar_to is not None:
         d["similar_to"] = similar_to
     return d
@@ -118,9 +121,9 @@ def _arrange_by_similarity(clusters: list[M.PersonCluster], s=None) -> list[tupl
                     best_ref = group[max_idx]
 
             # Calibrated threshold for linking as similar face / suggesting merge:
-            # 512-D ArcFace vectors operate at 0.38; 128-D SFace at 0.65
+            # 512-D ArcFace vectors operate at 0.35; 128-D SFace at 0.65
             cand_dim = len(with_emb[best_cand][1]) if best_cand is not None else dim
-            merge_threshold = 0.38 if cand_dim >= 512 else 0.65
+            merge_threshold = 0.35 if cand_dim >= 512 else 0.65
             if best_cand is not None and best_score >= merge_threshold:
                 unvisited.remove(best_cand)
                 cand_cluster = with_emb[best_cand][0]
@@ -496,7 +499,9 @@ def consolidate_clusters(db_path: Path | str, threshold: float = 0.65, stage: st
                 if len(target_emb) != len(cluster_centroids[cand.id]):
                     continue
                 sim = float(np.dot(target_emb, cluster_centroids[cand.id]))
-                if sim >= threshold:
+                dim = len(target_emb)
+                eff_threshold = min(threshold, 0.35) if dim >= 512 else threshold
+                if sim >= eff_threshold:
                     # Merge candidate into target
                     faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.person_id == cand.id)).all()
                     for f in faces:
@@ -682,7 +687,7 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
         def assign_face_item(f, u, allow_new_cluster: bool):
             dim = len(u)
             # Calibrate threshold for 512-D ArcFace vectors vs 128-D SFace
-            base_thresh = min(threshold, 0.38) if dim >= 512 else threshold
+            base_thresh = min(threshold, 0.35) if dim >= 512 else threshold
             diversity_thresh = 0.78 if dim >= 512 else 0.88
 
             best_c = None
@@ -891,7 +896,8 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
 
     # 4. Run post-clustering consolidation to merge convergent clusters
     try:
-        consolidate_clusters(db_path, threshold=max(0.60, threshold + 0.05), stage=stage)
+        consolidate_thresh = min(0.35, threshold) if any(len(item[1]) >= 512 for item in parsed_faces) else max(0.60, threshold + 0.05)
+        consolidate_clusters(db_path, threshold=consolidate_thresh, stage=stage)
     except Exception:
         pass
 

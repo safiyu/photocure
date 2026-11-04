@@ -2073,7 +2073,31 @@ Creative Commons may be contacted at creativecommons.org.
    License: Apache License 2.0 (full text under item 4 above)
 ================================================================================
 
-19. RapidOCR with PaddleOCR v4 models  (OCR, optional extra photocure[ocr])
+19. RapidOCR with PaddleOCR v4/v5 models  (OCR, optional extra photocure[ocr])
    Source: https://github.com/RapidAI/RapidOCR and https://github.com/PaddlePaddle/PaddleOCR
+   License: Apache License 2.0 (full text under item 4 above)
+================================================================================
+
+20. AuraFace v1 face recognizer  (auraface.onnx)
+   High-accuracy 512-dimensional ArcFace deep facial representation model.
+   Source: fal.ai (https://huggingface.co/fal/AuraFace-v1)
+   License: Apache License 2.0 (full text under item 4 above)
+================================================================================
+
+21. SigLIP 2 NaFlex vision-language model
+   Dynamic aspect ratio and multilingual zero-shot semantic categorization.
+   Source: Google LLC (https://huggingface.co/google/siglip2-base-patch16-naflex)
+   License: Apache License 2.0 (full text under item 4 above)
+================================================================================
+
+22. MI-GAN inpainting model
+   Real-time inpainting and distraction removal for the editor's Heal / Magic Eraser.
+   Source: Picsart AI Research (https://github.com/Picsart-AI-Research/MI-GAN)
+   License: MIT
+================================================================================
+
+23. Depth Anything V2 Small
+   Monocular depth estimation for portrait bokeh depth blur in the editor.
+   Source: Depth Anything (https://github.com/DepthAnything/Depth-Anything-V2)
    License: Apache License 2.0 (full text under item 4 above)
 ================================================================================

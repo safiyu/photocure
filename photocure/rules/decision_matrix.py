@@ -252,37 +252,56 @@ class DecisionMatrix:
 
         # 7. Semantic routing with group-aware confidence gating.
         if assessment is not None:
+            top1_cat = sem.top1_category
+            # Dedicated camera guard: physical cameras (Fujifilm, Canon, Sony, Nikon, etc.)
+            # take optical camera captures, not computer or mobile OS screenshots.
+            if top1_cat == "screenshot" and getattr(rec, "camera_model", None):
+                dist = _parse_distribution(sem)
+                outside_screen = sorted(
+                    [(v, n) for n, v in dist.items() if self.taxonomy.group_of(n) != SCREEN_GROUP],
+                    key=lambda x: -x[0]
+                )
+                if outside_screen and outside_screen[0][0] >= self.tax.min_class_floor:
+                    top1_cat = outside_screen[0][1]
+                else:
+                    return Decision(
+                        CategoryType.UNCERTAIN,
+                        reason="camera capture cannot be an OS screenshot",
+                        subcategory="scenery" if "scenery" in dist else "uncertain",
+                        confidence=float(sem.top1_score),
+                    )
+
             top1 = sem.top1_score
             margin = assessment["margin"]
-            if not assessment["confident"]:
+            if not assessment["confident"] and top1_cat == sem.top1_category:
                 return Decision(
                     CategoryType.UNCERTAIN,
                     reason=(f"low confidence {top1:.2f} "
                             f"or margin {margin:.2f}"),
-                    subcategory=sem.top1_category,
+                    subcategory=top1_cat,
                     confidence=top1,
                     diagnostics={
                         **{k: assessment[k] for k in (
                             "kind", "top1", "top1_score", "top2", "top2_score", "text")},
                         "margin": margin},
                 )
-            cat = self._map_category(sem.top1_category)
+            cat = self._map_category(top1_cat)
             if cat is None:
                 return Decision(
                     CategoryType.UNCERTAIN,
                     reason="unmapped category",
-                    subcategory=sem.top1_category,
+                    subcategory=top1_cat,
                     confidence=top1,
                 )
-            needs_date = self.taxonomy.is_date_grouped(sem.top1_category)
+            needs_date = self.taxonomy.is_date_grouped(top1_cat)
             return Decision(
                 cat,
-                reason=f"clip top1 {sem.top1_category} {top1:.2f}",
-                subcategory=sem.top1_category,
+                reason=f"clip top1 {top1_cat} {top1:.2f}",
+                subcategory=top1_cat,
                 confidence=top1,
                 needs_date=needs_date,
-                folder=self.taxonomy.folder_override_of(sem.top1_category),
-                diagnostics={"top1": sem.top1_category, "top1_score": top1,
+                folder=self.taxonomy.folder_override_of(top1_cat),
+                diagnostics={"top1": top1_cat, "top1_score": top1,
                              "top2": sem.top2_category, "margin": margin,
                              "group": assessment["group"],
                              "group_score": assessment["group_score"]},

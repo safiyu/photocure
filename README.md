@@ -28,7 +28,13 @@ Photocure analyzes your photos locally, identifies subject matter, picks the sha
 
 Works with JPEG, PNG, WebP, TIFF, HEIC and common RAW formats (CR2, NEF, ARW, DNG). Libraries of 100,000+ photos scroll smoothly.
 
-**New in 2.x:** Built-in [photo editor](#photo-editor), burst collages, library reanalysis, direct Trash staging, and enhanced burst detection.
+**New in 3.x:**
+- **AuraFace 512-D Face Engine:** Next-generation ArcFace facial identity with chronological medoid growth chaining, co-occurrence sibling protection, and geometric landmark plausibility filters.
+- **SigLIP 2 Multilingual Vision-Language AI:** Dynamic native aspect ratio zero-shot categorization and multilingual natural language photo search across English, French, Arabic, Spanish, and more.
+- **BiRefNet Lite & Studio Matting:** Commercial-grade hair, fur, and edge precision in the Remove BG tool.
+- **MI-GAN Magic Eraser:** Real-time neural inpainting to erase unwanted background objects or people with seamless background reconstruction.
+- **Depth Anything V2 Portrait Bokeh:** Monocular depth estimation for progressive aperture bokeh blur in portraits.
+- **Joint Technical & Aesthetic Quality:** Dual blur/noise evaluation with TOPIQ/LIQE scoring so motion-blurred shots never crowd Highlights.
 
 ## Install
 
@@ -116,7 +122,9 @@ Once you've culled a burst or rescued a memory, you can polish it on the spot wi
 | | **Looks** | 7 skin-safe color grades (Vivid, Portrait, Film, Cinematic, Golden, Matte, Mono) with strength control; no hue distortion so skin tones remain natural |
 | | **Detail & Red-Eye** | Selective sharpening, softening, and red-eye removal |
 | | **Remaster** | AI denoise, low-light rescue, and super-resolution upscaling for older, grainy, or under-exposed shots |
-| **Quick Fun & Annotate** | **Remove BG** | AI subject isolation with fallback edge cutout |
+| | **Portrait Bokeh** | Depth Anything V2 monocular depth estimation for realistic background bokeh blur |
+| | **Heal / Magic Eraser** | MI-GAN real-time inpainting to erase unwanted strangers or distractions seamlessly |
+| **Quick Fun & Annotate** | **Remove BG** | BiRefNet Lite AI subject isolation with commercial-grade edge mattes |
 | | **Draw & Stickers** | Freehand pen, highlighter, eraser, and emoji stickers for family notes and quick sharing |
 
 - **Unified Apply bar:** Live previews for Crop, Light, Looks, and Detail with instant Undo/Redo (up to 10 steps).

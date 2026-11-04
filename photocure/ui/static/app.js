@@ -3788,7 +3788,7 @@
         <!-- Portrait Image -->
         <div class="people-card-portrait">
           ${p.sample_face_id
-            ? `<img class="people-face-img" src="/api/faces/${num(p.sample_face_id)}.jpg" alt="" loading="lazy"
+            ? `<img class="people-face-img" src="/api/faces/${num(p.sample_face_id)}.jpg${p.face_v ? '?v=' + esc(p.face_v) : ''}" alt="" loading="lazy"
                  onload="this.classList.add('loaded')"
                  onerror="this.classList.add('loaded');this.style.display='none';this.nextElementSibling.style.display='flex'">
                <div class="people-face-fallback" style="display:none"><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.5'><circle cx='12' cy='8' r='4'/><path d='M4 20c0-4 3.6-7 8-7s8 3 8 7'/></svg></div>`
@@ -3833,7 +3833,7 @@
                     data-target-name="${esc(p.similar_to.target_name || 'Person #' + p.similar_to.target_id)}"
                     title="Visually similar (${Math.round(p.similar_to.score * 100)}% match). Click to merge!">
               ${p.similar_to.target_sample_face_id ? `
-                <img class="people-merge-thumb" src="/api/faces/${num(p.similar_to.target_sample_face_id)}.jpg" alt="" loading="lazy">
+                <img class="people-merge-thumb" src="/api/faces/${num(p.similar_to.target_sample_face_id)}.jpg${p.face_v ? '?v=' + esc(p.face_v) : ''}" alt="" loading="lazy">
               ` : `
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <circle cx="18" cy="18" r="3"></circle>
@@ -7205,20 +7205,30 @@
 
       const aboutCard = $("#about-card");
       if (aboutCard) {
-        const chips = (about.models || []).map((m) => `<span class="about-chip">${esc(m.name)}</span>`).join("");
+        const chips = (about.models || []).map((m) => `<span class="about-chip" title="${esc(m.purpose || '')}">${esc(m.name)}</span>`).join("");
+        const modelList = (about.models || []).map((m) => `
+          <div class="about-model-item">
+            <div>
+              <strong class="about-model-name">${esc(m.name)}</strong>
+              ${m.purpose ? `<span class="about-model-purpose">${esc(m.purpose)}</span>` : ""}
+            </div>
+            ${m.license ? `<span class="badge ghost sm about-model-license">${esc(m.license)}</span>` : ""}
+          </div>`).join("");
         aboutCard.innerHTML = `
           <div class="about">
             <img class="about-logo" src="/static/logo.svg" alt="" width="64" height="64">
             <div class="about-main">
               <div class="about-title"><span class="about-name">Photocure Studio</span><span class="about-ver">v${esc(about.version || "0.0.0")}</span></div>
-              <p class="about-tag">Offline photo curation. Your photos never leave this computer.</p>
+              <p class="about-tag">Offline photo curation & neural vision suite. Your photos never leave this computer.</p>
               <dl class="about-facts">
                 <div><dt>Acceleration</dt><dd>${esc(about.device || "CPU")}</dd></div>
                 <div><dt>Python</dt><dd>${esc(about.python || "unknown")}</dd></div>
                 <div><dt>License</dt><dd>${esc(about.license || "MIT License")}</dd></div>
                 <div><dt>Author</dt><dd>${esc(about.author || "Unknown")}</dd></div>
               </dl>
+              <h4 class="about-section-heading">Neural Vision & Face Engine</h4>
               ${chips ? `<div class="about-models" aria-label="Active models">${chips}</div>` : ""}
+              ${modelList ? `<div class="about-model-list">${modelList}</div>` : ""}
               <div class="about-links">
                 <a class="btn sm secondary" href="/licenses" target="_blank" rel="noopener">Licenses</a>
                 <a class="btn sm ghost" href="https://github.com/safiyu/photocure" target="_blank" rel="noopener">GitHub</a>
