@@ -62,7 +62,7 @@ def highlight_score(aesthetic: float | None, preference: float | None, rating: i
     if aesthetic is None or rating == -1:
         return None
     if quality is not None:
-        tech_factor = float(np.clip(0.35 + 0.65 * quality, 0.2, 1.0))
+        tech_factor = float(max(0.2, min(1.0, 0.35 + 0.65 * quality)))
         aesthetic = aesthetic * tech_factor
     use_taste = preference is not None and label_for(rating, favorite) is None
     base = (1.0 - w.preference) * aesthetic + w.preference * preference if use_taste else aesthetic
