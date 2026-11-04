@@ -21,7 +21,7 @@ from photocure.config import CuratorConfig
 from photocure.db import models as M
 from photocure.db.session import get_session, init_db
 from photocure.inference.backends import BackendState, reset_backend_cache
-from photocure.inference.face_engine import FaceEngine, FaceInfo
+from photocure.inference.face_engine import FaceEngine, FaceInfo, is_valid_face_geometry
 from photocure.inference.pipeline import InferencePipeline
 
 from .test_inference import _scan
@@ -552,3 +552,30 @@ def test_server_warns_at_startup_about_an_altered_model(tmp_path, monkeypatch, c
             pass
     assert any(models.LANDMARKER in r.getMessage() and "MANIFEST" in r.getMessage() for r in caplog.records)
     assert not any(models.YUNET in r.getMessage() for r in caplog.records)
+
+
+def test_is_valid_face_geometry_rejects_false_positives():
+    # Valid face
+    valid_face = FaceInfo(0.3, 0.3, 0.5, 0.5, 0.90, landmarks=[
+        (0.35, 0.35), (0.45, 0.35), (0.40, 0.40), (0.36, 0.45), (0.44, 0.45)
+    ])
+    assert is_valid_face_geometry(valid_face, 1000, 1000) is True
+
+    # Hands / henna false positive (eyes unrealistically close together)
+    hand_face = FaceInfo(0.48, 0.55, 0.52, 0.61, 0.75, landmarks=[
+        (0.493, 0.574), (0.498, 0.574), (0.491, 0.585), (0.496, 0.597), (0.499, 0.596)
+    ])
+    assert is_valid_face_geometry(hand_face, 1000, 1000) is False
+
+    # Bokeh circle false positive (nose projected far outside eyes)
+    bokeh_face = FaceInfo(0.83, 0.55, 0.86, 0.61, 0.88, landmarks=[
+        (0.834, 0.578), (0.841, 0.578), (0.831, 0.590), (0.835, 0.599), (0.841, 0.599)
+    ])
+    assert is_valid_face_geometry(bokeh_face, 1000, 1000) is False
+
+    # Extreme limb / column aspect ratio
+    limb_face = FaceInfo(0.48, 0.77, 0.52, 0.88, 0.80, landmarks=[
+        (0.506, 0.814), (0.512, 0.814), (0.516, 0.830), (0.505, 0.848), (0.510, 0.848)
+    ])
+    assert is_valid_face_geometry(limb_face, 1000, 1000) is False
+

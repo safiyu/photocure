@@ -11,6 +11,7 @@ never treated as open or closed.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
@@ -41,6 +42,8 @@ class FaceInfo:
     is_blink: bool = False
     # SFace embedding (128-dim), or None when too small/blurry to trust or SFace is unavailable.
     embedding: list[float] | None = None
+    # Secondary confirmation from MediaPipe FaceLandmarker (True if landmarks verified, False if landmarker found no face)
+    verified_face: bool | None = None
 
     @property
     def w(self) -> float:
@@ -49,6 +52,35 @@ class FaceInfo:
     @property
     def h(self) -> float:
         return max(0.0, self.y2 - self.y1)
+
+
+def is_valid_face_geometry(face: FaceInfo, width: int = 1000, height: int = 1000) -> bool:
+    """Validate geometric plausibility of 5 facial landmarks to reject non-faces (hands, ears, bokeh)."""
+    bw = face.w * width
+    bh = face.h * height
+    if bw < 8 or bh < 8:
+        return False
+    ar = bh / bw
+    if ar < 0.50 or ar > 2.20:
+        return False
+    if not face.landmarks or len(face.landmarks) < 5:
+        return True
+    pts = [(lx * width, ly * height) for lx, ly in face.landmarks[:5]]
+    le, re, nose, lm, rm = pts
+    eye_d = math.hypot(re[0] - le[0], re[1] - le[1])
+    if eye_d / bw < 0.12:
+        return False
+    mouth_d = math.hypot(rm[0] - lm[0], rm[1] - lm[1])
+    if mouth_d / bw < 0.08:
+        return False
+    v_lr = (re[0] - le[0], re[1] - le[1])
+    v_ln = (nose[0] - le[0], nose[1] - le[1])
+    len_sq = v_lr[0]**2 + v_lr[1]**2
+    if len_sq > 0:
+        proj_h = (v_ln[0] * v_lr[0] + v_ln[1] * v_lr[1]) / len_sq
+        if proj_h < -0.22 or proj_h > 1.22:
+            return False
+    return True
 
 
 ARCFACE_REF_5PTS = np.array([
@@ -180,7 +212,8 @@ class FaceEngine:
                 self._landmarker.close()
             except Exception:
                 pass
-        self._yunet = self._landmarker = self._recognizer = None
+            self._landmarker = None
+        self._yunet = self._recognizer = None
         if hasattr(self, "_aura_sess"):
             self._aura_sess = None
         self._landmarker_failed = False
@@ -219,6 +252,9 @@ class FaceEngine:
         # Suppress duplicate / overlapping boxes on the same face (IoU or containment)
         candidates.sort(key=lambda f: f.confidence, reverse=True)
         for c in candidates:
+            # Pre-filter geometrically implausible shapes from raw YuNet candidates
+            if not is_valid_face_geometry(c, w, h):
+                continue
             cb = (c.x1, c.y1, c.x2, c.y2)
             dup = False
             for k in out:
@@ -254,7 +290,7 @@ class FaceEngine:
             if crop.size == 0:
                 continue
             face.face_sharpness = standardized_sharpness(crop, f.sharpness_width)
-            face.eye_closed_score = self._eye_closed_score(shrink_to(crop, f.landmark_max_side))
+            face.eye_closed_score = self._eye_closed_score(shrink_to(crop, f.landmark_max_side), face=face)
 
     # ------------------------------------------------- stage 3: identity embedding
     def _ensure_recognizer_loaded(self):
@@ -299,9 +335,19 @@ class FaceEngine:
         # Clear blur measures under ~10% of the "fully sharp" reference (30 of 300).
         min_sharp = 0.1 * self.cfg.burst.face_sharp_ref
         min_emb_px = getattr(self.cfg.face, "min_embedding_px", 48)
+        min_emb_conf = getattr(self.cfg.face, "min_embedding_conf", 0.70)
         for face in faces:
             # Quality & size gate before embedding: don't run heavy ResNet-100 on tiny background faces (< 48px)
             if min(face.w * W, face.h * H) < min_emb_px:
+                continue
+            # Confidence gate: discard low-confidence detections (< 0.70) from creating people clusters
+            if face.confidence < min_emb_conf:
+                continue
+            # Geometric face plausibility: reject hands, limbs, ears, and distorted non-faces
+            if not is_valid_face_geometry(face, W, H):
+                continue
+            # Landmarker verification: if landmarker is active and found no face landmarks, reject
+            if face.verified_face is False:
                 continue
             # None: too small (analyze_faces said so); below min_sharp: blurred, would seed junk clusters.
             if face.face_sharpness is None or face.face_sharpness < min_sharp:
@@ -326,7 +372,7 @@ class FaceEngine:
                 feature = recognizer.feature(aligned)
                 face.embedding = feature.flatten().tolist()
 
-    def _eye_closed_score(self, crop: np.ndarray) -> float | None:
+    def _eye_closed_score(self, crop: np.ndarray, face: FaceInfo | None = None) -> float | None:
         lm = self._load_landmarker()
         if lm is None:
             return None
@@ -337,7 +383,11 @@ class FaceEngine:
             log.warning("landmarker failed on a crop (%s: %s)", e.__class__.__name__, e)
             return None
         if not res.face_landmarks or not res.face_blendshapes:
+            if face is not None:
+                face.verified_face = False
             return None
+        if face is not None:
+            face.verified_face = True
         # A crop can include a neighbour: take the face nearest the centre.
         centres = [(np.mean([p.x for p in pts]) - 0.5) ** 2 + (np.mean([p.y for p in pts]) - 0.5) ** 2
                    for pts in res.face_landmarks]

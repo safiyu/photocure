@@ -50,7 +50,7 @@ def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
     # Calibrate threshold for 512-D ArcFace vectors vs 128-D SFace
     if dim >= 512:
         # Standard ArcFace operating point: strangers are < 0.20, same person is > 0.38
-        eff_threshold = min(threshold, 0.38) if threshold >= 0.50 else threshold
+        eff_threshold = min(threshold, 0.38)
     else:
         eff_threshold = threshold
 

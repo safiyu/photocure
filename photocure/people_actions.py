@@ -117,8 +117,11 @@ def _arrange_by_similarity(clusters: list[M.PersonCluster], s=None) -> list[tupl
                     best_cand = cand
                     best_ref = group[max_idx]
 
-            # Strict threshold for linking as similar face / suggesting merge: 0.65
-            if best_cand is not None and best_score >= 0.65:
+            # Calibrated threshold for linking as similar face / suggesting merge:
+            # 512-D ArcFace vectors operate at 0.38; 128-D SFace at 0.65
+            cand_dim = len(with_emb[best_cand][1]) if best_cand is not None else dim
+            merge_threshold = 0.38 if cand_dim >= 512 else 0.65
+            if best_cand is not None and best_score >= merge_threshold:
                 unvisited.remove(best_cand)
                 cand_cluster = with_emb[best_cand][0]
                 target_cluster = with_emb[best_ref][0]
@@ -679,7 +682,7 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
         def assign_face_item(f, u, allow_new_cluster: bool):
             dim = len(u)
             # Calibrate threshold for 512-D ArcFace vectors vs 128-D SFace
-            base_thresh = min(threshold, 0.38) if dim >= 512 and threshold >= 0.50 else threshold
+            base_thresh = min(threshold, 0.38) if dim >= 512 else threshold
             diversity_thresh = 0.78 if dim >= 512 else 0.88
 
             best_c = None

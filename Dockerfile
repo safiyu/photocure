@@ -10,7 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
 # Extra system packages, for example a GPU runtime. Space separated, empty by default.
 ARG APT_PACKAGES=""
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 $APT_PACKAGES \
+    && apt-get install -y --no-install-recommends libgomp1 libglib2.0-0 libegl1 libgles2 libgl1 $APT_PACKAGES \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

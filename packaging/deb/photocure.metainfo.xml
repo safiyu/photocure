@@ -38,6 +38,11 @@
   </categories>
   <launchable type="desktop-id">io.github.safiyu.photocure.desktop</launchable>
   <releases>
+    <release version="3.0.1" type="stable" date="2026-11-04">
+      <description>
+        <p>Photocure release 3.0.1: Facial landmark geometric validation to eliminate non-face false positives (hands, ears, bokeh), container graphics library support for MediaPipe FaceLandmarker, and calibrated 512-D ArcFace similarity clustering and merging.</p>
+      </description>
+    </release>
     <release version="3.0.0" type="stable" date="2026-11-04">
       <description>
         <p>Photocure release 3.0.0: AuraFace-v1 face recognition (512-dim ArcFace embeddings) with canonical 112x112 affine alignment, chronological medoid chaining across years, co-occurrence sibling protection, and configurable fast-faces fallback.</p>
