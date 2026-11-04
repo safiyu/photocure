@@ -490,6 +490,8 @@ def consolidate_clusters(db_path: Path | str, threshold: float = 0.65, stage: st
                 if target_imgs.intersection(cand_imgs):
                     continue
 
+                if len(target_emb) != len(cluster_centroids[cand.id]):
+                    continue
                 sim = float(np.dot(target_emb, cluster_centroids[cand.id]))
                 if sim >= threshold:
                     # Merge candidate into target
@@ -506,12 +508,13 @@ def consolidate_clusters(db_path: Path | str, threshold: float = 0.65, stage: st
                     tot = target.face_count
                     n_cand = len(faces)
                     n_prev = max(1, tot - n_cand)
-                    new_cent = (target_emb * n_prev + cand_emb * n_cand) / max(1, tot)
-                    norm_new = float(np.linalg.norm(new_cent))
-                    if norm_new > 1e-6:
-                        target_emb = new_cent / norm_new
-                        cluster_centroids[target.id] = target_emb
-                        target.centroid_json = quantize_embedding(target_emb.tolist())
+                    if len(target_emb) == len(cand_emb):
+                        new_cent = (target_emb * n_prev + cand_emb * n_cand) / max(1, tot)
+                        norm_new = float(np.linalg.norm(new_cent))
+                        if norm_new > 1e-6:
+                            target_emb = new_cent / norm_new
+                            cluster_centroids[target.id] = target_emb
+                            target.centroid_json = quantize_embedding(target_emb.tolist())
 
                     target_imgs.update(cand_imgs)
                     deleted_ids.add(cand.id)
@@ -687,6 +690,10 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
             f_year = str(datetime.fromtimestamp(f_ts).year) if f_ts else None
 
             for c in clusters:
+                # Dimension guard
+                if len(u) != len(c["centroid"]):
+                    continue
+
                 # 1. Co-occurrence Veto (cannot-link constraint): siblings in same photo NEVER merge
                 if f.image_id in c["image_ids"]:
                     continue
@@ -696,23 +703,25 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
 
                 # 3. Multi-exemplar matching
                 for ex in c.get("exemplars", []):
-                    ex_sim = float(np.dot(u, ex))
-                    if ex_sim > sim:
-                        sim = ex_sim
+                    if len(ex) == len(u):
+                        ex_sim = float(np.dot(u, ex))
+                        if ex_sim > sim:
+                            sim = ex_sim
 
                 # 4. Chronological medoid chaining (growth bridging across years)
                 c_medoids = c.setdefault("yearly_medoids", {})
                 if f_year and c_medoids:
                     for y_key in [f_year, str(int(f_year) - 1), str(int(f_year) + 1)]:
-                        if y_key in c_medoids:
+                        if y_key in c_medoids and len(c_medoids[y_key]) == len(u):
                             med_sim = float(np.dot(u, c_medoids[y_key]))
                             if med_sim > sim:
                                 sim = med_sim
                 elif c_medoids:
                     for y_med in c_medoids.values():
-                        med_sim = float(np.dot(u, y_med))
-                        if med_sim > sim:
-                            sim = med_sim
+                        if len(y_med) == len(u):
+                            med_sim = float(np.dot(u, y_med))
+                            if med_sim > sim:
+                                sim = med_sim
 
                 # 5. Burst & temporal co-occurrence boost (safe under co-occurrence veto)
                 c_bursts = {img_info.get(img_id, {}).get("burst_id") for img_id in c["image_ids"]}
@@ -741,17 +750,20 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
                     best_c["names"].append(c_name)
                 # Update running centroid
                 n = len(best_c["face_ids"]) + (best_c["cluster_obj"].face_count if best_c.get("is_existing") else 0)
-                new_cent = (best_c["centroid"] * max(1, n - 1) + u) / max(1, n)
-                best_c["centroid"] = new_cent / float(np.linalg.norm(new_cent))
+                if len(best_c["centroid"]) == len(u):
+                    new_cent = (best_c["centroid"] * max(1, n - 1) + u) / max(1, n)
+                    best_c["centroid"] = new_cent / float(np.linalg.norm(new_cent))
+                else:
+                    best_c["centroid"] = u
                 # Update exemplars
                 exemplars = best_c.setdefault("exemplars", [])
                 if len(exemplars) < 5:
-                    if not any(float(np.dot(u, ex)) > diversity_thresh for ex in exemplars):
+                    if not any(float(np.dot(u, ex)) > diversity_thresh for ex in exemplars if len(ex) == len(u)):
                         exemplars.append(u)
                 # Update chronological medoid
                 if f_year:
                     c_meds = best_c.setdefault("yearly_medoids", {})
-                    if f_year not in c_meds:
+                    if f_year not in c_meds or len(c_meds[f_year]) != len(u):
                         c_meds[f_year] = u
                     else:
                         blended = c_meds[f_year] * 0.7 + u * 0.3
@@ -774,13 +786,16 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
                     fallback_c = None
                     fallback_sim = 0.45
                     for c in clusters:
+                        if len(u) != len(c["centroid"]):
+                            continue
                         if f.image_id in c["image_ids"]:
                             continue
                         sim = float(np.dot(u, c["centroid"]))
                         for ex in c.get("exemplars", []):
-                            ex_sim = float(np.dot(u, ex))
-                            if ex_sim > sim:
-                                sim = ex_sim
+                            if len(ex) == len(u):
+                                ex_sim = float(np.dot(u, ex))
+                                if ex_sim > sim:
+                                    sim = ex_sim
                         if sim >= fallback_sim:
                             fallback_sim = sim
                             fallback_c = c

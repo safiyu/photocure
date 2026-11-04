@@ -88,3 +88,24 @@ def test_arcface_alignment_and_normalization():
     assert warped.shape == (112, 112, 3)
     assert len(ARCFACE_REF_5PTS) == 5
 
+
+def test_mismatched_embedding_dimensions_handled_safely():
+    """Verify that comparing 512-D and 128-D vectors never raises ValueError."""
+    from photocure.clustering.face_identity import cosine, update_centroid
+
+    vec512 = [1.0] * 512
+    vec128 = [1.0] * 128
+
+    assert cosine(vec512, vec128) == 0.0
+    assert cosine(vec128, vec512) == 0.0
+
+    # Clusters with 128-dim shouldn't crash when matching against a 512-dim face
+    c128 = ClusterCentroid(1, vec128, 5)
+    c512 = ClusterCentroid(2, vec512, 2)
+    assert assign_cluster(vec512, [c128, c512], threshold=0.38) == 2
+
+    # Updating centroid when dimensions differ shouldn't crash
+    updated = update_centroid(vec128, 5, vec512)
+    assert len(updated) == 512
+
+

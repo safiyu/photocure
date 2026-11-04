@@ -15,6 +15,8 @@ import numpy as np
 
 
 def cosine(a: list[float], b: list[float]) -> float:
+    if len(a) != len(b):
+        return 0.0
     av, bv = np.asarray(a, dtype=np.float64), np.asarray(b, dtype=np.float64)
     na, nb = float(np.linalg.norm(av)), float(np.linalg.norm(bv))
     if na < 1e-9 or nb < 1e-9:
@@ -56,6 +58,10 @@ def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
     boosts = similarity_boosts or {}
 
     for c in centroids:
+        # Dimension guard: cannot compare embeddings of different dimensionalities
+        if len(c.centroid) != dim:
+            continue
+
         # 1. Co-occurrence Veto (cannot-link constraint)
         if image_id is not None and c.image_ids and image_id in c.image_ids:
             continue
@@ -66,21 +72,23 @@ def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
         # 3. Multi-exemplar comparison
         if c.exemplars:
             for ex in c.exemplars:
-                ex_score = cosine(embedding, ex)
-                if ex_score > score:
-                    score = ex_score
+                if len(ex) == dim:
+                    ex_score = cosine(embedding, ex)
+                    if ex_score > score:
+                        score = ex_score
 
         # 4. Chronological medoid chaining (yearly / developmental bucket)
         if c.temporal_medoids:
-            if time_bucket and time_bucket in c.temporal_medoids:
+            if time_bucket and time_bucket in c.temporal_medoids and len(c.temporal_medoids[time_bucket]) == dim:
                 med_score = cosine(embedding, c.temporal_medoids[time_bucket])
                 if med_score > score:
                     score = med_score
             else:
                 for med in c.temporal_medoids.values():
-                    med_score = cosine(embedding, med)
-                    if med_score > score:
-                        score = med_score
+                    if len(med) == dim:
+                        med_score = cosine(embedding, med)
+                        if med_score > score:
+                            score = med_score
 
         # 5. Add potential temporal / burst / event boost
         effective_score = score + boosts.get(c.person_id, 0.0)
@@ -99,7 +107,7 @@ def update_temporal_medoid(current_medoids: dict[str, list[float]] | None,
     if not time_bucket:
         return current_medoids or {}
     meds = dict(current_medoids or {})
-    if time_bucket not in meds:
+    if time_bucket not in meds or len(meds[time_bucket]) != len(new_embedding):
         meds[time_bucket] = list(new_embedding)
     else:
         old_vec = np.array(meds[time_bucket], dtype=np.float32)
@@ -115,6 +123,8 @@ def update_temporal_medoid(current_medoids: dict[str, list[float]] | None,
 def update_centroid(old_centroid: list[float], old_count: int,
                     new_embedding: list[float]) -> list[float]:
     """Incremental running mean after adding one more embedding."""
+    if len(old_centroid) != len(new_embedding):
+        return list(new_embedding)
     n = old_count + 1
     return [(c * old_count + e) / n for c, e in zip(old_centroid, new_embedding)]
 
@@ -128,7 +138,8 @@ def update_exemplars(current_exemplars: list[list[float]] | None,
     Adds ``new_embedding`` if the current pool is not full, or if it represents a sufficiently
     different pose from all existing exemplars (cosine < diversity_min_cosine).
     """
-    exemplars = list(current_exemplars or [])
+    dim = len(new_embedding)
+    exemplars = [ex for ex in (current_exemplars or []) if len(ex) == dim]
     if not exemplars:
         return [list(new_embedding)]
     # Check similarity to existing exemplars

@@ -2681,6 +2681,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         try:
             pipeline = InferencePipeline(c, backend=detect_for(c))
             res = pipeline.run(db_path=dbp, on_progress=on_prog, show_progress=False,
+                               retry_failed=True,
                                cancel_check=progress_mgr.is_stopped,
                                stage=body.stage, reanalyze=body.stage in ("trash", "library"))
         except InterruptedError:
