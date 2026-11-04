@@ -80,6 +80,12 @@ def is_valid_face_geometry(face: FaceInfo, width: int = 1000, height: int = 1000
         proj_h = (v_ln[0] * v_lr[0] + v_ln[1] * v_lr[1]) / len_sq
         if proj_h < -0.22 or proj_h > 1.22:
             return False
+    # Check vertical eye-to-mouth proportions:
+    eye_mid = ((le[0] + re[0]) / 2.0, (le[1] + re[1]) / 2.0)
+    mouth_mid = ((lm[0] + rm[0]) / 2.0, (lm[1] + rm[1]) / 2.0)
+    dist_em = math.hypot(mouth_mid[0] - eye_mid[0], mouth_mid[1] - eye_mid[1])
+    if dist_em > 0 and (eye_d / dist_em) < 0.40:
+        return False
     return True
 
 
@@ -386,12 +392,30 @@ class FaceEngine:
             if face is not None:
                 face.verified_face = False
             return None
-        if face is not None:
-            face.verified_face = True
         # A crop can include a neighbour: take the face nearest the centre.
         centres = [(np.mean([p.x for p in pts]) - 0.5) ** 2 + (np.mean([p.y for p in pts]) - 0.5) ** 2
                    for pts in res.face_landmarks]
-        scores = {c.category_name: c.score for c in res.face_blendshapes[int(np.argmin(centres))]}
+        best_idx = int(np.argmin(centres))
+        centre_dist = math.sqrt(centres[best_idx])
+        best_pts = res.face_landmarks[best_idx]
+        # Face must be reasonably centered in the crop and occupy a plausible portion of it
+        # (rejects tiny phantom faces hallucinated in far corners of non-face crops like hands)
+        if centre_dist > 0.25:
+            if face is not None:
+                face.verified_face = False
+            return None
+        if len(best_pts) >= 10:
+            xs = [p.x for p in best_pts]
+            ys = [p.y for p in best_pts]
+            box_w = max(xs) - min(xs)
+            box_h = max(ys) - min(ys)
+            if box_w < 0.20 or box_h < 0.20:
+                if face is not None:
+                    face.verified_face = False
+                return None
+        if face is not None:
+            face.verified_face = True
+        scores = {c.category_name: c.score for c in res.face_blendshapes[best_idx]}
         if "eyeBlinkLeft" not in scores or "eyeBlinkRight" not in scores:
             return None
         return float((scores["eyeBlinkLeft"] + scores["eyeBlinkRight"]) / 2.0)

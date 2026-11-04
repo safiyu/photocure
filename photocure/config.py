@@ -183,7 +183,7 @@ class FaceSettings(BaseSettings):
     model: str = "auto"                # "auto", "auraface" (512-dim ArcFace), "sface" (128-dim lightweight)
     cpu_light: bool = False            # When True, use lightweight SFace on CPU rather than ResNet-100
     min_embedding_px: int = 48         # Don't embed tiny background faces (< 48px min side) with heavy ResNet-100
-    min_embedding_conf: float = 0.70   # Minimum detector score required to embed and cluster as a person
+    min_embedding_conf: float = 0.78   # Minimum detector score required to embed and cluster as a person
     # Stage 2 crops come from the full-resolution frame.
     crop_margin: float = 0.20          # (tune) margin added around the box
     min_px: int = 60                   # (tune) narrower crops get eye_status "unknown"

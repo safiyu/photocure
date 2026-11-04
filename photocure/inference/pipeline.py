@@ -490,7 +490,9 @@ class InferencePipeline:
                             ]
                             ignored_flags = [False] * len(faces)
                             for i, f in enumerate(faces):
-                                if getattr(f, "x1", None) is not None:
+                                if getattr(f, "verified_face", None) is False:
+                                    ignored_flags[i] = True
+                                elif getattr(f, "x1", None) is not None:
                                     box = (f.x1, f.y1, f.x2, f.y2)
                                     if any(_box_iou(box, (oi.x1, oi.y1, oi.x2, oi.y2)) >= 0.5 for oi in old_ignored):
                                         ignored_flags[i] = True
