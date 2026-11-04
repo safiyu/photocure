@@ -52,6 +52,60 @@ def _as_dict(p: M.PersonCluster, sample_face_id: int | None = None, similar_to: 
     return d
 
 
+def _find_merge_matches(clusters: list[M.PersonCluster], s=None) -> dict[int, dict]:
+    """For every unnamed cluster, find the best matching cluster to suggest merging into.
+    Prioritizes named people first, then larger unnamed clusters.
+    """
+    import numpy as np
+    vecs: dict[int, tuple[M.PersonCluster, np.ndarray]] = {}
+    for c in clusters:
+        vec = dequantize_embedding(c.centroid_json) if c.centroid_json else None
+        if vec and len(vec) > 0:
+            arr = np.asarray(vec, dtype=np.float32)
+            norm = float(np.linalg.norm(arr))
+            if norm > 1e-6:
+                vecs[c.id] = (c, arr / norm)
+
+    matches: dict[int, dict] = {}
+    for cid, (cand, cand_v) in vecs.items():
+        if cand.name:
+            continue  # Named people never show incoming merge pills on themselves
+        cand_dim = len(cand_v)
+        thresh = 0.35 if cand_dim >= 512 else 0.65
+        best_target, best_score = None, -1.0
+
+        # 1. Search among named clusters first
+        for tid, (target, target_v) in vecs.items():
+            if tid == cid or len(target_v) != cand_dim or not target.name:
+                continue
+            score = float(np.dot(cand_v, target_v))
+            if score >= thresh and score > best_score:
+                best_score = score
+                best_target = target
+
+        # 2. If no named cluster matches, search among larger unnamed clusters
+        if best_target is None:
+            for tid, (target, target_v) in vecs.items():
+                if tid == cid or len(target_v) != cand_dim or target.name:
+                    continue
+                if target.face_count <= cand.face_count:
+                    continue
+                score = float(np.dot(cand_v, target_v))
+                if score >= thresh and score > best_score:
+                    best_score = score
+                    best_target = target
+
+        if best_target is not None:
+            target_sample_face_id = _best_face_id_for(best_target.id, s) if s is not None else None
+            matches[cid] = {
+                "target_id": best_target.id,
+                "target_name": best_target.name,
+                "target_sample_face_id": target_sample_face_id,
+                "score": round(best_score, 2),
+            }
+    return matches
+
+
 def _arrange_by_similarity(clusters: list[M.PersonCluster], s=None) -> list[tuple[M.PersonCluster, dict | None]]:
     """Arrange person clusters so that visually similar faces are grouped next to each other.
 
@@ -223,16 +277,17 @@ def list_people(db_path: Path | str, sort: str = "similarity", stage: str = "all
             else:
                 clusters = [c for c in library_clusters if c.face_count > 0]
 
+        matches = _find_merge_matches(clusters, s)
         if sort == "name":
             # Named first alphabetically, then unnamed by count desc
             clusters.sort(key=lambda p: (0 if p.name else 1, (p.name or "").lower(), -p.face_count))
-            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage)) for p in clusters]
+            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage), matches.get(p.id)) for p in clusters]
         elif sort == "count":
             clusters.sort(key=lambda p: (p.face_count, p.id or 0), reverse=True)
-            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage)) for p in clusters]
+            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage), matches.get(p.id)) for p in clusters]
         else:  # default: "similarity"
             arranged = _arrange_by_similarity(clusters, s)
-            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage), match) for p, match in arranged]
+            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage), matches.get(p.id) or match) for p, match in arranged]
 
         return [it for it in items if it["face_count"] > 0]
 

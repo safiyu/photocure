@@ -3830,7 +3830,7 @@
             <button class="people-merge-pill" type="button"
                     data-source-id="${num(p.id)}"
                     data-target-id="${num(p.similar_to.target_id)}"
-                    data-target-name="${esc(p.similar_to.target_name || 'Person #' + p.similar_to.target_id)}"
+                    data-target-name="${esc(p.similar_to.target_name || '')}"
                     title="Visually similar (${Math.round(p.similar_to.score * 100)}% match). Click to merge!">
               ${p.similar_to.target_sample_face_id ? `
                 <img class="people-merge-thumb" src="/api/faces/${num(p.similar_to.target_sample_face_id)}.jpg${p.face_v ? '?v=' + esc(p.face_v) : ''}" alt="" loading="lazy">
@@ -3841,7 +3841,7 @@
                   <path d="M6 21V9a9 9 0 0 0 9 9"></path>
                 </svg>
               `}
-              <span>Merge with ${esc(p.similar_to.target_name || 'Person #' + p.similar_to.target_id)}?</span>
+              <span>${p.similar_to.target_name ? `Merge with ${esc(p.similar_to.target_name)}` : `Merge`}</span>
             </button>` : ""
           }
 
@@ -3961,7 +3961,7 @@
           const targetName = mergeBtn.dataset.targetName;
           try {
             await post(`/api/people/${sourceId}/merge-into/${targetId}`, {});
-            toast(`Merged with ${targetName} ✓`, "ok");
+            toast(targetName ? `Merged with ${targetName} ✓` : "Merged ✓", "ok");
             const targetCard = host.querySelector(`.people-card[data-person-id="${targetId}"]`);
             if (targetCard) {
               const srcCount = parseInt(card.dataset.faceCount, 10) || 0;
@@ -3987,7 +3987,7 @@
 
           mergeThumb.addEventListener("mouseenter", () => {
             previewImg.src = mergeThumb.src;
-            previewLbl.textContent = mergeBtn.dataset.targetName || "Preview";
+            previewLbl.textContent = mergeBtn.dataset.targetName || "Matching face";
             preview.classList.add("visible");
           });
 
