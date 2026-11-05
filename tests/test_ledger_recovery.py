@@ -233,3 +233,36 @@ def test_restore_row_skips_companion_when_photo_reversal_fails(tmp_path):
 
     assert rb.failures == 1 and rb.reversed == 1
     assert get_img(w, w.ids[0]).path == str(photo_target)
+
+
+def test_migrate_backfills_companion_of_on_legacy_ledger_rows(tmp_path):
+    import sqlite3
+    from photocure.db.session import init_db
+    db = tmp_path / "old.db"
+    init_db(db)
+    con = sqlite3.connect(db)
+    con.execute("DROP INDEX ix_action_ledger_companion_of")
+    con.execute("ALTER TABLE action_ledger DROP COLUMN companion_of")
+    con.execute("INSERT INTO images (path, relative_path, filename, extension, mime_type, file_size, quick_hash,"
+                " sha256, width, height, orientation, taken_at_source, camera_model, city, region, country_code,"
+                " is_favorite, scan_status, infer_status, is_duplicate, is_best_shot, is_alternate, route_status,"
+                " locked, delete_approved, has_blinks, blink_count, faces_schema_version, created_at, updated_at, stage)"
+                " VALUES ('/lib/a.jpg','','a.jpg','','',0,'','',0,0,1,'','','','','',0,'scanned','pending',0,0,0,"
+                " 'executed',0,0,0,0,0,'2026-01-01','2026-01-01','library')")
+    img_id = con.execute("SELECT id FROM images").fetchone()[0]
+    for src, dst in (("/src/a.jpg", "/lib/a.jpg"), ("/src/a.MOV", "/lib/a.mov")):
+        con.execute("INSERT INTO action_ledger (transaction_id, image_id, source_path, target_path, operation_type,"
+                    " created_dir, prev_relative_path, prev_stage, prev_scan_status, prev_route_status,"
+                    " prev_delete_approved, sha256, file_size, actual_operation, status, created_at)"
+                    " VALUES ('TX_OLD', ?, ?, ?, 'move', '', '', '', '', '', 0, '', 0, 'move', 'committed', '2026-01-01')",
+                    (img_id, src, dst))
+    con.commit()
+    con.close()
+
+    init_db(db)  # migrate() adds companion_of and backfills
+
+    con = sqlite3.connect(db)
+    rows = con.execute("SELECT source_path, image_id, companion_of FROM action_ledger ORDER BY id").fetchall()
+    photo, mov = rows
+    assert photo[1] == img_id and photo[2] is None
+    assert mov[1] is None and mov[2] == con.execute("SELECT id FROM action_ledger WHERE source_path='/src/a.jpg'").fetchone()[0]

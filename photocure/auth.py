@@ -96,7 +96,12 @@ class AuthManager:
         return sid
 
     def validate_session(self, sid: str | None) -> bool:
-        return bool(sid) and any(_same(sid, s) for s in self._sessions)
+        if not sid:
+            return False
+        found = False
+        for s in self._sessions:  # no short-circuit: every entry is compared
+            found |= _same(sid, s)
+        return found
 
     def revoke_session(self, sid: str | None) -> None:
         self._sessions = {s for s in self._sessions if not (sid and _same(sid, s))}

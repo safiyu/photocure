@@ -131,3 +131,12 @@ def test_logout_revokes_cookie(app):
     assert c.post("/auth/logout").status_code == 204
     c.cookies.set("pcur_session", sid)  # a copied cookie must be dead too, not just cleared
     assert c.get("/api/images").status_code == 401
+
+
+def test_validate_session_checks_every_entry(app):
+    mgr = app.state.auth_mgr
+    sids = [mgr.new_session() for _ in range(3)]
+    assert all(mgr.validate_session(s) for s in sids)
+    assert mgr.validate_session("not-a-session") is False
+    mgr.revoke_session(sids[1])
+    assert mgr.validate_session(sids[1]) is False and mgr.validate_session(sids[2]) is True

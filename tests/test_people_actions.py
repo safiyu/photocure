@@ -457,3 +457,26 @@ def test_recluster_purity_on_synthetic_identities(cfg, session, repo):
     for (img, p), pid in assign.items():
         imgs.setdefault(img, []).append(pid)
     assert all(len(set(v)) == len(v) for v in imgs.values())
+
+
+def test_recluster_face_count_matches_db_after_faces_move(cfg, session, repo):
+    from tests.test_face_identity import mix, unit
+    # an anchored library person whose centroid is a; two new faces close to a, one far away
+    a = unit(61)
+    lib = repo.create_person_cluster(a); repo.rename_person(lib.id, "Lib"); repo.update_person_cluster(lib.id, a, 1)
+    session.add(M.ImageRecord(id=90, path="/90.jpg", filename="90.jpg", stage="library")); session.flush()
+    _face(session, 90, person_id=lib.id, embedding=a)
+    for iid in (91, 92, 93):
+        _image(session, iid)
+    _face(session, 91, embedding=mix(a, unit(62), cos=0.8))
+    _face(session, 92, embedding=mix(a, unit(63), cos=0.8))
+    _face(session, 93, embedding=unit(64))
+    session.commit()
+
+    recluster_people(cfg.db_path, threshold=0.35)
+
+    session.expire_all()
+    for c in session.exec(select(M.PersonCluster)).all():
+        actual = session.exec(select(M.FaceDetection).where(M.FaceDetection.person_id == c.id,
+                                                            M.FaceDetection.ignored == False)).all()
+        assert c.face_count == len(actual), (c.id, c.name, c.face_count, len(actual))

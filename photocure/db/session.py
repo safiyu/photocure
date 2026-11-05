@@ -127,6 +127,18 @@ def migrate(engine) -> int:
                 conn.exec_driver_sql(ddl)
                 added += 1
                 added_cols.add((table.name, col.name))
+        if ("action_ledger", "companion_of") in added_cols:
+            # Rows written before companion tracking: a .mov/.mp4/.xmp row in a transaction whose
+            # photo row shares the image id is that photo's companion, not the photo itself.
+            conn.exec_driver_sql(
+                "UPDATE action_ledger SET companion_of=(SELECT p.id FROM action_ledger p"
+                " WHERE p.transaction_id=action_ledger.transaction_id AND p.image_id=action_ledger.image_id"
+                " AND p.id<>action_ledger.id AND lower(substr(p.source_path, -4)) NOT IN ('.mov','.mp4','.xmp')"
+                " ORDER BY p.id LIMIT 1), image_id=NULL"
+                " WHERE lower(substr(source_path, -4)) IN ('.mov','.mp4','.xmp') AND image_id IS NOT NULL"
+                " AND EXISTS (SELECT 1 FROM action_ledger p WHERE p.transaction_id=action_ledger.transaction_id"
+                " AND p.image_id=action_ledger.image_id AND p.id<>action_ledger.id"
+                " AND lower(substr(p.source_path, -4)) NOT IN ('.mov','.mp4','.xmp'))")
         if ("images", "stage") in added_cols:
             # Rows from before stages existed take their stage from how they were routed.
             conn.exec_driver_sql("UPDATE images SET stage='library' WHERE route_status='executed'")

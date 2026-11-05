@@ -946,6 +946,7 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
         total_assigned = 0
         face_by_id = {f.id: f for f in faces}
 
+        existing_to_count: list[M.PersonCluster] = []
         for c_data in clusters:
             if c_data.get("is_existing") and c_data["cluster_obj"] is not None:
                 c = c_data["cluster_obj"]
@@ -954,12 +955,7 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                     if face_obj is not None:
                         face_obj.person_id = c.id
                         total_assigned += 1
-                # Update face_count
-                rem = s.exec(
-                    select(func.count(M.FaceDetection.id))
-                    .where(M.FaceDetection.person_id == c.id, M.FaceDetection.ignored == False)
-                ).one()
-                c.face_count = int(rem or 0)
+                existing_to_count.append(c)
                 centroid_list = c_data["centroid"].tolist()
                 c.centroid_json = quantize_embedding(centroid_list)
                 c.yearly_json = encode_yearly(c_data.get("yearly_medoids") or {}, c_data.get("yearly_counts") or {})
@@ -983,6 +979,14 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                         face_obj.person_id = new_c.id
                         total_assigned += 1
                 created_count += 1
+        # Count only after every face has its final person, or a face still to move counts twice.
+        s.flush()
+        for c in existing_to_count:
+            rem = s.exec(
+                select(func.count(M.FaceDetection.id))
+                .where(M.FaceDetection.person_id == c.id, M.FaceDetection.ignored == False)
+            ).one()
+            c.face_count = int(rem or 0)
 
         # Prune any empty unnamed ghost clusters
         has_any_face = s.exec(select(M.FaceDetection.id).limit(1)).first() is not None
