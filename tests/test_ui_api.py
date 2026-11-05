@@ -875,3 +875,28 @@ def test_move_to_output_dir_and_trash_index_removal_with_undo(env):
     assert c.get("/api/overview").json()["total"] == 4
 
 
+
+
+# ---------------------------------------------------------------- request validation
+def test_reset_rejects_unknown_stage_in_body(env):
+    r = env.client.post("/api/reset", json={"stage": "library"})
+    assert r.status_code == 422
+    assert env.client.get("/api/images?limit=50").json()["items"]  # nothing was cleared
+
+
+def test_fix_dates_rejects_non_numeric_shift(env):
+    assert env.client.post("/api/images/fix-dates", json={"shift_hours": "abc"}).status_code == 422
+
+
+def test_curate_budget_rejects_bad_action(env):
+    assert env.client.post("/api/curate/budget", json={"action": "delete_all"}).status_code == 422
+
+
+def test_bokeh_rejects_non_numeric_focus(env):
+    import base64
+    import cv2
+    import numpy as np
+    ok, buf = cv2.imencode(".png", np.zeros((8, 8, 3), np.uint8))
+    img = base64.b64encode(buf.tobytes()).decode()
+    r = env.client.post("/api/editor/bokeh", json={"image": img, "focus_x": "x"})
+    assert r.status_code == 400

@@ -166,6 +166,28 @@ class RenameReq(BaseModel):
     name: str
 
 
+class ResetReq(BaseModel):
+    stage: Literal["new", "all"] = "all"
+
+
+class CurateBudgetReq(BaseModel):
+    target_count: int | None = Field(None, ge=1)
+    target_percent: float | None = Field(None, gt=0, le=100)
+    event_id: int | None = None
+    stage: StageFilter = "new"
+    action: Literal["preview", "stage_delete", "star_keepers"] = "preview"
+
+
+class FixDatesReq(BaseModel):
+    ids: list[int] | None = Field(None, max_length=50000)
+    shift_hours: float = 0
+    shift_minutes: float = 0
+    shift_seconds: float = 0
+    camera_model: str | None = None
+    ingest_takeout: bool = False
+    write_sidecar: bool = True
+
+
 class FinalizeReq(BaseModel):
     ids: list[int] | None = None
     stage: StageFilter = "new"
@@ -1375,25 +1397,19 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "Content-Disposition": f'attachment; filename="highlights-{year}.html"'})
 
     @app.post("/api/curate/budget", dependencies=auth)
-    def curate_budget(payload: dict = Body(default={})):
+    def curate_budget(payload: CurateBudgetReq | None = Body(None)):
         from ..curate_budget import budget_curate
-        target_count = payload.get("target_count")
-        target_percent = payload.get("target_percent")
-        event_id = payload.get("event_id")
-        stage = payload.get("stage", "new")
-        action = payload.get("action", "preview")
-
+        p = payload or CurateBudgetReq()
         with get_session(dbp) as s:
-            res = budget_curate(
+            return budget_curate(
                 session=s,
                 cfg=app.state.cfg,
-                target_count=int(target_count) if target_count is not None else None,
-                target_percent=float(target_percent) if target_percent is not None else None,
-                event_id=int(event_id) if event_id is not None else None,
-                stage=stage,
-                action=action,
+                target_count=p.target_count,
+                target_percent=p.target_percent,
+                event_id=p.event_id,
+                stage=p.stage,
+                action=p.action,
             )
-            return res
 
     @app.get("/api/facets")
     def facets(stage: StageFilter = Query("all")):
@@ -1493,24 +1509,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
             }
 
     @app.post("/api/images/fix-dates", dependencies=auth)
-    def post_fix_dates(payload: dict = Body(default={})):
+    def post_fix_dates(payload: FixDatesReq | None = Body(None)):
         from ..scanner.exif_reader import read_takeout_sidecar
         from ..scanner.xmp import update_xmp_sidecar
-        ids = payload.get("ids")
-        shift_hours = payload.get("shift_hours")
-        shift_minutes = payload.get("shift_minutes")
-        shift_seconds = payload.get("shift_seconds")
-        camera_model = payload.get("camera_model")
-        ingest_takeout = bool(payload.get("ingest_takeout", False))
-        write_sidecar = payload.get("write_sidecar", True)
-
-        total_offset_sec = 0.0
-        if shift_hours is not None:
-            total_offset_sec += float(shift_hours) * 3600.0
-        if shift_minutes is not None:
-            total_offset_sec += float(shift_minutes) * 60.0
-        if shift_seconds is not None:
-            total_offset_sec += float(shift_seconds)
+        p = payload or FixDatesReq()
+        ids, camera_model = p.ids, p.camera_model
+        ingest_takeout, write_sidecar = p.ingest_takeout, p.write_sidecar
+        total_offset_sec = p.shift_hours * 3600.0 + p.shift_minutes * 60.0 + p.shift_seconds
 
         with get_session(dbp) as s:
             query = select(M.ImageRecord).where(M.ImageRecord.scan_status != "missing")
@@ -1919,18 +1924,24 @@ def create_app(db_path: str | None = None) -> FastAPI:
         focus_x = 0.5
         focus_y = 0.5
         aperture = 0.5
+
+        def unit_float(value, default: float) -> float:
+            if value is None:
+                return default
+            try:
+                return min(1.0, max(0.0, float(value)))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "focus_x, focus_y and aperture must be numbers between 0 and 1")
+
         if content_type.startswith("multipart/form-data"):
             form = await request.form()
             file_item = form.get("file")
             if not file_item:
                 raise HTTPException(400, "Missing 'file' in form data")
             image_bytes = await file_item.read()
-            if "focus_x" in form:
-                focus_x = float(form.get("focus_x"))
-            if "focus_y" in form:
-                focus_y = float(form.get("focus_y"))
-            if "aperture" in form:
-                aperture = float(form.get("aperture"))
+            focus_x = unit_float(form.get("focus_x"), 0.5)
+            focus_y = unit_float(form.get("focus_y"), 0.5)
+            aperture = unit_float(form.get("aperture"), 0.5)
         else:
             try:
                 body = await request.json()
@@ -1943,9 +1954,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 image_bytes = base64.b64decode(data_str)
             except Exception:
                 raise HTTPException(400, "Invalid base64 image data")
-            focus_x = float(body.get("focus_x", 0.5))
-            focus_y = float(body.get("focus_y", 0.5))
-            aperture = float(body.get("aperture", 0.5))
+            if not isinstance(body, dict):
+                raise HTTPException(400, "Invalid JSON body")
+            focus_x = unit_float(body.get("focus_x"), 0.5)
+            focus_y = unit_float(body.get("focus_y"), 0.5)
+            aperture = unit_float(body.get("aperture"), 0.5)
 
         try:
             jpg_bytes, w, h = apply_depth_bokeh(
@@ -3000,13 +3013,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return {"ok": True, "stopping": True, "message": "Stop requested"}
 
     @app.post("/api/reset", dependencies=auth)
-    def reset_library(body: dict | None = None, stage: Literal["new", "all"] = Query("all")):
+    def reset_library(body: ResetReq | None = Body(None), stage: Literal["new", "all"] = Query("all")):
         if hasattr(app.state, "watch") and app.state.watch is not None:
             app.state.watch.stop()
         from ..features import save_features
         save_features(dbp, {"watch_enabled": False, "watch_path": ""})
-        # If stage was specified in JSON body, respect that
-        effective_stage = (body.get("stage") if body and "stage" in body else stage)
+        effective_stage = body.stage if body is not None else stage
         with exclusive():
             with get_session(dbp) as s:
                 repo = PhotoRepository(s)
