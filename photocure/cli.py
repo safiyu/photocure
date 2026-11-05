@@ -1368,7 +1368,9 @@ def db_restore(
     close_engine(db)
     if db.exists():
         keep = db.with_name(db.name + ".pre-restore")
-        shutil.copy2(db, keep)
+        with contextlib.closing(sqlite3.connect(str(db))) as cur, \
+                contextlib.closing(sqlite3.connect(str(keep))) as dst:
+            cur.backup(dst)  # includes rows still sitting in the WAL
         console.print(f"Current database kept as {keep}")
     with contextlib.closing(sqlite3.connect(str(snapshot))) as src, \
             contextlib.closing(sqlite3.connect(str(db))) as dst:

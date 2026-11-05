@@ -100,3 +100,25 @@ def test_everything_we_do_not_own_survives_unchanged(tmp_path):
                        remove_tags=("photocure-blink",), label="Red")
     assert _not_ours(side) == before
     assert get_on_disk_rating(img.path) == 5
+
+
+def test_sidecar_flush_skips_rows_whose_file_is_missing(tmp_path):
+    from photocure.db.models import ImageRecord
+    from photocure.db.session import get_session, init_db
+    from photocure.sidecar_queue import SidecarQueue
+    from photocure.sidecar_sync import SKIPPED
+    db = tmp_path / "q.db"
+    init_db(db, drop=True)
+    with get_session(db) as s:
+        rec = ImageRecord(path=str(tmp_path / "gone.jpg"), filename="gone.jpg", file_size=1,
+                          quick_hash="q", sha256="s", rating=4)
+        s.add(rec)
+        s.commit()
+        rid = rec.id
+    q = SidecarQueue(db, debounce=60)
+    q.schedule(rid)
+
+    results = q.flush()
+
+    assert results[rid].status == SKIPPED
+    assert not list(tmp_path.glob("*.xmp"))
