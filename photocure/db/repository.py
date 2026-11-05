@@ -327,6 +327,7 @@ class PhotoRepository:
         existing = self.s.exec(
             sselect(SemanticScore).where(SemanticScore.image_id == sem.image_id)
         ).first()
+        sem.computed_at = utcnow()
         if existing is None:
             self.s.add(sem)
         else:
@@ -338,6 +339,7 @@ class PhotoRepository:
             existing.aesthetic = sem.aesthetic
             existing.aesthetic_model = sem.aesthetic_model
             existing.preference = sem.preference
+            existing.computed_at = sem.computed_at  # moves the embedding-cache version
         self.s.flush()
         return sem
 
@@ -637,6 +639,13 @@ class PhotoRepository:
 
     # -------------------------------------------------------- clear / reset
     def clear_library(self, keep_ledger: bool = False, stage: str | None = None) -> dict[str, int]:
+        """Clear indexed records, clusters, and plans.
+        """
+        from ..inference.embedding_cache import invalidate
+        invalidate()
+        return self._clear_library(keep_ledger=keep_ledger, stage=stage)
+
+    def _clear_library(self, keep_ledger: bool = False, stage: str | None = None) -> dict[str, int]:
         """Clear indexed records, clusters, and plans.
 
         When ``stage == 'new'``, only clears un-finalized photos in the 'new' section, leaving

@@ -26,46 +26,35 @@ def top_k(session, q: np.ndarray, k: int, *, exclude_id: int | None = None,
     """
     if k <= 0:
         return []
-    best_ids = np.empty(0, dtype=np.int64)
-    best_sims = np.empty(0, dtype=np.float32)
-    last = 0
-    while True:
-        stmt = sselect(SemanticScore.image_id, SemanticScore.embedding)
+    from ..inference.embedding_cache import matrix
+    all_ids, vecs = matrix(session)
+    if len(all_ids) == 0 or vecs.shape[1] != q.shape[0]:
+        return []
+    keep = np.ones(len(all_ids), dtype=bool)
+    if filters:
+        stmt = sselect(SemanticScore.image_id)
         if join_images:
             stmt = stmt.join(ImageRecord, ImageRecord.id == SemanticScore.image_id)
         for cond in filters:
             stmt = stmt.where(cond)
-        rows = session.exec(
-            stmt.where(col(SemanticScore.image_id) > last)
-            .order_by(col(SemanticScore.image_id)).limit(_CHUNK)).all()
-        if not rows:
-            break
-        last = rows[-1][0]
-        ids, vecs = [], []
-        for iid, blob in rows:
-            if iid == exclude_id:
-                continue
-            v = _unit(dequantize_embedding(blob) or [])
-            if v is None or v.shape != q.shape:
-                continue
-            ids.append(iid)
-            vecs.append(v)
-        if not ids:
-            continue
-        sims = np.stack(vecs) @ q
-        if min_score is not None:
-            keep = sims >= min_score
-            ids = [i for i, ok in zip(ids, keep) if ok]
-            sims = sims[keep]
-            if not ids:
-                continue
-        best_ids = np.concatenate([best_ids, np.asarray(ids, dtype=np.int64)])
-        best_sims = np.concatenate([best_sims, sims])
-        if len(best_ids) > k:
-            keep_idx = np.argpartition(-best_sims, k - 1)[:k]
-            best_ids, best_sims = best_ids[keep_idx], best_sims[keep_idx]
-    order = np.lexsort((best_ids, -best_sims))
-    return [(int(best_ids[i]), float(best_sims[i])) for i in order[:k]]
+        eligible = set(session.exec(stmt).all())
+        keep = np.fromiter((int(i) in eligible for i in all_ids), dtype=bool, count=len(all_ids))
+    if exclude_id is not None:
+        keep &= all_ids != exclude_id
+    if not keep.any():
+        return []
+    ids = all_ids[keep]
+    sims = vecs[keep].astype(np.float32) @ q.astype(np.float32)
+    if min_score is not None:
+        m = sims >= min_score
+        ids, sims = ids[m], sims[m]
+        if len(ids) == 0:
+            return []
+    if len(ids) > k:
+        top = np.argpartition(-sims, k - 1)[:k]
+        ids, sims = ids[top], sims[top]
+    order = np.lexsort((ids, -sims))
+    return [(int(ids[i]), float(sims[i])) for i in order[:k]]
 
 
 def find_similar(session, image_id: int, k: int = 10) -> list[tuple[int, float]]:

@@ -84,31 +84,19 @@ class SearchResult:
 
 def _scan(session, queries: np.ndarray, filters: tuple) -> tuple[np.ndarray, np.ndarray]:
     """Cosine of every searchable photo against each query row: ids (N,), sims (N, P)."""
-    ids: list[int] = []
-    blocks: list[np.ndarray] = []
-    last = 0
-    while True:
-        rows = session.exec(
-            sselect(SemanticScore.image_id, SemanticScore.embedding)
-            .join(ImageRecord, ImageRecord.id == SemanticScore.image_id)
-            .where(*filters, col(SemanticScore.image_id) > last)
-            .order_by(col(SemanticScore.image_id)).limit(_CHUNK)).all()
-        if not rows:
-            break
-        last = rows[-1][0]
-        keep_ids, vecs = [], []
-        for iid, blob in rows:
-            v = _unit(dequantize_embedding(blob) or [])
-            if v is None or v.shape[0] != queries.shape[1]:
-                continue
-            keep_ids.append(iid)
-            vecs.append(v)
-        if keep_ids:
-            ids.extend(keep_ids)
-            blocks.append(np.stack(vecs) @ queries.T)
-    if not ids:
+    from .inference.embedding_cache import matrix
+    all_ids, vecs = matrix(session)
+    if len(all_ids) == 0 or vecs.shape[1] != queries.shape[1]:
         return np.empty(0, dtype=np.int64), np.empty((0, queries.shape[0]), dtype=np.float32)
-    return np.asarray(ids, dtype=np.int64), np.concatenate(blocks).astype(np.float32)
+    eligible = set(session.exec(
+        sselect(SemanticScore.image_id)
+        .join(ImageRecord, ImageRecord.id == SemanticScore.image_id)
+        .where(*filters)).all())
+    keep = np.fromiter((int(i) in eligible for i in all_ids), dtype=bool, count=len(all_ids))
+    if not keep.any():
+        return np.empty(0, dtype=np.int64), np.empty((0, queries.shape[0]), dtype=np.float32)
+    sims = vecs[keep].astype(np.float32) @ queries.T.astype(np.float32)
+    return all_ids[keep], sims.astype(np.float32)
 
 
 def _robust_z(sims: np.ndarray) -> np.ndarray:
