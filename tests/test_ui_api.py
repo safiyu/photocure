@@ -175,7 +175,10 @@ def test_near_dup_highlights_event_filters(env):
         a.event_id = ev.id
         b.event_id = ev.id
         for i, val in zip(ids, (1.0, 2.0, 7.5, 3.0)):
-            s.get(M.ImageRecord, i).semantic.aesthetic = val
+            rec = s.get(M.ImageRecord, i)
+            rec.semantic.aesthetic = val
+            if rec.quality is not None:
+                rec.quality.quality_score = 1.0  # equal technical quality: the order is the aesthetic order
         eid = ev.id
     c = env.client
     assert [i["id"] for i in c.get("/api/images?near_dup=true").json()["items"]] == [ids[1]]

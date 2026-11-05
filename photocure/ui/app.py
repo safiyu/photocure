@@ -1161,6 +1161,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
         def apply(stmt):
             if need_sem:
                 stmt = stmt.join(M.SemanticScore, M.SemanticScore.image_id == I.id)
+            if highlights:
+                stmt = stmt.outerjoin(M.QualityMetric, M.QualityMetric.image_id == I.id)
             for c in conds:
                 stmt = stmt.where(c)
             return stmt
@@ -1169,7 +1171,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             total = s.exec(apply(select(func.count()).select_from(I))).one()
             if highlights:
                 from ..highlights import highlight_expr
-                expr = highlight_expr(hl_weights())
+                expr = highlight_expr(hl_weights(), with_quality=True)
                 ranked = s.exec(apply(select(I.id, expr)).order_by(expr.desc(), I.id)
                                 .offset(offset).limit(limit)).all()
                 ids = [i for i, _ in ranked]

@@ -18,7 +18,7 @@ from sqlalchemy import and_, case, func, not_, or_
 from sqlmodel import col, select
 
 from .clustering.events import UNRELIABLE_TIME_SOURCES
-from .db.models import EventGroup, ImageRecord, SemanticScore
+from .db.models import EventGroup, ImageRecord, QualityMetric, SemanticScore
 from .narrative import balance_selection, coverage
 
 log = logging.getLogger("photocure.highlights")
@@ -73,16 +73,25 @@ def highlight_score(aesthetic: float | None, preference: float | None, rating: i
     return float(base)
 
 
-def highlight_expr(w: HighlightWeights):
-    """SQL twin of :func:`highlight_score` over ``SemanticScore`` joined to ``ImageRecord``."""
-    S, I = SemanticScore, ImageRecord
+def highlight_expr(w: HighlightWeights, with_quality: bool = False):
+    """SQL twin of :func:`highlight_score` over ``SemanticScore`` joined to ``ImageRecord``.
+
+    ``with_quality`` adds the technical tempering and requires ``QualityMetric`` outer-joined
+    (see :func:`_joined`); without the join SQLite would cross-join and multiply rows.
+    """
+    S, I, Q = SemanticScore, ImageRecord, QualityMetric
     stars_in = func.coalesce(col(I.rating), 0)
     liked = or_(col(I.is_favorite) == True, stars_in >= 4)  # noqa: E712
     disliked = stars_in.in_(BAD_STARS)
     labelled = or_(and_(liked, not_(disliked)), and_(disliked, not_(liked)))
+    # Same tempering as highlight_score(quality=...): blurred frames do not ride a high aesthetic score.
+    aesthetic = col(S.aesthetic)
+    if with_quality:
+        quality = func.coalesce(col(Q.quality_score), 1.0)
+        aesthetic = aesthetic * func.max(0.2, func.min(1.0, 0.35 + 0.65 * quality))
     base = case((and_(col(S.preference).is_not(None), not_(labelled)),
-                 (1.0 - w.preference) * col(S.aesthetic) + w.preference * col(S.preference)),
-                else_=col(S.aesthetic))
+                 (1.0 - w.preference) * aesthetic + w.preference * col(S.preference)),
+                else_=aesthetic)
     stars = case((and_(col(I.rating) >= 1, col(I.rating) <= 5),
                   (col(I.rating) - 3) * (w.rating / 2.0)), else_=0.0)
     fav = case((col(I.is_favorite) == True, w.favorite), else_=0.0)  # noqa: E712
@@ -101,7 +110,8 @@ def candidate_filters(stage: str = "all") -> list:
 
 
 def _joined(stmt):
-    return stmt.join(SemanticScore, SemanticScore.image_id == ImageRecord.id)
+    return (stmt.join(SemanticScore, SemanticScore.image_id == ImageRecord.id)
+            .outerjoin(QualityMetric, QualityMetric.image_id == ImageRecord.id))
 
 
 def _by_capture_time(taken: dict):
@@ -119,7 +129,7 @@ def best_of_events(session, w: HighlightWeights, per_event: int = 1,
     With ``scale_of`` (photo ids to scale labels, or None) the selection is balanced across shot
     scales and listed in capture order, so the event reads like a story.
     """
-    expr = highlight_expr(w)
+    expr = highlight_expr(w, with_quality=True)
     stmt = _joined(select(ImageRecord.id, ImageRecord.event_id, expr)).where(
         col(ImageRecord.event_id).is_not(None), *candidate_filters(stage))
     if min_score is not None:
@@ -164,15 +174,38 @@ def _reliable_time():
             col(ImageRecord.taken_at_source).not_in(tuple(UNRELIABLE_TIME_SOURCES))]
 
 
-def top_of_year(session, w: HighlightWeights, year: int, n: int = 50) -> list[tuple[int, float]]:
-    """The ``n`` highest ranked photos taken in ``year`` as ``(image_id, score)``."""
+def top_of_year(session, w: HighlightWeights, year: int, n: int = 50,
+                max_cosine: float = 0.90) -> list[tuple[int, float]]:
+    """The ``n`` highest ranked photos taken in ``year`` as ``(image_id, score)``.
+
+    Retakes that fall outside burst grouping are skipped: a photo whose embedding is within
+    ``max_cosine`` of one already picked gives its place to the next best.
+    """
+    import numpy as np
+    from .db.repository import dequantize_embedding
     lo, hi = _year_bounds(year)
-    expr = highlight_expr(w)
-    stmt = (_joined(select(ImageRecord.id, expr))
+    expr = highlight_expr(w, with_quality=True)
+    stmt = (_joined(select(ImageRecord.id, expr, SemanticScore.embedding))
             .where(*candidate_filters(), *_reliable_time(),
                    col(ImageRecord.taken_at) >= lo, col(ImageRecord.taken_at) < hi)
-            .order_by(expr.desc(), col(ImageRecord.id)).limit(n))
-    return [(int(i), float(s)) for i, s in session.exec(stmt).all()]
+            .order_by(expr.desc(), col(ImageRecord.id)).limit(3 * n))
+    picked: list[tuple[int, float]] = []
+    kept: list[np.ndarray] = []
+    for i, s, blob in session.exec(stmt).all():
+        vec = dequantize_embedding(blob) if blob else None
+        v = None
+        if vec:
+            arr = np.asarray(vec, dtype=np.float32)
+            norm = float(np.linalg.norm(arr))
+            v = arr / norm if norm > 1e-6 else None
+        if v is not None and any(k.shape == v.shape and float(k @ v) >= max_cosine for k in kept):
+            continue
+        picked.append((int(i), float(s)))
+        if v is not None:
+            kept.append(v)
+        if len(picked) >= n:
+            break
+    return picked
 
 
 def years_available(session) -> list[tuple[int, int]]:
