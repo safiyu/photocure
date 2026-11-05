@@ -60,7 +60,6 @@ def model_path(name: str, models_dir: Path = MODELS_DIR) -> Path | None:
             models_dir / AURAFACE,
             Path("/data/models/auraface.onnx"),
             Path.home() / ".cache/photocure/models/auraface.onnx",
-            Path("/home/safiyu/Photocure/data/models/auraface.onnx"),
         ]
         for c in candidates:
             if str(c) and c.is_file():
@@ -81,7 +80,7 @@ def downloaded_models(models_dir: Path = MODELS_DIR) -> list[dict]:
     except (OSError, ValueError):
         return []
     home = Path(os.environ.get("U2NET_HOME") or Path(os.environ.get("XDG_DATA_HOME", "~")) / ".u2net").expanduser()
-    cache_roots = [home, Path("/data/models"), Path.home() / ".cache/photocure/models", Path("/home/safiyu/Photocure/data/models")]
+    cache_roots = [home, Path("/data/models"), Path.home() / ".cache/photocure/models"]
     found = []
     for m in entries:
         if m.get("cache_file"):

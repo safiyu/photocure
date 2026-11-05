@@ -88,13 +88,6 @@
       "license": "Apache-2.0",
       "cache_file": "depth_anything_v2_vits.onnx",
       "upstream_url": "https://github.com/DepthAnything/Depth-Anything-V2"
-    },
-    {
-      "name": "SigLIP 2 NaFlex",
-      "purpose": "Dynamic aspect ratio vision-language embeddings and multilingual zero-shot search",
-      "license": "Apache-2.0",
-      "cache_file": "siglip2_base_naflex.onnx",
-      "upstream_url": "https://huggingface.co/google/siglip2-base-patch16-naflex"
     }
   ]
 }
