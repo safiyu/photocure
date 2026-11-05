@@ -57,6 +57,26 @@ def dequantize_embedding(blob: str) -> list[float] | None:
     return [float(v) for v in arr]
 
 
+def encode_yearly(meds: dict[str, Sequence[float]], counts: dict[str, int]) -> str:
+    return json.dumps({y: {"n": int(counts.get(y, 1)), "v": quantize_embedding(v)} for y, v in meds.items()})
+
+
+def decode_yearly(raw: str | None) -> tuple[dict[str, list[float]], dict[str, int]]:
+    if not raw:
+        return {}, {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}, {}
+    meds, counts = {}, {}
+    for y, item in data.items():
+        vec = dequantize_embedding(item.get("v")) if isinstance(item, dict) else None
+        if vec:
+            meds[y] = vec
+            counts[y] = int(item.get("n", 1))
+    return meds, counts
+
+
 def stage_clause(stage: str | None):
     """SQL filter for one stage. "all" (or None) is new and library photos together.
 
@@ -255,17 +275,22 @@ class PhotoRepository:
     def all_person_clusters(self) -> list[PersonCluster]:
         return list(self.s.exec(sselect(PersonCluster)).all())
 
-    def create_person_cluster(self, embedding: Sequence[float], stage: str = "library") -> PersonCluster:
-        p = PersonCluster(name=None, face_count=1, stage=stage, centroid_json=quantize_embedding(embedding))
+    def create_person_cluster(self, embedding: Sequence[float], stage: str = "library",
+                              yearly: tuple[dict, dict] | None = None) -> PersonCluster:
+        p = PersonCluster(name=None, face_count=1, stage=stage, centroid_json=quantize_embedding(embedding),
+                          yearly_json=encode_yearly(*yearly) if yearly else None)
         self.s.add(p)
         self.s.flush()
         return p
 
-    def update_person_cluster(self, person_id: int, centroid: Sequence[float], face_count: int) -> None:
+    def update_person_cluster(self, person_id: int, centroid: Sequence[float], face_count: int,
+                              yearly: tuple[dict, dict] | None = None) -> None:
         p = self.s.get(PersonCluster, person_id)
         if p is None:
             raise ValueError(f"no person cluster with id {person_id}")
         p.centroid_json = quantize_embedding(centroid)
+        if yearly is not None:
+            p.yearly_json = encode_yearly(*yearly)
         p.face_count = face_count
         if p.face_count <= 0 and not p.name:
             self.s.delete(p)

@@ -52,7 +52,7 @@ from ..db.models import (
     QualityMetric,
     SemanticScore,
 )
-from ..db.repository import PhotoRepository, dequantize_embedding, quantize_embedding
+from ..db.repository import PhotoRepository, dequantize_embedding, quantize_embedding, decode_yearly
 from ..db.session import get_session
 from ..quality.engine import QualityEngine
 from ..quality.image_loader import load_image
@@ -418,24 +418,7 @@ class InferencePipeline:
         chunks = [c[i:i + cap] for c in chunks for i in range(0, len(c), cap)]
         # Loaded once so a cluster created or grown earlier in this run is visible to later
         # images, without re-reading every centroid from the DB on each face.
-        cluster_images: dict[int, set[int]] = {}
-        try:
-            for p_id, img_id in repo.s.exec(
-                sselect(FaceDetection.person_id, FaceDetection.image_id).where(FaceDetection.person_id.is_not(None))
-            ).all():
-                cluster_images.setdefault(p_id, set()).add(img_id)
-        except Exception:
-            pass
-        centroids: dict[int, ClusterCentroid] = {
-            c.id: ClusterCentroid(
-                c.id,
-                dequantize_embedding(c.centroid_json) or [],
-                c.face_count,
-                image_ids=cluster_images.get(c.id, set()),
-            )
-            for c in repo.all_person_clusters()
-            if c.centroid_json and c.face_count > 0 and c.stage == self._cluster_stage
-        }
+        centroids = self._load_centroids(repo)
         try:
             for chunk in chunks:
                 if cancel_check and cancel_check():
@@ -679,6 +662,23 @@ class InferencePipeline:
                     f.embedding = dequantize_embedding(best.embedding_json)
         return out
 
+    def _load_centroids(self, repo: PhotoRepository) -> dict[int, ClusterCentroid]:
+        """Every live cluster of this stage with its per-year means and photo set."""
+        cluster_images: dict[int, set[int]] = {}
+        for p_id, img_id in repo.s.exec(
+            sselect(FaceDetection.person_id, FaceDetection.image_id).where(FaceDetection.person_id.is_not(None))
+        ).all():
+            cluster_images.setdefault(p_id, set()).add(img_id)
+        out: dict[int, ClusterCentroid] = {}
+        for c in repo.all_person_clusters():
+            if not (c.centroid_json and c.face_count > 0 and c.stage == self._cluster_stage):
+                continue
+            meds, counts = decode_yearly(c.yearly_json)
+            out[c.id] = ClusterCentroid(c.id, dequantize_embedding(c.centroid_json) or [], c.face_count,
+                                        temporal_medoids=meds, temporal_counts=counts,
+                                        image_ids=cluster_images.get(c.id, set()))
+        return out
+
     @staticmethod
     def _live_cluster(repo: PhotoRepository, centroids: dict[int, ClusterCentroid],
                       pid: int) -> ClusterCentroid | None:
@@ -687,7 +687,11 @@ class InferencePipeline:
         if p is None or not p.centroid_json:
             centroids.pop(pid, None)
             return None
-        c = ClusterCentroid(pid, dequantize_embedding(p.centroid_json) or [], p.face_count)
+        meds, counts = decode_yearly(p.yearly_json)
+        prev = centroids.get(pid)
+        c = ClusterCentroid(pid, dequantize_embedding(p.centroid_json) or [], p.face_count,
+                            temporal_medoids=meds, temporal_counts=counts,
+                            image_ids=prev.image_ids if prev is not None else None)
         centroids[pid] = c
         return c
 
@@ -757,12 +761,13 @@ class InferencePipeline:
                     if pid is None or self._live_cluster(repo, centroids, pid) is not None:
                         break
                 if pid is None:
-                    created = repo.create_person_cluster(f.embedding, stage=self._cluster_stage)
+                    meds, counts = update_temporal_medoid({}, time_bucket, f.embedding, {})
+                    created = repo.create_person_cluster(f.embedding, stage=self._cluster_stage,
+                                                         yearly=(meds, counts))
                     pid = created.id
                     undo.created.append(pid)
-                    meds = {time_bucket: list(f.embedding)} if time_bucket else {}
                     centroids[pid] = ClusterCentroid(pid, list(f.embedding), 1,
-                                                     temporal_medoids=meds,
+                                                     temporal_medoids=meds, temporal_counts=counts,
                                                      image_ids={image_id})
                 else:
                     c = centroids[pid]
@@ -772,11 +777,12 @@ class InferencePipeline:
                     # occurrence continuing (remap's stricter threshold just missed it), not a
                     # second one. Only a person new to this photo grows the cluster.
                     new_count = c.face_count if pid in old_person_ids else c.face_count + 1
-                    repo.update_person_cluster(pid, new_centroid, new_count)
-                    new_meds = update_temporal_medoid(c.temporal_medoids, time_bucket, f.embedding)
+                    new_meds, new_counts = update_temporal_medoid(c.temporal_medoids, time_bucket,
+                                                                  f.embedding, c.temporal_counts)
+                    repo.update_person_cluster(pid, new_centroid, new_count, yearly=(new_meds, new_counts))
                     c_imgs = (c.image_ids or set()) | {image_id}
                     centroids[pid] = ClusterCentroid(pid, new_centroid, new_count,
-                                                     temporal_medoids=new_meds,
+                                                     temporal_medoids=new_meds, temporal_counts=new_counts,
                                                      image_ids=c_imgs)
             result[i] = pid
             claimed_in_image.add(pid)

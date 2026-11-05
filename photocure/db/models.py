@@ -297,6 +297,8 @@ class PersonCluster(SQLModel, table=True):
     stage: str = Field(default="library", index=True)
     # Running-mean embedding (same JSON/float16 encoding as FaceDetection.embedding_json).
     centroid_json: str | None = Field(default=None)
+    # Per-year running means: {"2019": {"n": 12, "v": <quantized embedding>}, ...}
+    yearly_json: str | None = Field(default=None)
 
 
 class EventGroup(SQLModel, table=True):

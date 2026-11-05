@@ -43,7 +43,8 @@ class ClusterCentroid:
     centroid: list[float]
     face_count: int
     exemplars: list[list[float]] | None = None  # Diverse member embeddings for multi-exemplar matching
-    temporal_medoids: dict[str, list[float]] | None = None  # Chronological/yearly medoid vectors
+    temporal_medoids: dict[str, list[float]] | None = None  # per-year running means
+    temporal_counts: dict[str, int] | None = None  # faces behind each per-year mean
     image_ids: set[int] | None = None  # Set of image_ids already in this cluster (co-occurrence veto)
 
 
@@ -107,24 +108,27 @@ def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
 
 def update_temporal_medoid(current_medoids: dict[str, list[float]] | None,
                            time_bucket: str | None,
-                           new_embedding: list[float]) -> dict[str, list[float]]:
-    """Update or add a yearly/chronological medoid vector for a cluster."""
-    import numpy as np
-
+                           new_embedding: Sequence[float],
+                           counts: dict[str, int] | None) -> tuple[dict[str, list[float]], dict[str, int]]:
+    """Fold one face into its year's running mean (weight 1/n), renormalized."""
+    meds = {k: list(v) for k, v in (current_medoids or {}).items()}
+    cnt = dict(counts or {})
     if not time_bucket:
-        return current_medoids or {}
-    meds = dict(current_medoids or {})
-    if time_bucket not in meds or len(meds[time_bucket]) != len(new_embedding):
-        meds[time_bucket] = list(new_embedding)
-    else:
-        old_vec = np.array(meds[time_bucket], dtype=np.float32)
-        new_vec = np.array(new_embedding, dtype=np.float32)
-        blended = old_vec * 0.7 + new_vec * 0.3
-        norm = float(np.linalg.norm(blended))
-        if norm > 1e-6:
-            blended /= norm
-        meds[time_bucket] = blended.tolist()
-    return meds
+        return meds, cnt
+    new_vec = np.asarray(new_embedding, dtype=np.float32)
+    n = cnt.get(time_bucket, 0)
+    if time_bucket not in meds or len(meds[time_bucket]) != len(new_vec) or n <= 0:
+        meds[time_bucket] = new_vec.tolist()
+        cnt[time_bucket] = 1
+        return meds, cnt
+    old_vec = np.asarray(meds[time_bucket], dtype=np.float32)
+    old_norm = float(np.linalg.norm(old_vec))
+    old_vec = old_vec / old_norm if old_norm > 1e-6 else old_vec
+    mean = (old_vec * n + new_vec) / (n + 1)
+    norm = float(np.linalg.norm(mean))
+    meds[time_bucket] = (mean / norm if norm > 1e-6 else mean).tolist()
+    cnt[time_bucket] = n + 1
+    return meds, cnt
 
 
 def update_centroid(old_centroid: list[float], old_count: int,

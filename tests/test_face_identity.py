@@ -158,3 +158,14 @@ def test_drift_is_blocked_by_exemplar_rule():
     exemplars = update_exemplars([a], b, centroid=centroid)
     cluster = ClusterCentroid(1, centroid, 11, exemplars=exemplars)
     assert assign_cluster(c, [cluster], threshold=0.35) is None
+
+
+def test_yearly_mean_is_a_running_mean():
+    from photocure.clustering.face_identity import update_temporal_medoid
+    e1, e2 = unit(1), unit(2)
+    meds, counts = update_temporal_medoid({}, "2020", e1, {})
+    meds, counts = update_temporal_medoid(meds, "2020", e2, counts)
+    assert counts == {"2020": 2}
+    expect = (np.asarray(e1) + np.asarray(e2)) / 2
+    expect /= np.linalg.norm(expect)
+    assert np.allclose(meds["2020"], expect, atol=1e-6)

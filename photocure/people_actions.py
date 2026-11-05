@@ -7,9 +7,10 @@ from pathlib import Path
 from sqlmodel import col, func, select
 
 from .db import models as M
-from .db.repository import PhotoRepository, dequantize_embedding, quantize_embedding, stage_clause
+from .db.repository import (PhotoRepository, decode_yearly, dequantize_embedding, encode_yearly,
+                            quantize_embedding, stage_clause)
 from .db.session import get_session
-from .clustering.face_identity import effective_threshold, update_exemplars
+from .clustering.face_identity import effective_threshold, update_exemplars, update_temporal_medoid
 
 
 def _cluster_stage(stage: str) -> str:
@@ -670,6 +671,7 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                 .where(M.ImageRecord.stage == "library")
             ).all())
 
+            y_meds, y_counts = decode_yearly(c.yearly_json)
             clusters.append({
                 "cluster_obj": c,
                 "centroid": u,
@@ -678,6 +680,9 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                 "image_ids": anchored_img_ids,
                 "names": [c.name] if c.name else [],
                 "is_existing": True,
+                "anchor_count": int(lib_face_cnt),  # library faces behind the anchored centroid
+                "yearly_medoids": y_meds,
+                "yearly_counts": y_counts,
             })
             anchored_cluster_ids.add(c.id)
 
@@ -805,8 +810,8 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                 best_c["image_ids"].add(f.image_id)
                 if c_name:
                     best_c["names"].append(c_name)
-                # Update running centroid
-                n = len(best_c["face_ids"]) + (best_c["cluster_obj"].face_count if best_c.get("is_existing") else 0)
+                # Update running centroid (pipeline faces re-clustered here plus the anchored library faces)
+                n = len(best_c["face_ids"]) + best_c.get("anchor_count", 0)
                 if len(best_c["centroid"]) == len(u):
                     new_cent = (best_c["centroid"] * max(1, n - 1) + u) / max(1, n)
                     best_c["centroid"] = new_cent / float(np.linalg.norm(new_cent))
@@ -814,15 +819,8 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                     best_c["centroid"] = u
                 best_c["exemplars"] = [np.asarray(ex, dtype=np.float32) for ex in update_exemplars(
                     best_c.get("exemplars", []), u, best_c["centroid"])]
-                # Update chronological medoid
-                if f_year:
-                    c_meds = best_c.setdefault("yearly_medoids", {})
-                    if f_year not in c_meds or len(c_meds[f_year]) != len(u):
-                        c_meds[f_year] = u
-                    else:
-                        blended = c_meds[f_year] * 0.7 + u * 0.3
-                        blended /= float(np.linalg.norm(blended))
-                        c_meds[f_year] = blended
+                best_c["yearly_medoids"], best_c["yearly_counts"] = update_temporal_medoid(
+                    best_c.get("yearly_medoids"), f_year, u.tolist(), best_c.get("yearly_counts"))
             elif allow_new_cluster:
                 clusters.append({
                     "cluster_obj": None,
@@ -897,6 +895,7 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                 c.face_count = int(rem or 0)
                 centroid_list = c_data["centroid"].tolist()
                 c.centroid_json = quantize_embedding(centroid_list)
+                c.yearly_json = encode_yearly(c_data.get("yearly_medoids") or {}, c_data.get("yearly_counts") or {})
             elif c_data["face_ids"]:
                 cluster_name = None
                 if c_data["names"]:
@@ -904,6 +903,7 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                 centroid_list = c_data["centroid"].tolist()
                 new_c = M.PersonCluster(
                     centroid_json=quantize_embedding(centroid_list),
+                    yearly_json=encode_yearly(c_data.get("yearly_medoids") or {}, c_data.get("yearly_counts") or {}),
                     face_count=len(c_data["face_ids"]),
                     name=cluster_name,
                     stage=cluster_stage,
