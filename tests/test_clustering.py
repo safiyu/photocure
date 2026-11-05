@@ -141,6 +141,46 @@ def test_transitive_burst_chaining(cfg):
     assert sorted(groups[0]) == [1, 2, 3]
 
 
+def test_burst_different_phash_never_groups(cfg):
+    """Photos with different composition/phash must not group even if CLIP and time match."""
+    t0 = datetime(2024, 5, 12, 15, 30, 0)
+    rng = np.random.default_rng(2)
+    base = _unit(rng.normal(size=512))
+    items = [
+        BurstInput(1, t0, base.tolist(), phash="0000000000000000"),
+        BurstInput(2, t0 + timedelta(seconds=2), base.tolist(), phash="ffffffff00000000"),  # 32 bits different
+    ]
+    groups = BurstDetector(cfg).cluster(items)
+    assert len(groups) == 0
+
+
+def test_cohesive_floor_prevents_chain_drift(cfg):
+    """A-B similar (0.89), B-C similar (0.89), but A-C dissimilar (<0.85) must not chain."""
+    t0 = datetime(2024, 5, 12, 15, 30, 0)
+    rng = np.random.default_rng(99)
+    base = _unit(rng.normal(size=512))
+    a = base
+    b = _at(a, 0.89, rng)
+    # create c that is close to b but far from a
+    diff = b - a
+    c = _unit(b + diff)
+    sim_ab = float(a @ b)
+    sim_bc = float(b @ c)
+    sim_ac = float(a @ c)
+    assert sim_ab >= 0.88
+    assert sim_bc >= 0.88
+    assert sim_ac < cfg.burst.cohesive_floor
+
+    items = [
+        BurstInput(1, t0, a.tolist(), taken_at_source="exif:dtoriginal"),
+        BurstInput(2, t0 + timedelta(seconds=5), b.tolist(), taken_at_source="exif:dtoriginal"),
+        BurstInput(3, t0 + timedelta(seconds=10), c.tolist(), taken_at_source="exif:dtoriginal"),
+    ]
+    groups = BurstDetector(cfg).cluster(items)
+    # The cohesive floor prevents all 3 from merging into a single burst
+    assert [1, 2, 3] not in groups
+
+
 def test_singletons_excluded(cfg):
     strict(cfg)
     t0 = datetime(2024, 5, 12, 15, 30, 0)

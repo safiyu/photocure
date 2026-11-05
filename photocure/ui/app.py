@@ -3365,6 +3365,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return trash_job("trash-return", "Return to origin", lambda c, stop, cb: trash_actions.return_to_origin(
             dbp, c, body.ids, cancel_check=stop, on_progress=cb))
 
+    @app.post("/api/library/return-to-origin", dependencies=auth, status_code=202)
+    def library_return(body: TrashReturnReq):
+        from .. import trash_actions
+        return trash_job("library-return", "Return to origin", lambda c, stop, cb: trash_actions.return_to_origin(
+            dbp, c, body.ids, cancel_check=stop, on_progress=cb))
+
     @app.post("/api/trash/delete", dependencies=auth, status_code=202)
     def trash_delete(body: TrashIdsReq):
         from .. import trash_actions

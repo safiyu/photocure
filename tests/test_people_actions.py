@@ -257,6 +257,48 @@ def test_bulk_delete_people_removes_clusters_and_unassigns_faces(cfg, session, r
     assert rf3.person_id == p3.id
 
 
+def test_merge_suggestion_persists_when_suggested_face_is_renamed_or_merged(cfg, session, repo):
+    # Image records
+    _image(session, 101)
+    _image(session, 102)
+    _image(session, 103)
+
+    # 1. Existing named person "Femi" (ID 1, e.g. 10 faces)
+    existing = repo.create_person_cluster([1.0, 0.0, 0.0])
+    repo.rename_person(existing.id, "Femi")
+    repo.update_person_cluster(existing.id, [1.0, 0.0, 0.0], 1)
+    _face(session, 101, person_id=existing.id, embedding=[1.0, 0.0, 0.0])
+
+    # 2. Target cluster T (unnamed, 5 faces, embedding similar to Femi)
+    target = repo.create_person_cluster([0.98, 0.1, 0.0])
+    repo.update_person_cluster(target.id, [0.98, 0.1, 0.0], 1)
+    _face(session, 102, person_id=target.id, embedding=[0.98, 0.1, 0.0])
+
+    # 3. Candidate cluster C (unnamed, 1 face, embedding similar to target)
+    cand = repo.create_person_cluster([0.96, 0.15, 0.0])
+    repo.update_person_cluster(cand.id, [0.96, 0.15, 0.0], 1)
+    _face(session, 103, person_id=cand.id, embedding=[0.96, 0.15, 0.0])
+    session.commit()
+
+    # Before rename: cand should suggest merging
+    items1 = list_people(cfg.db_path, sort="similarity")
+    cand_item1 = next(it for it in items1 if it["id"] == cand.id)
+    assert cand_item1["similar_to"] is not None
+    # Prioritizes named person Femi or target
+    assert cand_item1["similar_to"]["target_name"] in ("Femi", None)
+
+    # When target is renamed to "Femi" (merging into existing named person)
+    rename_person(cfg.db_path, target.id, "Femi")
+
+    # After merge/rename: cand MUST STILL suggest merging into Femi!
+    items2 = list_people(cfg.db_path, sort="similarity")
+    cand_item2 = next(it for it in items2 if it["id"] == cand.id)
+    assert cand_item2["similar_to"] is not None
+    assert cand_item2["similar_to"]["target_id"] == existing.id
+    assert cand_item2["similar_to"]["target_name"] == "Femi"
+
+
+
 
 
 

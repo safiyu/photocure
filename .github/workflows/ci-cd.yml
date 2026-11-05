@@ -11,6 +11,9 @@ permissions:
   contents: write
   packages: write
 
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE20: true
+
 jobs:
   test:
     name: Test Suite

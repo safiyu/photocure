@@ -39,7 +39,7 @@ def quantize_embedding(vec: Sequence[float]) -> str:
     return json.dumps([_f16(v) for v in vec])
 
 
-def dequantize_embedding(blob: str) -> list[float] | None:
+def dequantize_embedding(blob: str, dim: int | None = None) -> list[float] | None:
     """Deserialize an embedding produced by :func:`quantize_embedding`."""
     import numpy as np
 
@@ -49,6 +49,17 @@ def dequantize_embedding(blob: str) -> list[float] | None:
         raw = json.loads(blob)
     except (ValueError, TypeError):
         return None
+    if not raw:
+        return []
+    if isinstance(raw, dict):
+        if dim is not None and str(dim) in raw:
+            raw = raw[str(dim)]
+        elif "512" in raw:
+            raw = raw["512"]
+        elif "128" in raw:
+            raw = raw["128"]
+        else:
+            raw = next(iter(raw.values()))
     if not raw:
         return []
     if isinstance(raw[0], float):
@@ -75,6 +86,43 @@ def decode_yearly(raw: str | None) -> tuple[dict[str, list[float]], dict[str, in
             meds[y] = vec
             counts[y] = int(item.get("n", 1))
     return meds, counts
+
+
+def dequantize_all_embeddings(blob: str | None) -> dict[int, list[float]]:
+    """Return all embeddings available in blob as {dim: [float, ...]}."""
+    if not blob:
+        return {}
+    try:
+        raw = json.loads(blob)
+    except Exception:
+        return {}
+    if not raw:
+        return {}
+    import numpy as np
+    res = {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            try:
+                d = int(k)
+                if not v:
+                    continue
+                if isinstance(v[0], float):
+                    res[d] = [float(x) for x in v]
+                else:
+                    arr = np.fromiter(v, dtype=np.int16, count=len(v)).view(np.float16)
+                    res[d] = [float(x) for x in arr]
+            except Exception:
+                continue
+    elif isinstance(raw, list):
+        if not raw:
+            return {}
+        if isinstance(raw[0], float):
+            vec = [float(x) for x in raw]
+        else:
+            arr = np.fromiter(raw, dtype=np.int16, count=len(raw)).view(np.float16)
+            vec = [float(x) for x in arr]
+        res[len(vec)] = vec
+    return res
 
 
 def stage_clause(stage: str | None):
@@ -320,6 +368,7 @@ class PhotoRepository:
         stmt = sselect(PersonCluster).where(func.lower(func.trim(PersonCluster.name)) == target)
         if stage is not None:
             stmt = stmt.where(PersonCluster.stage == stage)
+        stmt = stmt.order_by(PersonCluster.face_count.desc())
         return self.s.exec(stmt).first()
 
     # -------------------------------------------------------------- semantic

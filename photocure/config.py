@@ -143,6 +143,10 @@ class BurstThresholds(BaseSettings):
     untimed_max_items: int = 40000
     # Burst group must contain >= 2 members to be a burst.
     min_group_size: int = 2
+    # Maximum perceptual hash Hamming distance allowed between burst frames (checks framing/composition).
+    max_phash_distance: int = 12
+    # Cohesive floor: all members within tier 0 must share at least this pairwise similarity (prevents chaining drift).
+    cohesive_floor: float = 0.85
     # Best-shot composite weights (rebalanced to sum to 1.00).
     weight_blur: float = 0.35
     weight_face_sharp: float = 0.25

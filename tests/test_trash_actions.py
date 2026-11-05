@@ -203,7 +203,20 @@ def test_finalize_deletes_moves_marked_to_trash(env):
     assert out["transaction_id"] != ""
     assert _row(env, ids[0])["stage"] == "trash"
     assert _row(env, ids[1])["stage"] == "trash"
-    assert _row(env, ids[2])["stage"] == "new"
+
+
+def test_return_library_photo_to_origin(trashed):
+    env, ids = trashed
+    # Restore one photo into library
+    trash_actions.restore(env.db, _cfg(env), [ids[0]])
+    assert _row(env, ids[0])["stage"] == "library"
+    # Return that library photo to origin
+    out = trash_actions.return_to_origin(env.db, _cfg(env), [ids[0]])
+    assert out["returned"] == 1
+    row = _row(env, ids[0])
+    assert row["stage"] == "new"
+    assert row["route_status"] == "unrouted"
+    assert Path(row["path"]).exists()
 
 
 def test_api_finalize_endpoint(env):

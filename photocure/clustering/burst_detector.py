@@ -62,6 +62,7 @@ class BurstInput:
     # A screen, page or flat graphic: only the tightest tier may group it.
     flat_content: bool = False
     filename: str = ""
+    phash: str = ""
 
 
 class _UnionFind:
@@ -188,6 +189,8 @@ class BurstDetector:
             return []
         times = np.array([_ts(items[i].taken_at) for i in usable], dtype=np.float64)
         flat = np.array([items[i].flat_content for i in usable], dtype=bool)
+        phashes = [items[i].phash for i in usable]
+        max_phash_dist = int(getattr(self.t, "max_phash_distance", 12))
         tiers = self._tiers()
 
         n_usable = len(usable)
@@ -196,6 +199,7 @@ class BurstDetector:
         # Every in-window pair (i, k) is compared once, as one matrix-vector product per i
         # (times are sorted, so the window is a contiguous slice).
         ends = np.searchsorted(times, times + tiers[-1][0], side="right")
+        from ..scanner.phash import hamming
         for i in range(n_usable - 1):
             k_end = int(ends[i])
             if k_end <= i + 1:
@@ -210,18 +214,33 @@ class BurstDetector:
                 elif ti:
                     ok &= ~flat[i + 1:k_end]
                 for off in np.flatnonzero(ok):
-                    edges[ti].append((i, i + 1 + int(off)))
+                    k = i + 1 + int(off)
+                    if max_phash_dist > 0 and phashes[i] and phashes[k]:
+                        if hamming(phashes[i], phashes[k]) > max_phash_dist:
+                            continue
+                    edges[ti].append((i, k))
                 lower = window
         # Tightest tier first, so a true burst is never split by a looser tier's group limit.
-        # The tightest tier chains frame to frame (a pan or a sweep drifts along the burst).
+        # Cohesive floor check prevents chaining drift into unrelated scenes/subjects.
+        cohesive_floor = float(getattr(self.t, "cohesive_floor", 0.0))
+        members: dict[int, list[int]] = {k: [k] for k in range(n_usable)}
         for a, b in edges[0]:
-            uf.union_capped(a, b, tiers[0][2])
+            ra, rb = uf.find(a), uf.find(b)
+            if ra == rb:
+                continue
+            ma, mb = members[ra], members[rb]
+            if cohesive_floor > 0.0 and float((embs[ma] @ embs[mb].T).min()) < cohesive_floor:
+                continue
+            if not uf.union_capped(ra, rb, tiers[0][2]):
+                continue
+            root = uf.find(ra)
+            merged = ma + mb
+            members.pop(ra, None)
+            members.pop(rb, None)
+            members[root] = merged
         # Looser tiers join groups only when every cross pair is still alike: a long chain of
         # look-alikes minutes apart must not drift into a different scene.
         floor = float(getattr(self.t, "loose_floor", 0.0))
-        members: dict[int, list[int]] = {}
-        for k in range(n_usable):
-            members.setdefault(uf.find(k), []).append(k)
         for ti in range(1, len(tiers)):
             span = tiers[ti][2]
             for a, b in edges[ti]:
@@ -257,12 +276,15 @@ class BurstDetector:
         if n < self.t.min_group_size:
             return []
 
+        phashes = [items[u].phash for u in usable]
+        max_phash_dist = int(getattr(self.t, "max_phash_distance", 12))
         thr = float(thr)
         floor = float(getattr(self.t, "untimed_floor", thr - 0.05))
         max_group = int(getattr(self.t, "untimed_max_group", 12))
         # Cap neighbours per photo: enough candidates to form a group but bounded in RAM.
         top_k = max(max_group * 4, 32)
         edges: list[tuple[float, int, int]] = []
+        from ..scanner.phash import hamming
         for start in range(0, n, _BLOCK):
             block = embs[start:start + _BLOCK] @ embs.T
             for r in range(block.shape[0]):
@@ -276,7 +298,11 @@ class BurstDetector:
                     top = np.argpartition(tail[cand], -top_k)[-top_k:]
                     cand = cand[top]
                 for j in cand:
-                    edges.append((float(tail[j]), i, i + 1 + int(j)))
+                    k = i + 1 + int(j)
+                    if max_phash_dist > 0 and phashes[i] and phashes[k]:
+                        if hamming(phashes[i], phashes[k]) > max_phash_dist:
+                            continue
+                    edges.append((float(tail[j]), i, k))
         # Most alike pairs first; a group takes a new member only when that member is close to
         # every photo already in it, so a chain of look-alikes cannot drift into a stranger.
         # Tie-break by image_id so a rescan with the same photos produces the same groups
@@ -337,6 +363,7 @@ class BurstDetector:
                 taken_at_source=r.taken_at_source or "",
                 flat_content=flat,
                 filename=getattr(r, "filename", "") or "",
+                phash=getattr(r, "phash", "") or "",
             ))
         groups = self.cluster(inputs)
         return [BurstGroupResult(image_ids) for image_ids in groups]

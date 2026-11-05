@@ -343,6 +343,7 @@ def test_cluster_stage_isolation(burst_env, tmp_path):
         for i, r in enumerate(recs):
             r.taken_at = datetime(2024, 1, 1, 10, 0, i, tzinfo=timezone.utc)
             r.taken_at_source = "exif:dtoriginal"
+            r.phash = "0000000000000000"
             if not r.semantic:
                 s.add(M.SemanticScore(image_id=r.id, embedding=emb))
             else:
@@ -369,6 +370,7 @@ def test_cluster_stage_isolation(burst_env, tmp_path):
         for i, nr in enumerate(new_recs):
             nr.taken_at = datetime(2024, 2, 2, 10, 0, i, tzinfo=timezone.utc)
             nr.taken_at_source = "exif:dtoriginal"
+            nr.phash = "0000000000000000"
             if not nr.semantic:
                 s.add(M.SemanticScore(image_id=nr.id, embedding=emb))
             else:

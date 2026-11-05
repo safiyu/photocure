@@ -2630,6 +2630,8 @@
     if (fixDateBtn) fixDateBtn.hidden = !it.taken_at || !["filename", "mtime"].includes(it.taken_at_source);
     const ocrSec = $("#lb-ocr-section");
     if (ocrSec) ocrSec.hidden = true;
+    const retBtn = $("#lb-return-origin");
+    if (retBtn) retBtn.hidden = !it.origin_path || state.stage === "new";
     const ap = $("#lb-approve");
     ap.disabled = id == null;
     ap.setAttribute("aria-pressed", String(!!it.delete_approved));
@@ -2799,6 +2801,15 @@
       };
     }
     $("#lb-approve").onclick = () => (state.stage === "trash" ? purgePhotos([lbIdAt(lb.i)]) : toggleApproveDelete(lbIdAt(lb.i))).catch((e) => toast(e.message, "err"));
+    const lbRet = $("#lb-return-origin");
+    if (lbRet) {
+      lbRet.onclick = async () => {
+        const id = lbIdAt(lb.i);
+        if (id == null) return;
+        await runTrashJob("Returning", "/api/trash/return", { ids: [id] }, (r) => `Returned photo to origin folder.`);
+        if (lb.open) closeLightbox();
+      };
+    }
     $$("#lb-rate .star").forEach((b) => {
       b.onclick = () => {
         const id = lbIdAt(lb.i);
@@ -5792,7 +5803,22 @@
         const msg = res.trashed
           ? `Burst finalized: ${fmtN(res.trashed)} moved to trash, ${fmtN(res.finalized)} kept in library`
           : `Burst finalized: ${fmtN(res.finalized)} kept in library`;
-        toast(msg, "ok");
+        const txn = res.transaction_id;
+        toast(msg, "ok", txn ? {
+          label: "Undo",
+          fn: async () => {
+            await runTask("Undoing burst finalization", async () => {
+              const r = await post("/api/undo", { transaction_id: txn, verify: false });
+              if (r && r.job_id) {
+                await followJob(r.job_id, "Undo");
+                toast("Burst finalization undone: files restored", "ok");
+                await Promise.all([loadStats(), refreshBackend(), loadTransactions()]);
+                await renderBursts();
+                resetVisibleGrids();
+              }
+            });
+          }
+        } : null);
         await Promise.all([loadStats(), refreshBackend(), loadTransactions()]);
         await renderBursts();
       }
@@ -5837,7 +5863,22 @@
         const msg = res.trashed
           ? `All bursts finalized: ${fmtN(res.trashed)} moved to trash, ${fmtN(res.finalized)} kept in library`
           : `All bursts finalized: ${fmtN(res.finalized)} kept in library`;
-        toast(msg, "ok");
+        const txn = res.transaction_id;
+        toast(msg, "ok", txn ? {
+          label: "Undo",
+          fn: async () => {
+            await runTask("Undoing all bursts finalization", async () => {
+              const r = await post("/api/undo", { transaction_id: txn, verify: false });
+              if (r && r.job_id) {
+                await followJob(r.job_id, "Undo");
+                toast("Burst finalization undone: files restored", "ok");
+                await Promise.all([loadStats(), refreshBackend(), loadTransactions()]);
+                await renderBursts();
+                resetVisibleGrids();
+              }
+            });
+          }
+        } : null);
         await Promise.all([loadStats(), refreshBackend(), loadTransactions()]);
         await renderBursts();
       }
@@ -6605,14 +6646,15 @@
     const cats = Object.entries(ov.by_category).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
     const active = ($("#catfilter") || {}).value || "";
     const dockTotal = $("#dock-total");
+    const where = state.stage === "trash" ? "in the trash" : state.stage === "new" ? "in the new queue" : "in your library";
     if (dockTotal) {
       dockTotal.textContent = fmtN(total);
-      const where = state.stage === "trash" ? "in the trash" : "in your library";
       $("#dock-label").textContent = `${total === 1 ? "photo" : "photos"} ${where}`;
     }
     $$(".comp-host").forEach((host) => {
+      const emptyHint = state.stage === "trash" ? "" : state.stage === "new" ? ". Import a folder to analyze and sort new photos." : ". No photos organized in library yet.";
       const head = `<div class="comp-head total"><b class="comp-total" id="total">${fmtN(total)}</b>
-        <span class="comp-label">${total === 1 ? "photo" : "photos"} ${state.stage === "trash" ? "in the trash" : "in your library"}${total ? "" : state.stage === "trash" ? "" : ". Import a folder to see it sorted here."}</span></div>`;
+        <span class="comp-label">${total === 1 ? "photo" : "photos"} ${where}${total ? "" : emptyHint}</span></div>`;
       if (!total) {
         host.innerHTML = head + '<div class="comp-strip bar empty-strip"></div>';
         return;
@@ -7051,7 +7093,7 @@
       title: isFullReset ? "Reset everything?" : "Clear New queue?",
       message: isFullReset
         ? "This removes all indexed photos across New and Library sections, clusters, and plans from the database. Your photo files on disk are never deleted."
-        : "This only removes unfinalized photos in the New section and clears pending analysis. All photos in your finalized Library remain completely safe and untouched.",
+        : "This only removes unfinalized photos in the New intake queue and clears pending analysis. All photos already in your finalized Library folder remain completely safe and untouched in your Library folder.",
       confirmText: isFullReset ? "Reset everything" : "Clear New section",
       variant: "danger",
     });

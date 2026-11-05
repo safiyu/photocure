@@ -88,12 +88,22 @@ def restore(dbp: Path, cfg: CuratorConfig, ids: list[int], *, cancel_check: Call
 
 def return_to_origin(dbp: Path, cfg: CuratorConfig, ids: list[int] | None, *,
                      cancel_check: Callable | None = None, on_progress: Callable | None = None) -> dict:
-    """Move trashed photos back to the folder they were first scanned from; they count as new again."""
+    """Move trashed or library photos back to the folder they were first scanned from; they count as new again."""
+    from .people_actions import detach_faces
     skipped = {"origin_missing": 0, "origin_occupied": 0, "file_missing": 0}
     failed, errors = 0, []
     actions: list[PlannedAction] = []
     with get_session(dbp) as s:
-        for rec in _trashed(s, ids):
+        if ids is None:
+            recs = _trashed(s, None)
+        else:
+            q = select(M.ImageRecord).where(
+                M.ImageRecord.route_status != "purged",
+                col(M.ImageRecord.stage).in_([STAGE_TRASH, STAGE_LIBRARY]),
+                col(M.ImageRecord.id).in_(list(ids)),
+            )
+            recs = list(s.exec(q.order_by(M.ImageRecord.id)).all())
+        for rec in recs:
             src = Path(rec.path)
             origin = Path(rec.origin_path) if rec.origin_path else None
             if origin is None or not origin.parent.is_dir():
@@ -120,6 +130,8 @@ def return_to_origin(dbp: Path, cfg: CuratorConfig, ids: list[int] | None, *,
                     s.get(M.ImageRecord, a.image_id).delete_approved = True  # it stays in the trash, still marked
                     continue
                 rec = s.get(M.ImageRecord, a.image_id)
+                if rec.stage == STAGE_LIBRARY:
+                    detach_faces(s, rec.id)
                 rec.stage, rec.route_status, rec.scan_status = STAGE_NEW, "unrouted", "scanned"
                 rec.infer_status, rec.origin_path, rec.target_path = "pending", None, None
                 rec.delete_approved = False
