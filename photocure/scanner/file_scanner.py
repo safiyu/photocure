@@ -654,7 +654,7 @@ class FileScanner:
         origin = repo.s.exec(sselect(ImageRecord).where(
             ImageRecord.origin_path == str(path), ImageRecord.stage.in_(("library", "trash")),
             ImageRecord.route_status != "purged")).first()
-        if origin is not None and origin.file_size == rec.file_size:
+        if origin is not None and origin.file_size == rec.file_size and os.path.exists(origin.path):
             return origin  # the photo came from this very path and is the same size: no need to read it
         stmt = sselect(ImageRecord).where(
             ImageRecord.quick_hash == rec.quick_hash,
@@ -668,6 +668,8 @@ class FileScanner:
             return None
         rec.sha256 = sha
         for cand in cands:
+            if not os.path.exists(cand.path):
+                continue
             if not cand.sha256:
                 cand.sha256 = _safe_sha256(Path(cand.path))
                 repo.s.flush()
@@ -683,12 +685,13 @@ class FileScanner:
                                           ImageRecord.is_duplicate == False)  # noqa: E712
         if rec.id is not None:
             stmt = stmt.where(ImageRecord.id != rec.id)
-        hit = repo.s.exec(stmt).first()
-        if hit is not None:
-            return hit
+        # A row whose file is gone (renamed, not yet pruned) must never be a duplicate target.
+        for hit in repo.s.exec(stmt).all():
+            if os.path.exists(hit.path):
+                return hit
         # A prior *lazy* run may have left a candidate's sha256 empty: backfill.
         for cand in repo.find_by_quick_hash(rec.quick_hash, exclude_id=rec.id):
-            if cand.scan_status == "missing" or cand.is_duplicate:
+            if cand.scan_status == "missing" or cand.is_duplicate or not os.path.exists(cand.path):
                 continue
             if not cand.sha256:
                 cand.sha256 = _safe_sha256(Path(cand.path))
