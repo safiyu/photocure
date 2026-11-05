@@ -9,6 +9,7 @@ from sqlmodel import col, func, select
 from .db import models as M
 from .db.repository import PhotoRepository, dequantize_embedding, quantize_embedding, stage_clause
 from .db.session import get_session
+from .clustering.face_identity import effective_threshold
 
 
 def _cluster_stage(stage: str) -> str:
@@ -554,8 +555,7 @@ def consolidate_clusters(db_path: Path | str, threshold: float = 0.65, stage: st
                 if len(target_emb) != len(cluster_centroids[cand.id]):
                     continue
                 sim = float(np.dot(target_emb, cluster_centroids[cand.id]))
-                dim = len(target_emb)
-                eff_threshold = min(threshold, 0.35) if dim >= 512 else threshold
+                eff_threshold = effective_threshold(threshold, len(target_emb))
                 if sim >= eff_threshold:
                     # Merge candidate into target
                     faces = s.exec(select(M.FaceDetection).where(M.FaceDetection.person_id == cand.id)).all()
@@ -588,7 +588,7 @@ def consolidate_clusters(db_path: Path | str, threshold: float = 0.65, stage: st
         return {"merged_count": merged_count}
 
 
-def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = "new") -> dict:
+def recluster_people(db_path: Path | str, threshold: float | None = None, stage: str = "new") -> dict:
     """Recluster faces on New Pipeline photos while anchoring on existing named/library PersonCluster centroids.
 
     Uses two-stage clustering (core discovery + satellite absorption) with multi-exemplar matching
@@ -741,8 +741,7 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
 
         def assign_face_item(f, u, allow_new_cluster: bool):
             dim = len(u)
-            # Calibrate threshold for 512-D ArcFace vectors vs 128-D SFace
-            base_thresh = min(threshold, 0.35) if dim >= 512 else threshold
+            base_thresh = effective_threshold(threshold, dim)
             diversity_thresh = 0.78 if dim >= 512 else 0.88
 
             best_c = None
@@ -786,20 +785,16 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
                             if med_sim > sim:
                                 sim = med_sim
 
-                # 5. Burst & temporal co-occurrence boost (safe under co-occurrence veto)
+                # 5. Burst / seconds-apart tie-break: never enough to cross the threshold on its own
                 c_bursts = {img_info.get(img_id, {}).get("burst_id") for img_id in c["image_ids"]}
                 c_bursts.discard(None)
                 if f_burst and f_burst in c_bursts:
-                    sim += 0.08  # Same burst bonus
+                    sim += 0.02
                 elif f_ts is not None:
-                    # Check temporal closeness (within 180 days for child growth tolerance, or 120s burst)
                     min_dt = min((abs(ts - f_ts) for img_id in c["image_ids"]
                                   if (ts := img_info.get(img_id, {}).get("timestamp")) is not None), default=None)
-                    if min_dt is not None:
-                        if min_dt <= 120.0:
-                            sim += 0.06
-                        elif min_dt <= 86400 * 180:  # within 6 months
-                            sim += 0.04
+                    if min_dt is not None and min_dt <= 120.0:
+                        sim += 0.01
 
                 if sim >= best_sim:
                     best_sim = sim
@@ -951,7 +946,9 @@ def recluster_people(db_path: Path | str, threshold: float = 0.55, stage: str = 
 
     # 4. Run post-clustering consolidation to merge convergent clusters
     try:
-        consolidate_thresh = min(0.35, threshold) if any(len(item[1]) >= 512 for item in parsed_faces) else max(0.60, threshold + 0.05)
+        dim_seen = max((len(item[1]) for item in parsed_faces), default=0)
+        base = effective_threshold(threshold, dim_seen)
+        consolidate_thresh = base if dim_seen >= 512 else max(0.60, base + 0.05)
         consolidate_clusters(db_path, threshold=consolidate_thresh, stage=stage)
     except Exception:
         pass

@@ -24,6 +24,19 @@ def cosine(a: list[float], b: list[float]) -> float:
     return float(np.dot(av, bv) / (na * nb))
 
 
+DEFAULT_THRESHOLD_512 = 0.35  # ArcFace-class models: strangers sit well below, same person above
+DEFAULT_THRESHOLD_128 = 0.64  # SFace
+
+
+def effective_threshold(threshold: float | None, dim: int,
+                        default_512: float = DEFAULT_THRESHOLD_512,
+                        default_128: float = DEFAULT_THRESHOLD_128) -> float:
+    """The caller's threshold when given, else the per-model default. Never silently clamped."""
+    if threshold is not None:
+        return float(threshold)
+    return default_512 if dim >= 512 else default_128
+
+
 @dataclass
 class ClusterCentroid:
     person_id: int
@@ -35,7 +48,7 @@ class ClusterCentroid:
 
 
 def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
-                   threshold: float,
+                   threshold: float | None,
                    similarity_boosts: dict[int, float] | None = None,
                    image_id: int | None = None,
                    time_bucket: str | None = None) -> int | None:
@@ -44,15 +57,9 @@ def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
     Supports:
     - Sibling Protection / Cannot-Link Veto: strictly forbids assigning if image_id is already in the cluster.
     - Chronological Medoid Chaining: compares against adjacent yearly medoids for childhood growth bridging.
-    - Calibrated Operating Point: scales threshold from 0.55 down to 0.38 for 512-D ArcFace vectors.
     """
     dim = len(embedding)
-    # Calibrate threshold for 512-D ArcFace vectors vs 128-D SFace
-    if dim >= 512:
-        # Standard ArcFace operating point: strangers are < 0.20, same person is > 0.35
-        eff_threshold = min(threshold, 0.35)
-    else:
-        eff_threshold = threshold
+    eff_threshold = effective_threshold(threshold, dim)
 
     best_id, best_score = None, eff_threshold
     boosts = similarity_boosts or {}
@@ -178,9 +185,8 @@ def remap_person_ids(old_faces: Sequence[OldFace], new_faces: Sequence[NewFace],
     reused once claimed.
     """
     pairs = []
-    is_512 = any(len(f.embedding) >= 512 for f in new_faces if f.embedding is not None) or \
-             any(len(f.embedding) >= 512 for f in old_faces if f.embedding is not None)
-    eff_threshold = min(threshold, 0.42) if is_512 else threshold
+    dims = [len(f.embedding) for f in (*new_faces, *old_faces) if f.embedding is not None]
+    eff_threshold = effective_threshold(threshold, max(dims) if dims else 0)
 
     for oi, old in enumerate(old_faces):
         for new in new_faces:

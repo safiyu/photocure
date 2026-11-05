@@ -534,8 +534,9 @@ def cluster(
 @app.command("recluster-faces")
 def recluster_faces(
     db: Path = typer.Option(default_factory=default_db_path),
-    threshold: float = typer.Option(0.64, "--threshold", "-t",
-                                    help="Cosine similarity threshold for clustering faces (default 0.64)."),
+    threshold: float | None = typer.Option(None, "--threshold", "-t",
+                                           help="Cosine similarity threshold for clustering faces "
+                                                "(default: 0.35 for AuraFace, 0.64 for SFace)."),
 ):
     """Recluster all detected faces with strict identity threshold to fix mixed-up clusters."""
     from .people_actions import recluster_people
@@ -543,7 +544,7 @@ def recluster_faces(
     with console.status("Re-clustering faces..."):
         res = recluster_people(cfg.db_path, threshold=threshold)
     console.print(f"[green]Re-clustered {res['faces_clustered']} faces into {res['clusters_created']} person clusters[/green] "
-                  f"(threshold>={threshold}). Custom names were preserved.")
+                  f"(threshold>={threshold if threshold is not None else 'model default'}). Custom names were preserved.")
 
 
 # ---------------------------------------------------------------------------

@@ -206,6 +206,7 @@ class FaceSettings(BaseSettings):
     # 0.35 calibrated for 512-D ArcFace embeddings (strangers < 0.20, profile/child > 0.35)
     # with co-occurrence cannot-link sibling protection.
     cluster_join_threshold: float = 0.35
+    cluster_join_threshold_sface: float = 0.64  # 128-D SFace operating point
     # Stricter remap threshold scoped to one photo's own prior faces on re-analysis.
     cluster_remap_threshold: float = 0.42
 

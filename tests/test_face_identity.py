@@ -1,14 +1,30 @@
 """Pure face-clustering and backfill-remap matching: no DB, no OpenCV."""
 from __future__ import annotations
 
+import numpy as np
+
 from photocure.clustering.face_identity import (
     ClusterCentroid,
     NewFace,
     OldFace,
     assign_cluster,
+    effective_threshold,
     remap_person_ids,
     update_centroid,
 )
+
+
+def unit(seed: int, dim: int = 512) -> list[float]:
+    v = np.random.default_rng(seed).standard_normal(dim)
+    return (v / np.linalg.norm(v)).tolist()
+
+
+def mix(a: list[float], b: list[float], cos: float) -> list[float]:
+    """A unit vector with cosine exactly ``cos`` to ``a``, leaning towards ``b``."""
+    a_, b_ = np.asarray(a), np.asarray(b)
+    perp = b_ - float(a_ @ b_) * a_
+    perp /= np.linalg.norm(perp)
+    return (cos * a_ + np.sqrt(1.0 - cos * cos) * perp).tolist()
 
 
 def test_assign_cluster_picks_the_closest_centroid_above_threshold():
@@ -109,3 +125,17 @@ def test_mismatched_embedding_dimensions_handled_safely():
     assert len(updated) == 512
 
 
+
+
+def test_threshold_above_035_is_honoured_for_512d():
+    c = ClusterCentroid(1, unit(1), 3)
+    face = mix(unit(1), unit(2), cos=0.45)
+    assert assign_cluster(face, [c], threshold=0.50) is None
+    assert assign_cluster(face, [c], threshold=0.40) == 1
+
+
+def test_effective_threshold_defaults_by_dimension():
+    assert effective_threshold(None, 512) == 0.35
+    assert effective_threshold(None, 128) == 0.64
+    assert effective_threshold(0.55, 512) == 0.55
+    assert effective_threshold(0.30, 512) == 0.30

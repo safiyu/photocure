@@ -146,6 +146,7 @@ def test_upgrade_backfills_origin_from_the_first_move_in_the_ledger(tmp_path):
     init_db(db)
     con = sqlite3.connect(db)
     con.execute("DROP INDEX ix_images_stage")
+    con.execute("DROP INDEX ix_images_origin_path")
     con.execute("DROP INDEX ix_person_clusters_stage")
     con.execute("ALTER TABLE images DROP COLUMN stage")
     con.execute("ALTER TABLE images DROP COLUMN origin_path")

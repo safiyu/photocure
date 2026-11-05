@@ -259,3 +259,19 @@ def test_bulk_delete_people_removes_clusters_and_unassigns_faces(cfg, session, r
 
 
 
+
+
+def test_recluster_temporal_boost_capped(cfg, session, repo):
+    from datetime import datetime, timezone
+    from tests.test_face_identity import mix, unit
+    when = datetime(2024, 5, 1, 12, 0, 0, tzinfo=timezone.utc)
+    for iid in (1, 2):
+        session.add(M.ImageRecord(id=iid, path=f"/{iid}.jpg", filename=f"{iid}.jpg", burst_id=7, taken_at=when))
+    session.flush()
+    _face(session, 1, embedding=unit(1))
+    _face(session, 2, embedding=mix(unit(1), unit(2), cos=0.30))  # same burst, clearly not the same face
+    session.commit()
+
+    res = recluster_people(cfg.db_path, threshold=0.35)
+
+    assert res["clusters_created"] == 2
