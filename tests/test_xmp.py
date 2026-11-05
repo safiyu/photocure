@@ -89,3 +89,14 @@ def test_exif_date_beats_xmp_but_rating_still_read(tmp_path):
     assert info.taken_at == dt.datetime(2019, 2, 3, 4, 5, 6)
     assert info.taken_at_source == "exif:dtoriginal"
     assert info.rating == 5
+
+
+def test_parse_xmp_never_parses_utf16_declarations(monkeypatch):
+    from photocure.scanner import xmp as xmp_mod
+
+    def boom(*_a, **_k):
+        raise AssertionError("parser must not see a document with declarations")
+
+    monkeypatch.setattr(xmp_mod.ET, "fromstring", boom)
+    data = "<!DOCTYPE x [<!ENTITY a 'b'>]><x/>".encode("utf-16")
+    assert parse_xmp(data) == xmp_mod.XmpInfo()

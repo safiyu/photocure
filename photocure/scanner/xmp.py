@@ -87,9 +87,16 @@ def _attr_or_child(desc: ET.Element, ns: str, name: str) -> str | None:
     return el.text.strip() if el is not None and el.text else None
 
 
+def _has_declarations(data: bytes) -> bool:
+    """DOCTYPE/ENTITY in any encoding we cannot scan byte-wise (UTF-16/32 BOM or NUL bytes) counts too."""
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff") or data[:4] in (b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"):
+        return True
+    return b"\x00" in data or b"<!DOCTYPE" in data or b"<!ENTITY" in data
+
+
 def parse_xmp(data: bytes) -> XmpInfo:
     info = XmpInfo()
-    if len(data) > _MAX_BYTES or b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+    if len(data) > _MAX_BYTES or _has_declarations(data):
         return info
     try:
         root = ET.fromstring(data)
@@ -155,7 +162,7 @@ def _safe_parse(path: Path):
     if path.stat().st_size > _MAX_BYTES:
         raise ValueError("sidecar too large")
     data = path.read_bytes()
-    if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+    if _has_declarations(data):
         raise ValueError("DOCTYPE/entity declarations are not allowed")
     parser = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False)
     return etree.fromstring(data, parser)

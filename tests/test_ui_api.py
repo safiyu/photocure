@@ -938,3 +938,24 @@ def test_cluster_runs_detector_before_touching_rows(env, monkeypatch):
     monkeypatch.setattr(BurstDetector, "cluster_records", detector)
     assert env.client.post("/api/cluster", json={"stage": "all"}).status_code == 200
     assert seen["intact"] is True
+
+
+# ---------------------------------------------------------------- server plumbing
+def test_busy_message_names_the_task(env):
+    env.app.state.progress.start("Clustering", "Burst detection...", 1)
+    assert ui_app._BUSY.acquire(blocking=False)
+    try:
+        r = env.client.post("/api/trash/empty", json={})
+    finally:
+        ui_app._BUSY.release()
+        env.app.state.progress.reset()
+    assert r.status_code == 409 and "Clustering" in r.json()["detail"]
+
+
+def test_job_log_is_capped():
+    from photocure.ui.app import jlog
+    job = {"log": []}
+    for i in range(20000):
+        jlog(job, str(i))
+    assert len(job["log"]) <= 5000
+    assert job["log"][0]["msg"] == "0" and job["log"][-1]["msg"] == "19999"

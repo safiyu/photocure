@@ -80,6 +80,16 @@ UTILITY_VALUES = tuple(c.value for c in CategoryType if c.is_utility)
 
 # Only one long-running task at a time across the whole process.
 _BUSY = threading.Lock()
+_LOG_CAP, _LOG_HEAD = 5000, 2000
+
+
+def jlog(job: dict, msg: str, level: str = "") -> None:
+    log_ = job["log"]
+    log_.append({"t": time.time(), "level": level, "msg": msg})
+    if len(log_) > _LOG_CAP:  # a 100k-file apply must not keep 100k lines per job in memory
+        dropped = len(log_) - _LOG_CAP + 1
+        del log_[_LOG_HEAD:_LOG_HEAD + dropped]
+        log_.insert(_LOG_HEAD, {"t": time.time(), "level": "", "msg": f"... {dropped} log lines truncated ..."})
 
 
 def _pid_file(port: int) -> Path:
@@ -748,19 +758,18 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     auth: list = []  # enforced app-wide by the guard middleware
 
+    def busy_error() -> HTTPException:
+        label = progress_mgr.get().get("task") or "background task"
+        return HTTPException(409, f"Another task is already running ({label}). Please wait for it to finish.")
+
     @contextmanager
     def exclusive(timeout: float = 3.0):
         if not _BUSY.acquire(blocking=True, timeout=timeout):
-            cur = progress_mgr.get()
-            label = cur.get("label") or cur.get("title") or "background task"
-            raise HTTPException(409, f"Another task is already running ({label}). Please wait for it to finish.")
+            raise busy_error()
         try:
             yield
         finally:
             _BUSY.release()
-
-    def jlog(job: dict, msg: str, level: str = ""):
-        job["log"].append({"t": time.time(), "level": level, "msg": msg})
 
     def spawn(kind: str, fn, cancellable: bool = True) -> dict:
         """Run fn(job) in a thread; the caller already holds _BUSY, released here."""
@@ -1296,7 +1305,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if not app.state.cfg.write_sidecars:
             raise HTTPException(400, "Sidecar writing is turned off in the settings.")
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             verb = "Removing" if body.remove else "Writing"
@@ -2250,7 +2259,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         from ..quality.image_loader import load_image
         c = run_cfg(None)
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             with get_session(dbp) as s:
@@ -2303,7 +2312,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             raise HTTPException(409, "scan these photos for sensitive details first, "
                                      "or choose to export without that check")
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             with get_session(dbp) as s:
@@ -2682,7 +2691,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         partial targets are removed and marked failed (sources are never touched)."""
         from ..engine.rollback import RollbackEngine, RollbackReport
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
         try:
             rep = RollbackReport(transaction_id=tid)
             with _LEDGER_WRITING, get_session(dbp) as s:
@@ -2695,7 +2704,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def rollback_orphaned(tid: str):
         from ..engine.rollback import RollbackEngine
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
         try:
             rep = RollbackEngine(req_cfg(), dbp).rollback_transaction(tid)
             return {"ok": rep.failures == 0, "transaction_id": tid, "reversed": rep.reversed,
@@ -3327,7 +3336,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         except LibraryRootMissing as e:
             raise HTTPException(409, str(e)) from None
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             progress_mgr.start(label, label, 0, "Working...")
@@ -3394,7 +3403,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if not pv["ok"]:
             raise HTTPException(409, pv["error"])
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             progress_mgr.start("Move library", "Copying the library", pv["files"], "Copying...")
@@ -3442,7 +3451,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if body.trash and not _accepts(planner.execute_plan, "trash"):
             raise _not_impl("trash staging")
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             # Pre-execution backup (C1 §2.5). A failed backup warns but does not block the apply.
@@ -3513,7 +3522,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if not body.verify and not _accepts(planner.undo, "verify"):
             raise _not_impl("undo without verification")
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             with get_session(dbp) as s:
@@ -3555,7 +3564,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if not hasattr(planner, "learn_from_corrections"):
             raise _not_impl("learning from corrections")
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             progress_mgr.start("Learning", "Re-sorting from your choices", 0,
