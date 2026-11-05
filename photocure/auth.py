@@ -40,6 +40,7 @@ class AuthManager:
         self.token = self._env_token or self._load_or_create()
         self.token_explicit = bool(self._env_token)
         self._failures: dict[str, list[float]] = {}
+        self._sessions: set[str] = set()  # cookie ids; a leaked cookie dies with logout or restart
 
     def _load_or_create(self) -> str:
         try:
@@ -88,6 +89,17 @@ class AuthManager:
 
     def validate(self, token: str | None) -> bool:
         return bool(token) and _same(token, self.token)
+
+    def new_session(self) -> str:
+        sid = secrets.token_urlsafe(32)
+        self._sessions.add(sid)
+        return sid
+
+    def validate_session(self, sid: str | None) -> bool:
+        return bool(sid) and any(_same(sid, s) for s in self._sessions)
+
+    def revoke_session(self, sid: str | None) -> None:
+        self._sessions = {s for s in self._sessions if not (sid and _same(sid, s))}
 
 
 def _same(a: str, b: str) -> bool:

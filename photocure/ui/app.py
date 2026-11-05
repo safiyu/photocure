@@ -729,8 +729,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
             return JSONResponse({"detail": "invalid host header"}, status_code=400)
         path = request.url.path
         if path not in _OPEN and not path.startswith("/static/"):
-            token = request.headers.get("x-pcur-token") or request.cookies.get(COOKIE_NAME)
-            if not app.state.auth_mgr.validate(token):
+            header = request.headers.get("x-pcur-token")
+            mgr = app.state.auth_mgr
+            ok = mgr.validate(header) if header else mgr.validate_session(request.cookies.get(COOKIE_NAME))
+            if not ok:
                 return JSONResponse({"detail": "missing or invalid token"}, status_code=401)
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
             origin = request.headers.get("origin") or request.headers.get("referer")
@@ -912,8 +914,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
         resp = Response(status_code=204)
         secure = (request.url.scheme == "https"
                   or request.headers.get("x-forwarded-proto", "").lower() == "https")
-        resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="strict", path="/",
+        resp.set_cookie(COOKIE_NAME, mgr.new_session(), httponly=True, samesite="strict", path="/",
                         secure=secure, max_age=COOKIE_MAX_AGE)
+        return resp
+
+    @app.post("/auth/logout")
+    def logout(request: Request):
+        app.state.auth_mgr.revoke_session(request.cookies.get(COOKIE_NAME))
+        resp = Response(status_code=204)
+        resp.delete_cookie(COOKIE_NAME, path="/")
         return resp
 
     @app.get("/api/config")

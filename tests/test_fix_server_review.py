@@ -29,7 +29,8 @@ def test_other_localhost_port_rejected_and_missing_origin(app):
     r = c.post("/api/settings", json={"device": "cpu"},
                headers={**h, "Origin": "http://localhost:3000"})
     assert r.status_code == 403
-    c2 = TestClient(app, cookies={"pcur_session": app.state.token})
+    c2 = TestClient(app)
+    assert c2.post("/auth/exchange", json={"code": app.state.token}).status_code == 204
     r = c2.post("/api/settings", json={"device": "cpu"}, headers={"Sec-Fetch-Site": "same-site"})
     assert r.status_code == 403
 
