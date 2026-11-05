@@ -259,6 +259,8 @@ class ActionLedger(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     transaction_id: str = Field(index=True)
     image_id: int | None = Field(default=None, foreign_key="images.id", index=True)
+    # Ledger id of the photo's own row when this row moved its .mov/.xmp companion.
+    companion_of: int | None = Field(default=None, index=True)
     source_path: str
     target_path: str
     operation_type: str = Field(default="move")  # move | copy | hardlink | symlink
