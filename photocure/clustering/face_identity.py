@@ -136,31 +136,24 @@ def update_centroid(old_centroid: list[float], old_count: int,
     return [(c * old_count + e) / n for c, e in zip(old_centroid, new_embedding)]
 
 
-def update_exemplars(current_exemplars: list[list[float]] | None,
-                     new_embedding: list[float],
+def update_exemplars(current_exemplars: Sequence[Sequence[float]] | None,
+                     new_embedding: Sequence[float],
+                     centroid: Sequence[float],
                      max_exemplars: int = 5,
-                     diversity_min_cosine: float = 0.88) -> list[list[float]]:
-    """Maintain a small diverse set of exemplars (different poses/angles/lighting).
-
-    Adds ``new_embedding`` if the current pool is not full, or if it represents a sufficiently
-    different pose from all existing exemplars (cosine < diversity_min_cosine).
-    """
+                     min_centroid_cosine: float = 0.45) -> list[list[float]]:
+    """Exemplars stay close to the centroid; an outlier that barely joined must never anchor matches."""
     dim = len(new_embedding)
-    exemplars = [ex for ex in (current_exemplars or []) if len(ex) == dim]
-    if not exemplars:
-        return [list(new_embedding)]
-    # Check similarity to existing exemplars
-    max_sim = max(cosine(new_embedding, ex) for ex in exemplars)
-    if max_sim < diversity_min_cosine:
-        # Novel pose / angle: add it
-        if len(exemplars) < max_exemplars:
-            exemplars.append(list(new_embedding))
-        else:
-            # Replace the most redundant pair or oldest non-seed
-            exemplars.pop(1 if len(exemplars) > 1 else 0)
-            exemplars.append(list(new_embedding))
-    elif len(exemplars) < max_exemplars:
+    exemplars = [list(ex) for ex in (current_exemplars or []) if len(ex) == dim]
+    new_sim = cosine(list(new_embedding), list(centroid))
+    if new_sim < min_centroid_cosine:
+        return exemplars
+    if len(exemplars) < max_exemplars:
         exemplars.append(list(new_embedding))
+        return exemplars
+    sims = [cosine(ex, list(centroid)) for ex in exemplars]
+    worst = min(range(len(sims)), key=sims.__getitem__)
+    if new_sim > sims[worst]:
+        exemplars[worst] = list(new_embedding)
     return exemplars
 
 

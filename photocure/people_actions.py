@@ -9,7 +9,7 @@ from sqlmodel import col, func, select
 from .db import models as M
 from .db.repository import PhotoRepository, dequantize_embedding, quantize_embedding, stage_clause
 from .db.session import get_session
-from .clustering.face_identity import effective_threshold
+from .clustering.face_identity import effective_threshold, update_exemplars
 
 
 def _cluster_stage(stage: str) -> str:
@@ -742,7 +742,6 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
         def assign_face_item(f, u, allow_new_cluster: bool):
             dim = len(u)
             base_thresh = effective_threshold(threshold, dim)
-            diversity_thresh = 0.78 if dim >= 512 else 0.88
 
             best_c = None
             best_sim = base_thresh
@@ -813,11 +812,8 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                     best_c["centroid"] = new_cent / float(np.linalg.norm(new_cent))
                 else:
                     best_c["centroid"] = u
-                # Update exemplars
-                exemplars = best_c.setdefault("exemplars", [])
-                if len(exemplars) < 5:
-                    if not any(float(np.dot(u, ex)) > diversity_thresh for ex in exemplars if len(ex) == len(u)):
-                        exemplars.append(u)
+                best_c["exemplars"] = [np.asarray(ex, dtype=np.float32) for ex in update_exemplars(
+                    best_c.get("exemplars", []), u, best_c["centroid"])]
                 # Update chronological medoid
                 if f_year:
                     c_meds = best_c.setdefault("yearly_medoids", {})

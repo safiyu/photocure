@@ -139,3 +139,22 @@ def test_effective_threshold_defaults_by_dimension():
     assert effective_threshold(None, 128) == 0.64
     assert effective_threshold(0.55, 512) == 0.55
     assert effective_threshold(0.30, 512) == 0.30
+
+
+def test_outlier_never_becomes_exemplar():
+    from photocure.clustering.face_identity import update_exemplars
+    cen = unit(1)
+    far = mix(unit(1), unit(9), cos=0.20)
+    assert update_exemplars([cen], far, centroid=cen) == [cen]
+
+
+def test_drift_is_blocked_by_exemplar_rule():
+    from photocure.clustering.face_identity import update_exemplars
+    a = unit(1)
+    b = mix(a, unit(2), cos=0.36)          # barely joins a 10-face cluster around a
+    c = mix(b, unit(3), cos=0.50)          # close to b only; far from a
+    assert float(np.dot(a, c)) < 0.30
+    centroid = update_centroid(a, 10, b)
+    exemplars = update_exemplars([a], b, centroid=centroid)
+    cluster = ClusterCentroid(1, centroid, 11, exemplars=exemplars)
+    assert assign_cluster(c, [cluster], threshold=0.35) is None
