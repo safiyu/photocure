@@ -15,7 +15,7 @@ from .db.session import get_session
 from .engine.action_engine import ActionEngine
 from .engine.locks import LEDGER_WRITING
 from .library import library_target, require_library_root, trash_dir
-from .library_actions import _category_enum, _effective_category, _move_sidecar
+from .library_actions import _category_enum, _effective_category
 from .people_actions import attach_faces_to_library
 from .rules.organizer import PlannedAction
 
@@ -77,7 +77,6 @@ def restore(dbp: Path, cfg: CuratorConfig, ids: list[int], *, cancel_check: Call
                 rec.scan_status = "scanned"
                 rec.delete_approved = False
                 attach_faces_to_library(s, rec.id)
-                _move_sidecar(a.source, Path(final))
                 restored += 1
                 _tick(on_progress, n, len(actions), rec.filename)
             PhotoRepository(s).prune_bursts()
@@ -124,7 +123,6 @@ def return_to_origin(dbp: Path, cfg: CuratorConfig, ids: list[int] | None, *,
                 rec.stage, rec.route_status, rec.scan_status = STAGE_NEW, "unrouted", "scanned"
                 rec.infer_status, rec.origin_path, rec.target_path = "pending", None, None
                 rec.delete_approved = False
-                _move_sidecar(a.source, Path(rep.resolved_targets[a.image_id]))
                 returned += 1
                 _tick(on_progress, n, len(actions), rec.filename)
             s.commit()
@@ -318,9 +316,6 @@ def finalize_deletes(dbp: Path, cfg: CuratorConfig, *,
         if rep.failures:
             raise OSError(f"failed to move photos to trash: {rep.errors[0]}")
         txn = rep.transaction_id
-        for a in actions:
-            dest = Path(rep.resolved_targets.get(a.image_id, a.target))
-            _move_sidecar(a.source, dest)
 
     with get_session(dbp) as s:
         for r_miss in missing_sources:

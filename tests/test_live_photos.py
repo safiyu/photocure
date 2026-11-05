@@ -9,7 +9,6 @@ from photocure.db.repository import PhotoRepository
 from photocure.db.session import get_session, init_db
 from photocure.engine.action_engine import ActionEngine, find_companion_files, new_transaction_id
 from photocure.engine.rollback import RollbackEngine
-from photocure.library_actions import _move_sidecar
 from photocure.rules.organizer import PlannedAction
 from tests.conftest import make_image
 
@@ -158,19 +157,3 @@ def test_find_companion_files_dedups_case_variants(tmp_path):
     if not probe.exists():  # case-sensitive filesystem: nothing to dedup
         pytest.skip("case-sensitive filesystem")
     assert len(find_companion_files(img)) == 1
-
-
-def test_library_move_sidecar_moves_live_photo(tmp_path):
-    src = tmp_path / "A" / "photo.heic"
-    src.parent.mkdir()
-    src.write_bytes(b"heic")
-    mov = tmp_path / "A" / "photo.mov"
-    mov.write_bytes(b"mov")
-
-    dst = tmp_path / "B" / "photo.heic"
-    dst.parent.mkdir()
-
-    _move_sidecar(src, dst)
-    assert not mov.exists()
-    assert (tmp_path / "B" / "photo.mov").exists()
-    assert (tmp_path / "B" / "photo.mov").read_bytes() == b"mov"
