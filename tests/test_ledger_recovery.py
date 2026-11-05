@@ -192,3 +192,44 @@ def test_undo_copy_refuses_when_source_is_gone(tmp_path):
     assert rb.failures == 1 and rb.reversed == 0
     assert target.exists()
     assert "source gone" in rb.errors[0]
+
+
+def _apply_with_companion_row(tmp_path, status):
+    from photocure.db.models import ActionLedger
+    w = build_world(tmp_path, n=1)
+    acts = _actions(w, w.out)
+    rep = ActionEngine(w.cfg, db_path=w.db).execute(acts, transaction_id="TX_COMP")
+    assert rep.executed == 1
+    photo_target = w.out / "People" / sorted(w.paths)[0].name
+    mov_target = photo_target.with_suffix(".mov")
+    mov_target.write_bytes(b"video")
+    with get_session(w.db) as s:
+        parent = PhotoRepository(s).ledger_by_txn("TX_COMP")[0]
+        s.add(ActionLedger(transaction_id="TX_COMP", image_id=w.ids[0], companion_of=parent.id,
+                           source_path=str(sorted(w.paths)[0].with_suffix(".mov")),
+                           target_path=str(mov_target), operation_type="move", status=status))
+        s.commit()
+    return w, photo_target
+
+
+def test_reconcile_pending_companion_does_not_repoint_photo_row(tmp_path):
+    from photocure.engine.rollback import RollbackReport
+    w, photo_target = _apply_with_companion_row(tmp_path, status="pending")
+    engine = RollbackEngine(w.cfg, db_path=w.db)
+    with get_session(w.db) as s:
+        engine._reconcile_pending("TX_COMP", PhotoRepository(s), RollbackReport(transaction_id="TX_COMP"))
+        s.commit()
+
+    assert get_img(w, w.ids[0]).path == str(photo_target)
+    with get_session(w.db) as s:
+        assert {r.status for r in PhotoRepository(s).ledger_by_txn("TX_COMP")} == {"committed"}
+
+
+def test_restore_row_skips_companion_when_photo_reversal_fails(tmp_path):
+    w, photo_target = _apply_with_companion_row(tmp_path, status="committed")
+    photo_target.write_bytes(b"edited since")  # hash mismatch: the photo's own undo must refuse
+
+    rb = RollbackEngine(w.cfg, db_path=w.db).rollback_transaction("TX_COMP")
+
+    assert rb.failures == 1 and rb.reversed == 1
+    assert get_img(w, w.ids[0]).path == str(photo_target)

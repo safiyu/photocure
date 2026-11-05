@@ -79,7 +79,7 @@ class RollbackEngine:
                     if ok:
                         repo.mark_rolled_back(entry)
                         img = repo.get_by_id(entry.image_id) if entry.image_id else None
-                        if img is not None:
+                        if img is not None and entry.companion_of is None:
                             self._restore_row(img, entry)
                         rep.reversed += 1
                     elif note == "already_reverted":
@@ -134,7 +134,7 @@ class RollbackEngine:
             if complete:
                 repo.ledger_commit(entry)
                 img = repo.get_by_id(entry.image_id) if entry.image_id else None
-                if img is not None and op in ("move", "copy"):
+                if img is not None and entry.companion_of is None and op in ("move", "copy"):
                     img.origin_path = img.origin_path or str(source)
                     img.path = str(target)
                     img.target_path = str(target)
