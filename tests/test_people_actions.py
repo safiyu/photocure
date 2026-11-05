@@ -275,3 +275,185 @@ def test_recluster_temporal_boost_capped(cfg, session, repo):
     res = recluster_people(cfg.db_path, threshold=0.35)
 
     assert res["clusters_created"] == 2
+
+
+def _clusters_with_centroids(n: int, dim: int = 512) -> list[M.PersonCluster]:
+    import numpy as np
+    rng = np.random.default_rng(0)
+    out = []
+    for i in range(n):
+        v = rng.standard_normal(dim)
+        v /= np.linalg.norm(v)
+        out.append(M.PersonCluster(id=i + 1, name=("Named %d" % i) if i % 10 == 0 else None,
+                                   face_count=1 + i % 7, centroid_json=quantize_embedding(v.tolist())))
+    return out
+
+
+def test_find_merge_matches_is_vectorized(monkeypatch):
+    import numpy as np
+    from photocure import people_actions
+    real_dot, calls = np.dot, []
+
+    def counting_dot(*a, **k):
+        calls.append(1)
+        return real_dot(*a, **k)
+
+    monkeypatch.setattr(np, "dot", counting_dot)  # numpy is imported inside the function
+    people_actions._find_merge_matches(_clusters_with_centroids(300))
+    assert len(calls) <= 5, len(calls)
+
+
+def test_list_people_3000_clusters_under_2s(cfg, session):
+    import time
+    for c in _clusters_with_centroids(3000):
+        session.add(c)
+    session.commit()
+    t0 = time.perf_counter()
+    items = list_people(cfg.db_path, sort="similarity")
+    elapsed = time.perf_counter() - t0
+    assert len(items) == 3000
+    assert elapsed < 2.0, elapsed
+
+
+def test_arrange_by_similarity_returns_order_only(cfg, session, repo):
+    from photocure.people_actions import _arrange_by_similarity
+    a = repo.create_person_cluster([1.0, 0.0]); repo.update_person_cluster(a.id, [1.0, 0.0], 10)
+    b = repo.create_person_cluster([0.0, 1.0]); repo.update_person_cluster(b.id, [0.0, 1.0], 8)
+    c = repo.create_person_cluster([0.98, 0.02]); repo.update_person_cluster(c.id, [0.98, 0.02], 3)
+    session.commit()
+    ordered = _arrange_by_similarity([a, b, c])
+    assert [x.id for x in ordered] == [a.id, c.id, b.id]
+
+
+def _three_photos_two_people(session, repo, cos_between=0.6):
+    """Clusters A and B that look alike (cos ``cos_between``) and both appear in photo 7."""
+    from tests.test_face_identity import mix, unit
+    va, vb = unit(11), mix(unit(11), unit(12), cos=cos_between)
+    for iid in (7, 8, 9):
+        _image(session, iid)
+    a = repo.create_person_cluster(va); repo.update_person_cluster(a.id, va, 2)
+    b = repo.create_person_cluster(vb); repo.update_person_cluster(b.id, vb, 1)
+    _face(session, 7, person_id=a.id, embedding=va)
+    _face(session, 8, person_id=a.id, embedding=va)
+    _face(session, 7, person_id=b.id, embedding=vb)
+    session.commit()
+    return a, b
+
+
+def test_cooccurring_clusters_are_never_suggested(cfg, session, repo):
+    a, b = _three_photos_two_people(session, repo)
+    items = {it["id"]: it for it in list_people(cfg.db_path)}
+    assert "similar_to" not in items[b.id]
+
+
+def test_named_target_loses_to_much_stronger_unnamed(cfg, session, repo):
+    from tests.test_face_identity import mix, unit
+    base = unit(21)
+    alice = repo.create_person_cluster(mix(base, unit(22), cos=0.36)); repo.rename_person(alice.id, "Alice")
+    repo.update_person_cluster(alice.id, mix(base, unit(22), cos=0.36), 5)
+    big = repo.create_person_cluster(mix(base, unit(23), cos=0.92)); repo.update_person_cluster(big.id, mix(base, unit(23), cos=0.92), 9)
+    cand = repo.create_person_cluster(base); repo.update_person_cluster(cand.id, base, 2)
+    session.commit()
+    items = {it["id"]: it for it in list_people(cfg.db_path)}
+    assert items[cand.id]["similar_to"]["target_id"] == big.id
+
+
+def test_named_target_within_margin_wins(cfg, session, repo):
+    from tests.test_face_identity import mix, unit
+    base = unit(31)
+    alice = repo.create_person_cluster(mix(base, unit(32), cos=0.60)); repo.rename_person(alice.id, "Alice")
+    repo.update_person_cluster(alice.id, mix(base, unit(32), cos=0.60), 5)
+    big = repo.create_person_cluster(mix(base, unit(33), cos=0.63)); repo.update_person_cluster(big.id, mix(base, unit(33), cos=0.63), 9)
+    cand = repo.create_person_cluster(base); repo.update_person_cluster(cand.id, base, 2)
+    session.commit()
+    items = {it["id"]: it for it in list_people(cfg.db_path)}
+    assert items[cand.id]["similar_to"]["target_id"] == alice.id
+
+
+def test_empty_named_cluster_is_not_a_target(cfg, session, repo):
+    from tests.test_face_identity import mix, unit
+    base = unit(41)
+    _image(session, 70)
+    bob = repo.create_person_cluster(mix(base, unit(42), cos=0.9)); repo.rename_person(bob.id, "Bob")
+    repo.update_person_cluster(bob.id, mix(base, unit(42), cos=0.9), 0)
+    cand = repo.create_person_cluster(base); repo.update_person_cluster(cand.id, base, 2)
+    _face(session, 70, person_id=cand.id, embedding=base)
+    session.commit()
+    items = {it["id"]: it for it in list_people(cfg.db_path)}
+    assert items[cand.id].get("similar_to", {}).get("target_id") != bob.id
+
+
+def _synthetic_identities(session, k=3, per=20, seed=0):
+    """k people, ``per`` faces each (within cos ~0.55), one face per photo, plus 5 co-occurring pairs."""
+    import numpy as np
+    from tests.test_face_identity import mix, unit
+    rng = np.random.default_rng(seed)
+    truth, faces, next_img = {}, [], 1
+    for p in range(k):
+        center = unit(100 + p)
+        for _ in range(per):
+            faces.append((next_img, p, mix(center, unit(int(rng.integers(1000, 10**6))), cos=0.55)))
+            next_img += 1
+    # co-occurring pairs: two different people in one photo
+    for q in range(5):
+        img = next_img; next_img += 1
+        for p in (q % k, (q + 1) % k):
+            faces.append((img, p, mix(unit(100 + p), unit(5000 + q * 7 + p), cos=0.55)))
+    for img_id in range(1, next_img):
+        _image(session, img_id)
+    return faces
+
+
+def _run_recluster_in_order(cfg, session, repo, faces, order):
+    session.exec(M.FaceDetection.__table__.delete())
+    session.exec(M.PersonCluster.__table__.delete())
+    ids = {}
+    for idx in order:
+        img, p, emb = faces[idx]
+        f = _face(session, img, embedding=emb)
+        ids[f.id] = (img, p)
+    session.commit()
+    recluster_people(cfg.db_path, threshold=0.35)
+    session.expire_all()
+    out = {}
+    for fid, (img, p) in ids.items():
+        out[(img, p)] = session.get(M.FaceDetection, fid).person_id
+    return out
+
+
+def _partition(assign):
+    groups = {}
+    for key, pid in assign.items():
+        groups.setdefault(pid, set()).add(key)
+    return {frozenset(v) for v in groups.values()}
+
+
+def test_recluster_is_order_invariant(cfg, session, repo):
+    import random
+    faces = _synthetic_identities(session)
+    order_a = list(range(len(faces)))
+    order_b = order_a[:]
+    random.Random(3).shuffle(order_b)
+    pa = _partition(_run_recluster_in_order(cfg, session, repo, faces, order_a))
+    pb = _partition(_run_recluster_in_order(cfg, session, repo, faces, order_b))
+    assert pa == pb
+
+
+def test_recluster_purity_on_synthetic_identities(cfg, session, repo):
+    faces = _synthetic_identities(session)
+    assign = _run_recluster_in_order(cfg, session, repo, faces, list(range(len(faces))))
+    by_cluster = {}
+    for (img, p), pid in assign.items():
+        by_cluster.setdefault(pid, []).append(p)
+    purity = sum(max(v.count(x) for x in set(v)) for v in by_cluster.values()) / len(assign)
+    assert purity >= 0.98
+    by_person = {}
+    for (img, p), pid in assign.items():
+        by_person.setdefault(p, []).append(pid)
+    completeness = sum(max(v.count(x) for x in set(v)) for v in by_person.values()) / len(assign)
+    assert completeness >= 0.95
+    # the five co-occurring pairs never share a person
+    imgs = {}
+    for (img, p), pid in assign.items():
+        imgs.setdefault(img, []).append(pid)
+    assert all(len(set(v)) == len(v) for v in imgs.values())

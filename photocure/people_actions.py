@@ -54,157 +54,143 @@ def _as_dict(p: M.PersonCluster, sample_face_id: int | None = None, similar_to: 
     return d
 
 
-def _find_merge_matches(clusters: list[M.PersonCluster], s=None) -> dict[int, dict]:
-    """For every unnamed cluster, find the best matching cluster to suggest merging into.
-    Prioritizes named people first, then larger unnamed clusters.
-    """
+def _unit_centroids(clusters: list[M.PersonCluster]) -> list[tuple[M.PersonCluster, "np.ndarray"]]:
     import numpy as np
-    vecs: dict[int, tuple[M.PersonCluster, np.ndarray]] = {}
+    out = []
     for c in clusters:
         vec = dequantize_embedding(c.centroid_json) if c.centroid_json else None
         if vec and len(vec) > 0:
             arr = np.asarray(vec, dtype=np.float32)
             norm = float(np.linalg.norm(arr))
             if norm > 1e-6:
-                vecs[c.id] = (c, arr / norm)
-
-    matches: dict[int, dict] = {}
-    for cid, (cand, cand_v) in vecs.items():
-        if cand.name:
-            continue  # Named people never show incoming merge pills on themselves
-        cand_dim = len(cand_v)
-        thresh = 0.35 if cand_dim >= 512 else 0.65
-        best_target, best_score = None, -1.0
-
-        # 1. Search among named clusters first
-        for tid, (target, target_v) in vecs.items():
-            if tid == cid or len(target_v) != cand_dim or not target.name:
-                continue
-            score = float(np.dot(cand_v, target_v))
-            if score >= thresh and score > best_score:
-                best_score = score
-                best_target = target
-
-        # 2. If no named cluster matches, search among larger unnamed clusters
-        if best_target is None:
-            for tid, (target, target_v) in vecs.items():
-                if tid == cid or len(target_v) != cand_dim or target.name:
-                    continue
-                if target.face_count <= cand.face_count:
-                    continue
-                score = float(np.dot(cand_v, target_v))
-                if score >= thresh and score > best_score:
-                    best_score = score
-                    best_target = target
-
-        if best_target is not None:
-            target_sample_face_id = _best_face_id_for(best_target.id, s) if s is not None else None
-            matches[cid] = {
-                "target_id": best_target.id,
-                "target_name": best_target.name,
-                "target_sample_face_id": target_sample_face_id,
-                "score": round(best_score, 2),
-            }
-    return matches
+                out.append((c, arr / norm))
+    return out
 
 
-def _arrange_by_similarity(clusters: list[M.PersonCluster], s=None) -> list[tuple[M.PersonCluster, dict | None]]:
-    """Arrange person clusters so that visually similar faces are grouped next to each other.
+def _best_face_ids_for(person_ids: list[int], s, stage: str = "all") -> dict[int, int]:
+    """Sharpest usable face per person in one query per 900 ids."""
+    best: dict[int, int] = {}
+    ids = [i for i in person_ids if i is not None]
+    for k in range(0, len(ids), 900):
+        rows = s.exec(
+            select(M.FaceDetection.person_id, M.FaceDetection.id)
+            .join(M.ImageRecord, M.ImageRecord.id == M.FaceDetection.image_id)
+            .where(col(M.FaceDetection.person_id).in_(ids[k:k + 900]))
+            .where(M.FaceDetection.ignored == False)  # noqa: E712
+            .where(stage_clause(stage))
+            .where(M.FaceDetection.x1.isnot(None))
+            .order_by(M.FaceDetection.face_sharpness.desc())
+        ).all()
+        for pid, fid in rows:
+            best.setdefault(pid, fid)
+    return best
 
-    Returns a list of tuples: (cluster, match_info), where match_info is either None or
-    {'target_id': int, 'target_name': str | None, 'target_sample_face_id': int | None, 'score': float}.
+
+def _cluster_image_sets(s) -> dict[int, set[int]]:
+    out: dict[int, set[int]] = {}
+    for pid, iid in s.exec(select(M.FaceDetection.person_id, M.FaceDetection.image_id)
+                           .where(M.FaceDetection.person_id.is_not(None))
+                           .where(M.FaceDetection.ignored == False)).all():  # noqa: E712
+        out.setdefault(pid, set()).add(iid)
+    return out
+
+
+MERGE_NAMED_MARGIN = 0.05  # a named target wins only when within this of the best score overall
+
+
+def _find_merge_matches(clusters: list[M.PersonCluster], s=None, stage: str = "all",
+                        cluster_images: dict[int, set[int]] | None = None) -> dict[int, dict]:
+    """For every unnamed cluster, the best cluster to suggest merging into (one matmul per dimension).
+
+    Named targets are preferred, but only within ``MERGE_NAMED_MARGIN`` of the strongest match;
+    clusters that share a photo (two people in one frame) are never suggested to each other.
     """
+    import numpy as np
+    by_dim: dict[int, list] = {}
+    for c, v in _unit_centroids(clusters):
+        by_dim.setdefault(len(v), []).append((c, v))
+    images = cluster_images or {}
+    pending: dict[int, tuple[M.PersonCluster, float]] = {}
+
+    def shares_photo(a: M.PersonCluster, b: M.PersonCluster) -> bool:
+        ia, ib = images.get(a.id), images.get(b.id)
+        return bool(ia and ib and (ia & ib))
+
+    def pick(row: "np.ndarray", cand: M.PersonCluster, items: list, thresh: float) -> tuple[int | None, float]:
+        row = row.copy()
+        while True:
+            j = int(np.argmax(row))
+            score = float(row[j])
+            if score < thresh:
+                return None, -1.0
+            if shares_photo(cand, items[j][0]):
+                row[j] = -1.0
+                continue
+            return j, score
+
+    for dim, items in by_dim.items():
+        if len(items) < 2:
+            continue
+        vectors = np.stack([v for _, v in items])
+        sims = vectors @ vectors.T
+        np.fill_diagonal(sims, -1.0)
+        thresh = 0.35 if dim >= 512 else 0.65
+        named = np.array([bool(c.name) for c, _ in items])
+        counts = np.array([int(c.face_count or 0) for c, _ in items])
+        sims[:, counts <= 0] = -1.0  # a person with no faces is not a merge target
+        for i, (cand, _) in enumerate(items):
+            if cand.name:
+                continue  # named people never show incoming merge pills on themselves
+            jn, sn = pick(np.where(named, sims[i], -1.0), cand, items, thresh)
+            ju, su = pick(np.where(~named & (counts > cand.face_count), sims[i], -1.0), cand, items, thresh)
+            if jn is not None and sn >= su - MERGE_NAMED_MARGIN:
+                pending[cand.id] = (items[jn][0], sn)
+            elif ju is not None:
+                pending[cand.id] = (items[ju][0], su)
+
+    faces = _best_face_ids_for([t.id for t, _ in pending.values()], s, stage) if s is not None else {}
+    return {cid: {"target_id": target.id, "target_name": target.name,
+                  "target_sample_face_id": faces.get(target.id), "score": round(score, 2),
+                  "shared_photos": 0}
+            for cid, (target, score) in pending.items()}
+
+
+def _arrange_by_similarity(clusters: list[M.PersonCluster]) -> list[M.PersonCluster]:
+    """Order clusters so visually similar people sit next to each other (no DB, no match info)."""
     if len(clusters) <= 1:
-        return [(c, None) for c in clusters]
-
+        return list(clusters)
     import numpy as np
-
-    with_emb = []
-    without_emb = []
-    for c in clusters:
-        vec = dequantize_embedding(c.centroid_json) if c.centroid_json else None
-        if vec and len(vec) > 0:
-            arr = np.asarray(vec, dtype=np.float32)
-            norm = float(np.linalg.norm(arr))
-            if norm > 1e-6:
-                with_emb.append((c, arr / norm))
-                continue
-        without_emb.append(c)
-
-    without_emb.sort(key=lambda p: (p.face_count, p.id or 0), reverse=True)
-
+    with_emb = _unit_centroids(clusters)
+    have = {id(c) for c, _ in with_emb}
+    without_emb = sorted((c for c in clusters if id(c) not in have),
+                         key=lambda p: (p.face_count, p.id or 0), reverse=True)
     if not with_emb:
-        return [(c, None) for c in without_emb]
-
-    # Pre-sort with_emb by prominence: named first, then most faces
+        return without_emb
     with_emb.sort(key=lambda x: (x[0].name is not None, x[0].face_count, x[0].id or 0), reverse=True)
-
     n = len(with_emb)
-    dim = len(with_emb[0][1])
-    if all(len(v) == dim for _, v in with_emb):
-        vectors = np.stack([v for _, v in with_emb])
-        sim_matrix = np.dot(vectors, vectors.T)
-    else:
-        sim_matrix = np.zeros((n, n), dtype=np.float32)
-        for i in range(n):
-            for j in range(i, n):
-                if len(with_emb[i][1]) == len(with_emb[j][1]):
-                    s_val = float(np.dot(with_emb[i][1], with_emb[j][1]))
-                    sim_matrix[i, j] = sim_matrix[j, i] = s_val
-
-    unvisited = set(range(n))
-    ordered: list[tuple[int, dict | None]] = []
-
-    while unvisited:
-        # Pick the most prominent unvisited node as seed
-        seed = min(unvisited)
-        unvisited.remove(seed)
-        ordered.append((seed, None))
-
-        group = [seed]
-        while unvisited:
-            best_cand = None
-            best_score = -1.0
-            best_ref = None
-
-            for cand in unvisited:
-                cand_scores = sim_matrix[cand, group]
-                max_idx = int(np.argmax(cand_scores))
-                score = float(cand_scores[max_idx])
-                if score > best_score:
-                    best_score = score
-                    best_cand = cand
-                    best_ref = group[max_idx]
-
-            # Calibrated threshold for linking as similar face / suggesting merge:
-            # 512-D ArcFace vectors operate at 0.35; 128-D SFace at 0.65
-            cand_dim = len(with_emb[best_cand][1]) if best_cand is not None else dim
-            merge_threshold = 0.35 if cand_dim >= 512 else 0.65
-            if best_cand is not None and best_score >= merge_threshold:
-                unvisited.remove(best_cand)
-                cand_cluster = with_emb[best_cand][0]
-                target_cluster = with_emb[best_ref][0]
-                match_info = None
-                # Only suggest merging for unnamed clusters; once a person is named, stop showing merge suggestions
-                if not cand_cluster.name:
-                    target_sample_face_id = _best_face_id_for(target_cluster.id, s) if s is not None else None
-                    match_info = {
-                        "target_id": target_cluster.id,
-                        "target_name": target_cluster.name,
-                        "target_sample_face_id": target_sample_face_id,
-                        "score": round(best_score, 2),
-                    }
-                ordered.append((best_cand, match_info))
-                group.append(best_cand)
-            else:
+    dims = np.array([len(v) for _, v in with_emb])
+    sims = np.full((n, n), -1.0, dtype=np.float32)
+    for dim in np.unique(dims):
+        idx = np.flatnonzero(dims == dim)
+        vectors = np.stack([with_emb[i][1] for i in idx])
+        sims[np.ix_(idx, idx)] = vectors @ vectors.T
+    thresholds = np.where(dims >= 512, 0.35, 0.65).astype(np.float32)
+    unvisited = np.ones(n, dtype=bool)
+    order: list[int] = []
+    while unvisited.any():
+        seed = int(np.argmax(unvisited))  # most prominent remaining
+        unvisited[seed] = False
+        order.append(seed)
+        best = sims[seed].copy()  # best similarity of every node to the growing group
+        while unvisited.any():
+            masked = np.where(unvisited, best, -2.0)
+            cand = int(np.argmax(masked))
+            if float(masked[cand]) < float(thresholds[cand]):
                 break
-
-    result = []
-    for idx, match in ordered:
-        result.append((with_emb[idx][0], match))
-    for c in without_emb:
-        result.append((c, None))
-    return result
+            unvisited[cand] = False
+            order.append(cand)
+            best = np.maximum(best, sims[cand])
+    return [with_emb[i][0] for i in order] + without_emb
 
 
 def list_people(db_path: Path | str, sort: str = "similarity", stage: str = "all") -> list[dict]:
@@ -255,7 +241,6 @@ def list_people(db_path: Path | str, sort: str = "similarity", stage: str = "all
                     clusters.append(c)
         else:
             # stage == "all": use cluster's face_count, but sync with active faces if FaceDetections exist
-            has_any_face = s.exec(select(M.FaceDetection.id).limit(1)).first() is not None
             library_clusters = [c for c in repo.all_person_clusters() if c.stage != "trash"]
             if has_any_face:
                 counts_q = (
@@ -279,18 +264,16 @@ def list_people(db_path: Path | str, sort: str = "similarity", stage: str = "all
             else:
                 clusters = [c for c in library_clusters if c.face_count > 0]
 
-        matches = _find_merge_matches(clusters, s)
+        matches = _find_merge_matches(clusters, s, stage=stage, cluster_images=_cluster_image_sets(s))
+        faces = _best_face_ids_for([c.id for c in clusters], s, stage)
         if sort == "name":
             # Named first alphabetically, then unnamed by count desc
-            clusters.sort(key=lambda p: (0 if p.name else 1, (p.name or "").lower(), -p.face_count))
-            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage), matches.get(p.id)) for p in clusters]
+            ordered = sorted(clusters, key=lambda p: (0 if p.name else 1, (p.name or "").lower(), -p.face_count))
         elif sort == "count":
-            clusters.sort(key=lambda p: (p.face_count, p.id or 0), reverse=True)
-            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage), matches.get(p.id)) for p in clusters]
+            ordered = sorted(clusters, key=lambda p: (p.face_count, p.id or 0), reverse=True)
         else:  # default: "similarity"
-            arranged = _arrange_by_similarity(clusters, s)
-            items = [_as_dict(p, _best_face_id_for(p.id, s, stage=stage), matches.get(p.id) or match) for p, match in arranged]
-
+            ordered = _arrange_by_similarity(clusters)
+        items = [_as_dict(p, faces.get(p.id), matches.get(p.id)) for p in ordered]
         return [it for it in items if it["face_count"] > 0]
 
 
@@ -599,6 +582,7 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
     - Excludes ignored faces.
     - Enforces same-photo exclusivity.
     """
+    import bisect
     import json
     from collections import Counter
     import numpy as np
@@ -681,6 +665,7 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                 "names": [c.name] if c.name else [],
                 "is_existing": True,
                 "anchor_count": int(lib_face_cnt),  # library faces behind the anchored centroid
+                "anchor_centroid": u,
                 "yearly_medoids": y_meds,
                 "yearly_counts": y_counts,
             })
@@ -741,8 +726,30 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
         core_faces = [item for item in parsed_faces if is_core_face(item[0])]
         satellite_faces = [item for item in parsed_faces if not is_core_face(item[0])]
 
-        core_faces.sort(key=lambda item: item[0].face_sharpness or 0.0, reverse=True)
-        satellite_faces.sort(key=lambda item: item[0].face_sharpness or 0.0, reverse=True)
+        order_key = lambda item: (-(item[0].face_sharpness or 0.0), item[0].id or 0)  # noqa: E731
+        core_faces.sort(key=order_key)
+        satellite_faces.sort(key=order_key)
+
+        def cluster_time(c: dict) -> tuple[set, list]:
+            """Burst ids and sorted timestamps of a cluster's photos, built once and kept current."""
+            if "bursts" not in c:
+                c["bursts"], c["ts"] = set(), []
+                for img_id in c["image_ids"]:
+                    _note_time(c, img_info.get(img_id, {}))
+            return c["bursts"], c["ts"]
+
+        def _note_time(c: dict, meta: dict) -> None:
+            if meta.get("burst_id") is not None:
+                c["bursts"].add(meta["burst_id"])
+            if meta.get("timestamp") is not None:
+                bisect.insort(c["ts"], meta["timestamp"])
+
+        def nearest_dt(ts_sorted: list, t: float) -> float | None:
+            if not ts_sorted:
+                return None
+            k = bisect.bisect_left(ts_sorted, t)
+            cands = [abs(ts_sorted[j] - t) for j in (k - 1, k) if 0 <= j < len(ts_sorted)]
+            return min(cands) if cands else None
 
         def assign_face_item(f, u, allow_new_cluster: bool):
             dim = len(u)
@@ -790,13 +797,11 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                                 sim = med_sim
 
                 # 5. Burst / seconds-apart tie-break: never enough to cross the threshold on its own
-                c_bursts = {img_info.get(img_id, {}).get("burst_id") for img_id in c["image_ids"]}
-                c_bursts.discard(None)
+                c_bursts, c_ts = cluster_time(c)
                 if f_burst and f_burst in c_bursts:
                     sim += 0.02
                 elif f_ts is not None:
-                    min_dt = min((abs(ts - f_ts) for img_id in c["image_ids"]
-                                  if (ts := img_info.get(img_id, {}).get("timestamp")) is not None), default=None)
+                    min_dt = nearest_dt(c_ts, f_ts)
                     if min_dt is not None and min_dt <= 120.0:
                         sim += 0.01
 
@@ -808,6 +813,8 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
             if best_c is not None:
                 best_c["face_ids"].append(f.id)
                 best_c["image_ids"].add(f.image_id)
+                if "bursts" in best_c:
+                    _note_time(best_c, f_meta)
                 if c_name:
                     best_c["names"].append(c_name)
                 # Update running centroid (pipeline faces re-clustered here plus the anchored library faces)
@@ -822,6 +829,7 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                 best_c["yearly_medoids"], best_c["yearly_counts"] = update_temporal_medoid(
                     best_c.get("yearly_medoids"), f_year, u.tolist(), best_c.get("yearly_counts"))
             elif allow_new_cluster:
+                y_meds, y_counts = update_temporal_medoid({}, f_year, u.tolist(), {})
                 clusters.append({
                     "cluster_obj": None,
                     "centroid": u,
@@ -830,6 +838,8 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                     "image_ids": {f.image_id},
                     "names": [c_name] if c_name else [],
                     "is_existing": False,
+                    "yearly_medoids": y_meds,
+                    "yearly_counts": y_counts,
                 })
             else:
                 # If satellite face didn't match any core at threshold, assign to best non-conflicting cluster
@@ -854,10 +864,13 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                     if fallback_c is not None:
                         fallback_c["face_ids"].append(f.id)
                         fallback_c["image_ids"].add(f.image_id)
+                        if "bursts" in fallback_c:
+                            _note_time(fallback_c, f_meta)
                         if c_name:
                             fallback_c["names"].append(c_name)
                     else:
                         # Otherwise allow creating a new cluster
+                        y_meds, y_counts = update_temporal_medoid({}, f_year, u.tolist(), {})
                         clusters.append({
                             "cluster_obj": None,
                             "centroid": u,
@@ -866,6 +879,8 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
                             "image_ids": {f.image_id},
                             "names": [c_name] if c_name else [],
                             "is_existing": False,
+                            "yearly_medoids": y_meds,
+                            "yearly_counts": y_counts,
                         })
 
         # Execute Pass 1 (core) and Pass 2 (satellites)
@@ -873,6 +888,58 @@ def recluster_people(db_path: Path | str, threshold: float | None = None, stage:
             assign_face_item(f, u, allow_new_cluster=True)
         for f, u in satellite_faces:
             assign_face_item(f, u, allow_new_cluster=False)
+
+        # Pass 3: one reassignment sweep against the final centroids, so the result does not depend on
+        # the order faces were seen. A face moves when another cluster is clearly closer (by 0.02).
+        u_by_face = {f.id: u for f, u in parsed_faces}
+        img_by_face = {f.id: f.image_id for f, _ in parsed_faces}
+        owner = {fid: c for c in clusters for fid in c["face_ids"]}
+        by_dim: dict[int, list[dict]] = {}
+        for c in clusters:
+            by_dim.setdefault(len(c["centroid"]), []).append(c)
+        moved = False
+        for dim, dim_clusters in by_dim.items():
+            if len(dim_clusters) < 2:
+                continue
+            cents = np.stack([c["centroid"] for c in dim_clusters])
+            fids = [fid for fid, u in u_by_face.items() if len(u) == dim and fid in owner]
+            for k in range(0, len(fids), 2048):
+                chunk = fids[k:k + 2048]
+                sims = np.stack([u_by_face[fid] for fid in chunk]) @ cents.T
+                for row, fid in zip(sims, chunk):
+                    cur = owner[fid]
+                    thr = effective_threshold(threshold, dim)
+                    cur_sim = float(np.dot(u_by_face[fid], cur["centroid"]))
+                    order = np.argsort(-row)
+                    for j in order[:5]:
+                        cand = dim_clusters[int(j)]
+                        score = float(row[j])
+                        if cand is cur or score < thr or score < cur_sim + 0.02:
+                            break
+                        if img_by_face[fid] in cand["image_ids"]:
+                            continue  # cannot-link: someone else from this photo is already there
+                        cur["face_ids"].remove(fid)
+                        cur["image_ids"].discard(img_by_face[fid])
+                        cand["face_ids"].append(fid)
+                        cand["image_ids"].add(img_by_face[fid])
+                        owner[fid] = cand
+                        moved = True
+                        break
+        if moved:
+            for c in clusters:
+                members = [u_by_face[fid] for fid in c["face_ids"] if fid in u_by_face]
+                if c.get("is_existing"):
+                    total = c["anchor_centroid"] * c.get("anchor_count", 0) + (np.sum(members, axis=0) if members else 0)
+                elif members:
+                    total = np.sum(members, axis=0)
+                else:
+                    continue
+                norm = float(np.linalg.norm(total))
+                if norm > 1e-6:
+                    c["centroid"] = total / norm
+                base = [c["cluster_obj"].name] if c.get("is_existing") and c["cluster_obj"].name else []
+                c["names"] = base + [face_custom_name[fid] for fid in c["face_ids"] if fid in face_custom_name]
+            clusters = [c for c in clusters if c["face_ids"] or c.get("is_existing")]
 
         # 3. Apply assignments only for pipeline faces
         created_count = 0
