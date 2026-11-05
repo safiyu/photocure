@@ -4379,6 +4379,7 @@
   // the per-image faces response so a standalone photo renders the same chrome as a burst frame.
   let activeOverlayStandaloneMember = null;
   let activeOverlayPeopleNames = [];
+  const FACE_SCROLL_THRESHOLD = 10;   // above this many faces the panel scrolls instead of shrinking nodes
   let overlayLayout = 'radial';      // 'radial' | 'split' | 'cinema' | 'matrix'
   let faceZoomMultiplier = 1.08;     // 0.86 (1.5x) | 1.08 (2.5x) | 1.28 (3.5x)
   let hoveredFaceId = null;
@@ -4436,6 +4437,8 @@
     if (hoveredFaceId === faceId) return;
     hoveredFaceId = faceId;
     updateBiometricSpotlight();
+    // Hovering a reticle on the photo brings its face into view in the scroll panel.
+    if (faceId != null) $(`#facepanel .in-scroll[data-node-id="${faceId}"]`)?.scrollIntoView({ block: "nearest" });
   }
 
   function selectFaceInOverlay(faceId, anchor) {
@@ -4816,7 +4819,34 @@
     let sourceBox = { x: centerX - 210, y: centerY - 145, w: 420, h: 290 };
     const faceNodesPositions = [];
 
-    if (overlayLayout === 'radial') {
+    // Crowded frames: fit the photo, put the faces in a scrollable panel beside or below it.
+    const scrollMode = overlayLayout !== 'matrix' && count > FACE_SCROLL_THRESHOLD;
+    let scrollRect = null;
+    if (scrollMode) {
+      if (vw >= 1024) {
+        let srcW = Math.min(560, vw * 0.46);
+        let srcH = Math.round(srcW * aspect);
+        const maxH = vh - 200;
+        if (srcH > maxH) { srcH = Math.round(maxH); srcW = Math.round(srcH / aspect); }
+        const gap = 32;
+        const totalW = Math.min(vw - 64, srcW + gap + 640);
+        const x0 = Math.round(centerX - totalW / 2);
+        sourceBox = { x: x0, y: Math.round(centerY - srcH / 2 - 15), w: srcW, h: srcH };
+        scrollRect = { x: x0 + srcW + gap, y: 96, w: totalW - srcW - gap, h: vh - 96 - 96 };
+      } else {
+        let srcW = Math.min(340, vw * 0.84);
+        let srcH = Math.round(srcW * aspect);
+        const maxH = vh * 0.3;
+        if (srcH > maxH) { srcH = Math.round(maxH); srcW = Math.round(srcH / aspect); }
+        sourceBox = { x: centerX - srcW / 2, y: 90, w: srcW, h: srcH };
+        const top = sourceBox.y + srcH + 12;
+        scrollRect = { x: 12, y: top, w: vw - 24, h: Math.max(160, vh - top - 90) };
+      }
+    }
+
+    if (scrollMode) {
+      // positions come from the scroll grid
+    } else if (overlayLayout === 'radial') {
       if (vw >= 1024) {
         let srcW = Math.min(460, vw * 0.35);
         let srcH = Math.round(srcW * aspect);
@@ -5068,18 +5098,22 @@
         </div>
 
         <!-- ENLARGED FACE NODES (Clean and uncrossed) -->
-        ${faceNodesPositions.map((node, idx) => {
+        ${scrollMode ? `<div class="bio-face-scroll" style="left:${scrollRect.x}px; top:${scrollRect.y}px; width:${scrollRect.w}px; height:${scrollRect.h}px;" role="list" aria-label="Faces in this photo">` : ''}
+        ${(scrollMode ? activeOverlayFaces.map((f) => ({ face: f })) : faceNodesPositions).map((node, idx) => {
           const f = node.face;
           const isHovered = hoveredFaceId === f.id;
-          const diam = isHovered ? Math.round(safeNodeDiameter * 1.08) : safeNodeDiameter;
+          const diam = scrollMode ? 84 : (isHovered ? Math.round(safeNodeDiameter * 1.08) : safeNodeDiameter);
+          const posStyle = scrollMode
+            ? `width:${diam}px; height:${diam}px;`
+            : `left:${node.cx}px; top:${node.cy}px; width:${diam}px; height:${diam}px; transform:translate(-50%, -50%);`;
           return `
             <figure
-              class="enlarged-face-node facechip${f.isBlink ? ' blink' : ''}"
+              class="enlarged-face-node facechip${scrollMode ? ' in-scroll' : ''}${f.isBlink ? ' blink' : ''}"
               data-node-id="${f.id}"
               onmouseenter="setHoveredFace(${f.id})"
               onmouseleave="setHoveredFace(null)"
               onclick="selectFaceInOverlay(${f.id}, this)"
-              style="left:${node.cx}px; top:${node.cy}px; width:${diam}px; height:${diam}px; transform:translate(-50%, -50%);"
+              style="${posStyle}"
             >
               <div class="bio-node-enter" style="animation-delay:calc(0.35s / var(--speed, 0.5) + ${60 + idx * 40}ms);">
                 <!-- Outer Rotating Ring -->
@@ -5113,6 +5147,7 @@
             </figure>
           `;
         }).join('')}
+        ${scrollMode ? '</div>' : ''}
         `}
       </div>
 

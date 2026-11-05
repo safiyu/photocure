@@ -2551,6 +2551,33 @@ body[data-stage="trash"] .btn-finalize-section, body[data-stage="trash"] #btn-fi
     opacity calc(0.25s / var(--speed, 0.5)) ease;
 }
 
+/* Crowded frames: faces live in a scrollable grid next to the photo */
+.bio-face-scroll {
+  position: fixed;
+  z-index: 30;
+  pointer-events: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  align-content: start;
+  justify-items: center;
+  gap: 18px 8px;
+  padding: 16px 12px 8px;
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(14px);
+  scrollbar-width: thin;
+}
+.enlarged-face-node.in-scroll {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 52px;
+  transition: transform 0.2s ease, opacity 0.25s ease;
+}
+.enlarged-face-node.in-scroll:hover { transform: scale(1.06); }
+
 /* Subtle Face Entrance Animation Container */
 .bio-node-enter {
   width: 100%;
