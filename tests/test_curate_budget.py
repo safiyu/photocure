@@ -109,3 +109,21 @@ def test_budget_curate_excludes_rejects_junk_utility(tmp_path):
     assert data["total"] == 1
     assert data["kept_ids"] == [good_id]
 
+
+
+def test_budget_uses_scale_labels(session, monkeypatch):
+    from photocure.curate_budget import budget_curate
+    from photocure.db.models import ImageRecord, SemanticScore
+    for i in range(1, 7):
+        session.add(ImageRecord(id=i, path=f"/b/{i}.jpg", filename=f"{i}.jpg", stage="new"))
+    session.flush()
+    for i in range(1, 7):
+        session.add(SemanticScore(image_id=i, aesthetic=0.4 + i / 20, backend="clip"))
+    session.commit()
+    monkeypatch.setattr("photocure.curate_budget.scale_labels",
+                        lambda s, ids, enc: {i: ("wide" if i % 2 else "closeup") for i in ids})
+    monkeypatch.setattr("photocure.search.default_encoder", lambda cfg=None: object())
+
+    res = budget_curate(session, target_count=4, stage="new")
+
+    assert set(res["scale_coverage"]) == {"wide", "closeup"}
