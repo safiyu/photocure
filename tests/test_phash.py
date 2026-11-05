@@ -7,7 +7,6 @@ from PIL import Image
 
 from photocure.scanner.phash import (
     NearDupIndex,
-    compute_dhash,
     compute_phash,
     from_hex,
     hamming,
@@ -29,8 +28,6 @@ def test_hash_format_and_determinism(tmp_path):
     h = compute_phash(p)
     assert len(h) == 16 and int(h, 16) >= 0
     assert compute_phash(p) == h
-    d = compute_dhash(p)
-    assert len(d) == 16 and compute_dhash(p) == d
 
 
 def test_resized_and_recompressed_copies_are_close(tmp_path):
@@ -39,7 +36,6 @@ def test_resized_and_recompressed_copies_are_close(tmp_path):
     cv2.imwrite(str(tmp_path / "small.jpg"), cv2.resize(img, (300, 400)),
                 [cv2.IMWRITE_JPEG_QUALITY, 60])
     assert hamming(compute_phash(p), compute_phash(tmp_path / "small.jpg")) <= 6
-    assert hamming(compute_dhash(p), compute_dhash(tmp_path / "small.jpg")) <= 10
 
 
 def test_different_images_are_far(tmp_path):
@@ -62,7 +58,7 @@ def test_exif_orientation_is_applied(tmp_path):
 def test_undecodable_file_returns_none(tmp_path):
     bad = tmp_path / "bad.jpg"
     bad.write_bytes(b"nope")
-    assert compute_phash(bad) is None and compute_dhash(bad) is None
+    assert compute_phash(bad) is None
 
 
 def test_hamming_helpers():
@@ -128,3 +124,8 @@ def test_index_seed_and_resolve_chain():
 
 def test_make_image_fixture_hashes_decode(tmp_path):
     assert compute_phash(make_image(tmp_path / "x.jpg", rng_seed=3)) is not None
+
+
+def test_dhash_helpers_removed():
+    import photocure.scanner.phash as m
+    assert not hasattr(m, "compute_dhash") and not hasattr(m, "dhash_from_gray")

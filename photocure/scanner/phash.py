@@ -50,15 +50,6 @@ def phash_from_gray(gray: np.ndarray) -> int:
     return out
 
 
-def dhash_from_gray(gray: np.ndarray) -> int:
-    """dHash of a 9x8 grayscale array (row-wise gradient sign)."""
-    diff = gray[:, 1:] > gray[:, :-1]
-    out = 0
-    for b in diff.flatten():
-        out = (out << 1) | int(b)
-    return out
-
-
 def to_hex(h: int) -> str:
     return f"{h:016x}"
 
@@ -123,13 +114,6 @@ def compute_phash(path: Path | str) -> str | None:
     """64-bit DCT pHash as 16 hex chars, or ``None`` if the file cannot decode."""
     arr = _gray_array(path, (_DCT_SIZE, _DCT_SIZE))
     return None if arr is None else to_hex(phash_from_gray(arr))
-
-
-def compute_dhash(path: Path | str) -> str | None:
-    """64-bit dHash as 16 hex chars, or ``None`` if the file cannot decode."""
-    arr = _gray_array(path, (9, 8))
-    # PIL size is (w, h) = (9, 8); the array is (rows=8, cols=9).
-    return None if arr is None else to_hex(dhash_from_gray(arr))
 
 
 @dataclass

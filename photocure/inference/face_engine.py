@@ -35,6 +35,8 @@ class FaceInfo:
     confidence: float
     # YuNet's 5 points: right eye, left eye, nose, right mouth corner, left mouth corner.
     landmarks: list[tuple[float, float]] = field(default_factory=list)
+    # The same points before clipping to the frame; alignment needs the true geometry at the edges.
+    landmarks_raw: list[tuple[float, float]] = field(default_factory=list)
     face_sharpness: float | None = None
     # (eyeBlinkLeft + eyeBlinkRight) / 2, or None when it could not be measured.
     eye_closed_score: float | None = None
@@ -54,8 +56,8 @@ class FaceInfo:
         return max(0.0, self.y2 - self.y1)
 
 
-def is_valid_face_geometry(face: FaceInfo, width: int = 1000, height: int = 1000) -> bool:
-    """Validate geometric plausibility of 5 facial landmarks to reject non-faces (hands, ears, bokeh)."""
+def is_plausible_box(face: FaceInfo, width: int = 1000, height: int = 1000) -> bool:
+    """Shape sanity for a detection (rejects hands, ears, bokeh blobs) without demanding a frontal pose."""
     bw = face.w * width
     bh = face.h * height
     if bw < 8 or bh < 8:
@@ -71,8 +73,16 @@ def is_valid_face_geometry(face: FaceInfo, width: int = 1000, height: int = 1000
     if eye_d / bw < 0.12:
         return False
     mouth_d = math.hypot(rm[0] - lm[0], rm[1] - lm[1])
-    if mouth_d / bw < 0.08:
-        return False
+    return mouth_d / bw >= 0.08
+
+
+def is_frontal_enough(face: FaceInfo, width: int = 1000, height: int = 1000) -> bool:
+    """Pose gate for identity embedding only: profiles still count as faces for blinks and group shots."""
+    if not face.landmarks or len(face.landmarks) < 5:
+        return True
+    pts = [(lx * width, ly * height) for lx, ly in face.landmarks[:5]]
+    le, re, nose, lm, rm = pts
+    eye_d = math.hypot(re[0] - le[0], re[1] - le[1])
     v_lr = (re[0] - le[0], re[1] - le[1])
     v_ln = (nose[0] - le[0], nose[1] - le[1])
     len_sq = v_lr[0]**2 + v_lr[1]**2
@@ -89,6 +99,11 @@ def is_valid_face_geometry(face: FaceInfo, width: int = 1000, height: int = 1000
     return True
 
 
+def is_valid_face_geometry(face: FaceInfo, width: int = 1000, height: int = 1000) -> bool:
+    """Both gates: a plausible box in a frontal-enough pose (what identity embedding requires)."""
+    return is_plausible_box(face, width, height) and is_frontal_enough(face, width, height)
+
+
 ARCFACE_REF_5PTS = np.array([
     [38.2946, 51.6963],
     [73.5318, 51.5014],
@@ -101,7 +116,7 @@ ARCFACE_REF_5PTS = np.array([
 def align_face_112(bgr: np.ndarray, landmarks_px: Sequence[tuple[float, float]]) -> np.ndarray:
     """Align and crop face to standard ArcFace 112x112 using 5 facial landmarks."""
     dst = np.array(landmarks_px, dtype=np.float32)
-    M, _ = cv2.estimateAffinePartial2D(dst, ARCFACE_REF_5PTS)
+    M, _ = cv2.estimateAffinePartial2D(dst, ARCFACE_REF_5PTS, method=cv2.LMEDS)  # all 5 points, no RANSAC drop
     if M is None:
         return cv2.resize(bgr, (112, 112))
     return cv2.warpAffine(bgr, M, (112, 112), borderValue=0.0)
@@ -251,15 +266,16 @@ class FaceEngine:
         candidates: list[FaceInfo] = []
         for r in rows:
             x, y, bw, bh = (float(v) for v in r[:4])
-            lm = [(clip(float(r[4 + 2 * i]) / w), clip(float(r[5 + 2 * i]) / h)) for i in range(5)]
+            lm_raw = [(float(r[4 + 2 * i]) / w, float(r[5 + 2 * i]) / h) for i in range(5)]
+            lm = [(clip(lx), clip(ly)) for lx, ly in lm_raw]
             candidates.append(FaceInfo(clip(x / w), clip(y / h), clip((x + bw) / w), clip((y + bh) / h),
-                                       confidence=float(r[14]), landmarks=lm))
+                                       confidence=float(r[14]), landmarks=lm, landmarks_raw=lm_raw))
 
         # Suppress duplicate / overlapping boxes on the same face (IoU or containment)
         candidates.sort(key=lambda f: f.confidence, reverse=True)
         for c in candidates:
-            # Pre-filter geometrically implausible shapes from raw YuNet candidates
-            if not is_valid_face_geometry(c, w, h):
+            # Pre-filter implausible shapes; pose is judged later, only before identity embedding
+            if not is_plausible_box(c, w, h):
                 continue
             cb = (c.x1, c.y1, c.x2, c.y2)
             dup = False
@@ -359,12 +375,13 @@ class FaceEngine:
             if face.face_sharpness is None or face.face_sharpness < min_sharp:
                 continue
             if recognizer == "auraface":
-                landmarks_px = [(lx * W, ly * H) for lx, ly in face.landmarks]
+                landmarks_px = [(lx * W, ly * H) for lx, ly in (face.landmarks_raw or face.landmarks)]
                 aligned = align_face_112(full_bgr, landmarks_px)
                 rgb = cv2.cvtColor(aligned, cv2.COLOR_BGR2RGB).astype(np.float32)
                 blob = (rgb - 127.5) / 127.5
                 blob = np.transpose(blob, (2, 0, 1))[np.newaxis, ...]
-                feature = self._aura_sess.run(None, {"data": blob})[0][0]
+                input_name = self._aura_sess.get_inputs()[0].name
+                feature = self._aura_sess.run(None, {input_name: blob})[0][0]
                 norm = float(np.linalg.norm(feature))
                 if norm > 1e-6:
                     feature = feature / norm
