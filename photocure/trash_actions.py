@@ -249,14 +249,11 @@ def finalize_deletes(dbp: Path, cfg: CuratorConfig, *,
             col(M.ImageRecord.route_status).not_in(["purged", "trashed"]),
         )
         if ids is not None and len(ids) > 0:
-            has_marked = any(s.exec(select(M.ImageRecord.id).where(
-                col(M.ImageRecord.id).in_(list(ids)),
-                M.ImageRecord.delete_approved == True,  # noqa: E712
-            )).all())
-            if has_marked:
-                q = q.where(col(M.ImageRecord.id).in_(list(ids)), M.ImageRecord.delete_approved == True)  # noqa: E712
-            else:
-                q = q.where(col(M.ImageRecord.id).in_(list(ids)))
+            # A selected photo is approved by the selection itself; the engine routes only marked rows to .trash.
+            for rec in s.exec(select(M.ImageRecord).where(col(M.ImageRecord.id).in_(list(ids)))).all():
+                rec.delete_approved = True
+            s.commit()
+            q = q.where(col(M.ImageRecord.id).in_(list(ids)))
         else:
             q = q.where(M.ImageRecord.delete_approved == True)  # noqa: E712
             if stage and stage != "all":
@@ -310,12 +307,11 @@ def finalize_deletes(dbp: Path, cfg: CuratorConfig, *,
 
     txn = ""
     trashed_count = 0
+    rep = None
     if actions:
-        engine = ActionEngine(cfg, db_path=dbp)
-        rep = engine.execute(actions, organize_root=root, trash=True)
-        if rep.failures:
-            raise OSError(f"failed to move photos to trash: {rep.errors[0]}")
+        rep = ActionEngine(cfg, db_path=dbp).execute(actions, organize_root=root, trash=True)
         txn = rep.transaction_id
+        actions = [a for a in actions if a.image_id in rep.resolved_targets]
 
     with get_session(dbp) as s:
         for r_miss in missing_sources:
@@ -343,5 +339,7 @@ def finalize_deletes(dbp: Path, cfg: CuratorConfig, *,
         PhotoRepository(s).prune_bursts()
         s.commit()
 
+    if rep is not None and rep.failures:
+        raise OSError(f"failed to move photos to trash: {rep.errors[0]}")
     return {"ok": True, "trashed": trashed_count, "transaction_id": txn}
 
