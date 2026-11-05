@@ -177,3 +177,18 @@ def test_space_check_blocks_copy(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "disk_usage", lambda p: U(10, 10, 5))
     with pytest.raises(OSError, match="free space"):
         ActionEngine._copy(src, tmp_path / "b.bin")
+
+
+def test_undo_copy_refuses_when_source_is_gone(tmp_path):
+    w = build_world(tmp_path, n=1)
+    acts = _actions(w, w.out, op="copy")
+    rep = ActionEngine(w.cfg, db_path=w.db).execute(acts, transaction_id="TX_COPY")
+    assert rep.executed == 1
+    target = w.out / "People" / sorted(w.paths)[0].name
+    sorted(w.paths)[0].unlink()  # the card was wiped: the copy is the only file left
+
+    rb = RollbackEngine(w.cfg, db_path=w.db).rollback_transaction("TX_COPY")
+
+    assert rb.failures == 1 and rb.reversed == 0
+    assert target.exists()
+    assert "source gone" in rb.errors[0]

@@ -226,7 +226,10 @@ class RollbackEngine:
             self._prune_empty_dirs(target.parent, entry.created_dir)
             return True, "moved back"
 
-        if op in ("copy", "hardlink", "symlink"):
+        if op == "copy":
+            return False, "source gone; the copy is the only remaining file (refusing to remove)"
+
+        if op in ("hardlink", "symlink"):
             self._remove_target(target, op)
             self._prune_empty_dirs(target.parent, entry.created_dir)
             return True, f"removed {op} target"
