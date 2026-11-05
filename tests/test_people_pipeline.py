@@ -122,3 +122,20 @@ def test_two_faces_in_the_same_photo_never_share_a_person_id(cfg, repo):
     assert result[0] is not None and result[1] is not None
     assert result[0] != result[1]
     assert len(repo.all_person_clusters()) == 2
+
+
+def test_yearly_vectors_survive_a_restart(cfg, repo):
+    from datetime import datetime
+    pipeline = _yunet_pipeline(cfg)
+    centroids: dict[int, ClusterCentroid] = {}
+    f1 = FaceInfo(0.1, 0.1, 0.3, 0.3, confidence=0.9, face_sharpness=50.0, embedding=[1.0, 0.0])
+    f2 = FaceInfo(0.1, 0.1, 0.3, 0.3, confidence=0.9, face_sharpness=50.0, embedding=[0.99, 0.01])
+    pipeline._assign_people(repo, centroids, 601, [f1], taken_at=datetime(2015, 6, 1))
+    pipeline._assign_people(repo, centroids, 602, [f2], taken_at=datetime(2020, 6, 1))
+    repo.s.commit()
+
+    loaded = pipeline._load_centroids(repo)  # what the next run starts from
+
+    (pid,) = loaded
+    assert set(loaded[pid].temporal_medoids) == {"2015", "2020"}
+    assert loaded[pid].temporal_counts == {"2015": 1, "2020": 1}

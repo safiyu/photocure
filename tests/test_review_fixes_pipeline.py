@@ -60,9 +60,11 @@ def test_a_hostile_xmp_rating_does_not_abort_the_scan(rating):
     assert parse_xmp(_XMP % rating).rating is None
 
 
-def test_a_new_copy_never_points_at_a_row_that_is_itself_a_duplicate(session):
-    original = M.ImageRecord(path="/p/a.jpg", filename="a.jpg", sha256="S", is_duplicate=False)
-    chain = M.ImageRecord(path="/p/b.jpg", filename="b.jpg", sha256="S", is_duplicate=True)
+def test_a_new_copy_never_points_at_a_row_that_is_itself_a_duplicate(session, tmp_path):
+    for name in ("a.jpg", "b.jpg"):
+        (tmp_path / name).write_bytes(b"x")  # a duplicate target must still exist on disk
+    original = M.ImageRecord(path=str(tmp_path / "a.jpg"), filename="a.jpg", sha256="S", is_duplicate=False)
+    chain = M.ImageRecord(path=str(tmp_path / "b.jpg"), filename="b.jpg", sha256="S", is_duplicate=True)
     session.add_all([chain, original])
     session.flush()
     rec = M.ImageRecord(path="/p/c.jpg", filename="c.jpg", sha256="S")

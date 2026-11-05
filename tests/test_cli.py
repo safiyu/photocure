@@ -222,3 +222,25 @@ def test_cli_serve_and_start_options(tmp_path, monkeypatch):
     r3 = runner.invoke(app, ["start", "--db", str(db), "--port", "8099", "--no-open"])
     assert r3.exit_code == 0
     assert len(served) == 3
+
+
+def test_db_restore_keeps_wal_rows_in_pre_restore_copy(tmp_path):
+    import sqlite3
+    db = tmp_path / "live.db"
+    snap = tmp_path / "snap.bak.db"
+    with sqlite3.connect(snap) as s:
+        s.execute("CREATE TABLE marker (v)")
+    con = sqlite3.connect(db)  # stays open so the WAL is not checkpointed into the main file
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("PRAGMA wal_autocheckpoint=0")
+    con.execute("CREATE TABLE t (v)")
+    con.execute("INSERT INTO t VALUES (1)")
+    con.commit()
+    assert (tmp_path / "live.db-wal").stat().st_size > 0
+
+    r = runner.invoke(app, ["db", "restore", str(snap), "--db", str(db)])
+    assert r.exit_code == 0, r.output
+
+    with sqlite3.connect(f"file:{db}.pre-restore?mode=ro", uri=True) as kept:
+        assert kept.execute("SELECT count(*) FROM t").fetchone()[0] == 1
+    con.close()

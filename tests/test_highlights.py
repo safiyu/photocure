@@ -299,3 +299,29 @@ def test_sql_ranking_ignores_taste_for_labelled_photos_like_the_python_score(ses
     for r in rows:
         want = highlight_score(0.5, 0.9, r.rating, r.is_favorite, W)
         assert got[r.id] == pytest.approx(want), r.filename
+
+
+def test_blurry_frame_ranks_below_sharp_one_with_equal_aesthetic(session):
+    sharp = _img(session, 901, aest=0.7, taken=_dt(2021))
+    blurry = _img(session, 902, aest=0.7, taken=_dt(2021))
+    session.add(M.QualityMetric(image_id=sharp.id, quality_score=1.0))
+    session.add(M.QualityMetric(image_id=blurry.id, quality_score=0.1, is_blurry=True))
+    session.commit()
+    top = highlights.top_of_year(session, W, 2021, n=2)
+    assert [i for i, _ in top] == [sharp.id, blurry.id]
+    assert top[0][1] > top[1][1]
+
+
+def test_top_of_year_skips_near_identical_retakes(session):
+    from photocure.db.repository import quantize_embedding
+    import numpy as np
+    same = np.zeros(512, dtype=np.float32); same[0] = 1.0
+    other = np.zeros(512, dtype=np.float32); other[1] = 1.0
+    clones = [_img(session, 910 + k, aest=0.9 - k * 0.01, taken=_dt(2022)) for k in range(5)]
+    distinct = _img(session, 920, aest=0.5, taken=_dt(2022))
+    for img in clones:
+        session.exec(select(SemanticScore).where(SemanticScore.image_id == img.id)).one().embedding = quantize_embedding(same.tolist())
+    session.exec(select(SemanticScore).where(SemanticScore.image_id == distinct.id)).one().embedding = quantize_embedding(other.tolist())
+    session.commit()
+    top = [i for i, _ in highlights.top_of_year(session, W, 2022, n=2)]
+    assert top == [clones[0].id, distinct.id]

@@ -579,3 +579,19 @@ def test_is_valid_face_geometry_rejects_false_positives():
     ])
     assert is_valid_face_geometry(limb_face, 1000, 1000) is False
 
+
+
+def test_profile_face_passes_detection_gate_but_not_embedding_gate():
+    from photocure.inference.face_engine import is_frontal_enough, is_plausible_box
+    # ~65 degree yaw: eyes close together relative to the eye-to-mouth drop, nose beyond the far eye
+    profile = FaceInfo(0.4, 0.3, 0.6, 0.6, confidence=0.9,
+                       landmarks=[(0.47, 0.40), (0.52, 0.40), (0.56, 0.47), (0.48, 0.53), (0.52, 0.53)])
+    assert is_plausible_box(profile, 1000, 1000) is True
+    assert is_frontal_enough(profile, 1000, 1000) is False
+    assert is_valid_face_geometry(profile, 1000, 1000) is False
+
+
+def test_face_info_keeps_unclipped_landmarks():
+    f = FaceInfo(0.0, 0.0, 0.1, 0.1, confidence=0.9, landmarks=[(0.0, 0.0)] * 5,
+                 landmarks_raw=[(-0.02, 0.01)] * 5)
+    assert f.landmarks_raw[0][0] < 0 <= f.landmarks[0][0]

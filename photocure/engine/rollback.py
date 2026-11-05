@@ -79,7 +79,7 @@ class RollbackEngine:
                     if ok:
                         repo.mark_rolled_back(entry)
                         img = repo.get_by_id(entry.image_id) if entry.image_id else None
-                        if img is not None:
+                        if img is not None and entry.companion_of is None:
                             self._restore_row(img, entry)
                         rep.reversed += 1
                     elif note == "already_reverted":
@@ -134,7 +134,7 @@ class RollbackEngine:
             if complete:
                 repo.ledger_commit(entry)
                 img = repo.get_by_id(entry.image_id) if entry.image_id else None
-                if img is not None and op in ("move", "copy"):
+                if img is not None and entry.companion_of is None and op in ("move", "copy"):
                     img.origin_path = img.origin_path or str(source)
                     img.path = str(target)
                     img.target_path = str(target)
@@ -226,7 +226,10 @@ class RollbackEngine:
             self._prune_empty_dirs(target.parent, entry.created_dir)
             return True, "moved back"
 
-        if op in ("copy", "hardlink", "symlink"):
+        if op == "copy":
+            return False, "source gone; the copy is the only remaining file (refusing to remove)"
+
+        if op in ("hardlink", "symlink"):
             self._remove_target(target, op)
             self._prune_empty_dirs(target.parent, entry.created_dir)
             return True, f"removed {op} target"

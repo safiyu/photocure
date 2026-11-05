@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import stat as stat_mod
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -38,21 +39,30 @@ def find_companion_files(source_path: Path) -> list[Path]:
     p = Path(source_path)
     if not p.parent.exists():
         return []
+    stem, name = p.stem.lower(), p.name.lower()
+    wanted = {f"{stem}.mov", f"{stem}.mp4", f"{stem}.xmp", f"{name}.xmp"}
     companions: list[Path] = []
-    parent = p.parent
-    stem = p.stem
-    name = p.name
-
-    for ext in (".mov", ".MOV", ".mp4", ".MP4"):
-        c = parent / f"{stem}{ext}"
-        if c.is_file() and c.resolve() != p.resolve() and c not in companions:
-            companions.append(c)
-
-    for sc in (parent / f"{stem}.xmp", parent / f"{stem}.XMP",
-               parent / f"{name}.xmp", parent / f"{name}.XMP"):
-        if sc.is_file() and sc.resolve() != p.resolve() and sc not in companions:
-            companions.append(sc)
-
+    seen: set[tuple[int, int]] = set()  # (dev, ino): case variants are one file on APFS/HFS+
+    try:
+        own = os.stat(p)
+        seen.add((own.st_dev, own.st_ino))
+    except OSError:
+        pass
+    try:
+        entries = sorted(os.scandir(p.parent), key=lambda e: e.name)
+    except OSError:
+        return []
+    for e in entries:
+        if e.name.lower() not in wanted:
+            continue
+        try:
+            st = e.stat()
+        except OSError:
+            continue
+        if not stat_mod.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) in seen:
+            continue
+        seen.add((st.st_dev, st.st_ino))
+        companions.append(Path(e.path))
     return companions
 
 
@@ -78,6 +88,7 @@ class ExecutionReport:
     in_place: int = 0  # target already is this photo (re-apply no-op)
     unapproved_junk: int = 0  # junk kept out of the trash because deletion was not approved
     marked_left_out: int = 0  # marked for delete but not staged (no trash option or not a move)
+    companion_failures: int = 0  # the photo moved, a .mov/.xmp beside it did not
     # image_id -> final on-disk target actually used (after collision rename).
     resolved_targets: dict = field(default_factory=dict)
     # Dry-run diff: what an apply would cost.
@@ -300,11 +311,11 @@ class ActionEngine:
                                     comp_target = target.parent / f"{target.name}{comp.suffix.lower()}"
                                 else:
                                     comp_target = target.parent / f"{target.stem}{comp.suffix.lower()}"
-                                if os.path.lexists(comp_target):
-                                    comp_target = self._resolve_collision(comp_target, comp_sha)
+                                comp_target = self._resolve_collision(comp_target)
                                 comp_entry = repo.ledger_add(
-                                    txn, action.image_id, str(comp),
+                                    txn, None, str(comp),
                                     str(comp_target), action.operation, comp_sha, comp_size)
+                                comp_entry.companion_of = entry_id
                                 session.commit()
                                 comp_action = PlannedAction(
                                     source=comp,
@@ -320,6 +331,9 @@ class ActionEngine:
                                 session.commit()
                             except Exception as ce:
                                 log.warning("failed to process companion %s: %s", comp, ce)
+                                session.rollback()
+                                rep.companion_failures += 1
+                                rep.errors.append(f"{comp}: {ce}")
                     except Exception as e:
                         # The file already moved: record that so rollback can reverse it.
                         session.rollback()
@@ -443,6 +457,15 @@ class ActionEngine:
         while os.path.lexists(candidate):
             n += 1
             candidate = action.target.with_name(f"{base} ({n}){suffix}")
+        return candidate
+
+    @staticmethod
+    def _resolve_collision(target: Path) -> Path:
+        """Companions never skip: a taken name gets the sequence suffix."""
+        candidate, n = target, 0
+        while os.path.lexists(candidate):
+            n += 1
+            candidate = target.with_name(f"{target.stem} ({n}){target.suffix}")
         return candidate
 
     def _apply(self, action: PlannedAction, target: Path, sha: str = "") -> str:

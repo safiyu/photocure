@@ -177,3 +177,92 @@ def test_space_check_blocks_copy(tmp_path, monkeypatch):
     monkeypatch.setattr(shutil, "disk_usage", lambda p: U(10, 10, 5))
     with pytest.raises(OSError, match="free space"):
         ActionEngine._copy(src, tmp_path / "b.bin")
+
+
+def test_undo_copy_refuses_when_source_is_gone(tmp_path):
+    w = build_world(tmp_path, n=1)
+    acts = _actions(w, w.out, op="copy")
+    rep = ActionEngine(w.cfg, db_path=w.db).execute(acts, transaction_id="TX_COPY")
+    assert rep.executed == 1
+    target = w.out / "People" / sorted(w.paths)[0].name
+    sorted(w.paths)[0].unlink()  # the card was wiped: the copy is the only file left
+
+    rb = RollbackEngine(w.cfg, db_path=w.db).rollback_transaction("TX_COPY")
+
+    assert rb.failures == 1 and rb.reversed == 0
+    assert target.exists()
+    assert "source gone" in rb.errors[0]
+
+
+def _apply_with_companion_row(tmp_path, status):
+    from photocure.db.models import ActionLedger
+    w = build_world(tmp_path, n=1)
+    acts = _actions(w, w.out)
+    rep = ActionEngine(w.cfg, db_path=w.db).execute(acts, transaction_id="TX_COMP")
+    assert rep.executed == 1
+    photo_target = w.out / "People" / sorted(w.paths)[0].name
+    mov_target = photo_target.with_suffix(".mov")
+    mov_target.write_bytes(b"video")
+    with get_session(w.db) as s:
+        parent = PhotoRepository(s).ledger_by_txn("TX_COMP")[0]
+        s.add(ActionLedger(transaction_id="TX_COMP", image_id=w.ids[0], companion_of=parent.id,
+                           source_path=str(sorted(w.paths)[0].with_suffix(".mov")),
+                           target_path=str(mov_target), operation_type="move", status=status))
+        s.commit()
+    return w, photo_target
+
+
+def test_reconcile_pending_companion_does_not_repoint_photo_row(tmp_path):
+    from photocure.engine.rollback import RollbackReport
+    w, photo_target = _apply_with_companion_row(tmp_path, status="pending")
+    engine = RollbackEngine(w.cfg, db_path=w.db)
+    with get_session(w.db) as s:
+        engine._reconcile_pending("TX_COMP", PhotoRepository(s), RollbackReport(transaction_id="TX_COMP"))
+        s.commit()
+
+    assert get_img(w, w.ids[0]).path == str(photo_target)
+    with get_session(w.db) as s:
+        assert {r.status for r in PhotoRepository(s).ledger_by_txn("TX_COMP")} == {"committed"}
+
+
+def test_restore_row_skips_companion_when_photo_reversal_fails(tmp_path):
+    w, photo_target = _apply_with_companion_row(tmp_path, status="committed")
+    photo_target.write_bytes(b"edited since")  # hash mismatch: the photo's own undo must refuse
+
+    rb = RollbackEngine(w.cfg, db_path=w.db).rollback_transaction("TX_COMP")
+
+    assert rb.failures == 1 and rb.reversed == 1
+    assert get_img(w, w.ids[0]).path == str(photo_target)
+
+
+def test_migrate_backfills_companion_of_on_legacy_ledger_rows(tmp_path):
+    import sqlite3
+    from photocure.db.session import init_db
+    db = tmp_path / "old.db"
+    init_db(db)
+    con = sqlite3.connect(db)
+    con.execute("DROP INDEX ix_action_ledger_companion_of")
+    con.execute("ALTER TABLE action_ledger DROP COLUMN companion_of")
+    con.execute("INSERT INTO images (path, relative_path, filename, extension, mime_type, file_size, quick_hash,"
+                " sha256, width, height, orientation, taken_at_source, camera_model, city, region, country_code,"
+                " is_favorite, scan_status, infer_status, is_duplicate, is_best_shot, is_alternate, route_status,"
+                " locked, delete_approved, has_blinks, blink_count, faces_schema_version, created_at, updated_at, stage)"
+                " VALUES ('/lib/a.jpg','','a.jpg','','',0,'','',0,0,1,'','','','','',0,'scanned','pending',0,0,0,"
+                " 'executed',0,0,0,0,0,'2026-01-01','2026-01-01','library')")
+    img_id = con.execute("SELECT id FROM images").fetchone()[0]
+    for src, dst in (("/src/a.jpg", "/lib/a.jpg"), ("/src/a.MOV", "/lib/a.mov")):
+        con.execute("INSERT INTO action_ledger (transaction_id, image_id, source_path, target_path, operation_type,"
+                    " created_dir, prev_relative_path, prev_stage, prev_scan_status, prev_route_status,"
+                    " prev_delete_approved, sha256, file_size, actual_operation, status, created_at)"
+                    " VALUES ('TX_OLD', ?, ?, ?, 'move', '', '', '', '', '', 0, '', 0, 'move', 'committed', '2026-01-01')",
+                    (img_id, src, dst))
+    con.commit()
+    con.close()
+
+    init_db(db)  # migrate() adds companion_of and backfills
+
+    con = sqlite3.connect(db)
+    rows = con.execute("SELECT source_path, image_id, companion_of FROM action_ledger ORDER BY id").fetchall()
+    photo, mov = rows
+    assert photo[1] == img_id and photo[2] is None
+    assert mov[1] is None and mov[2] == con.execute("SELECT id FROM action_ledger WHERE source_path='/src/a.jpg'").fetchone()[0]

@@ -15,7 +15,7 @@ from .db.session import get_session
 from .engine.action_engine import ActionEngine
 from .engine.locks import LEDGER_WRITING
 from .library import library_target, require_library_root, trash_dir
-from .library_actions import _category_enum, _effective_category, _move_sidecar
+from .library_actions import _category_enum, _effective_category
 from .people_actions import attach_faces_to_library
 from .rules.organizer import PlannedAction
 
@@ -77,7 +77,6 @@ def restore(dbp: Path, cfg: CuratorConfig, ids: list[int], *, cancel_check: Call
                 rec.scan_status = "scanned"
                 rec.delete_approved = False
                 attach_faces_to_library(s, rec.id)
-                _move_sidecar(a.source, Path(final))
                 restored += 1
                 _tick(on_progress, n, len(actions), rec.filename)
             PhotoRepository(s).prune_bursts()
@@ -124,7 +123,6 @@ def return_to_origin(dbp: Path, cfg: CuratorConfig, ids: list[int] | None, *,
                 rec.stage, rec.route_status, rec.scan_status = STAGE_NEW, "unrouted", "scanned"
                 rec.infer_status, rec.origin_path, rec.target_path = "pending", None, None
                 rec.delete_approved = False
-                _move_sidecar(a.source, Path(rep.resolved_targets[a.image_id]))
                 returned += 1
                 _tick(on_progress, n, len(actions), rec.filename)
             s.commit()
@@ -251,14 +249,11 @@ def finalize_deletes(dbp: Path, cfg: CuratorConfig, *,
             col(M.ImageRecord.route_status).not_in(["purged", "trashed"]),
         )
         if ids is not None and len(ids) > 0:
-            has_marked = any(s.exec(select(M.ImageRecord.id).where(
-                col(M.ImageRecord.id).in_(list(ids)),
-                M.ImageRecord.delete_approved == True,  # noqa: E712
-            )).all())
-            if has_marked:
-                q = q.where(col(M.ImageRecord.id).in_(list(ids)), M.ImageRecord.delete_approved == True)  # noqa: E712
-            else:
-                q = q.where(col(M.ImageRecord.id).in_(list(ids)))
+            # A selected photo is approved by the selection itself; the engine routes only marked rows to .trash.
+            for rec in s.exec(select(M.ImageRecord).where(col(M.ImageRecord.id).in_(list(ids)))).all():
+                rec.delete_approved = True
+            s.commit()
+            q = q.where(col(M.ImageRecord.id).in_(list(ids)))
         else:
             q = q.where(M.ImageRecord.delete_approved == True)  # noqa: E712
             if stage and stage != "all":
@@ -312,15 +307,11 @@ def finalize_deletes(dbp: Path, cfg: CuratorConfig, *,
 
     txn = ""
     trashed_count = 0
+    rep = None
     if actions:
-        engine = ActionEngine(cfg, db_path=dbp)
-        rep = engine.execute(actions, organize_root=root, trash=True)
-        if rep.failures:
-            raise OSError(f"failed to move photos to trash: {rep.errors[0]}")
+        rep = ActionEngine(cfg, db_path=dbp).execute(actions, organize_root=root, trash=True)
         txn = rep.transaction_id
-        for a in actions:
-            dest = Path(rep.resolved_targets.get(a.image_id, a.target))
-            _move_sidecar(a.source, dest)
+        actions = [a for a in actions if a.image_id in rep.resolved_targets]
 
     with get_session(dbp) as s:
         for r_miss in missing_sources:
@@ -348,5 +339,7 @@ def finalize_deletes(dbp: Path, cfg: CuratorConfig, *,
         PhotoRepository(s).prune_bursts()
         s.commit()
 
+    if rep is not None and rep.failures:
+        raise OSError(f"failed to move photos to trash: {rep.errors[0]}")
     return {"ok": True, "trashed": trashed_count, "transaction_id": txn}
 

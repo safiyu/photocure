@@ -1,14 +1,30 @@
 """Pure face-clustering and backfill-remap matching: no DB, no OpenCV."""
 from __future__ import annotations
 
+import numpy as np
+
 from photocure.clustering.face_identity import (
     ClusterCentroid,
     NewFace,
     OldFace,
     assign_cluster,
+    effective_threshold,
     remap_person_ids,
     update_centroid,
 )
+
+
+def unit(seed: int, dim: int = 512) -> list[float]:
+    v = np.random.default_rng(seed).standard_normal(dim)
+    return (v / np.linalg.norm(v)).tolist()
+
+
+def mix(a: list[float], b: list[float], cos: float) -> list[float]:
+    """A unit vector with cosine exactly ``cos`` to ``a``, leaning towards ``b``."""
+    a_, b_ = np.asarray(a), np.asarray(b)
+    perp = b_ - float(a_ @ b_) * a_
+    perp /= np.linalg.norm(perp)
+    return (cos * a_ + np.sqrt(1.0 - cos * cos) * perp).tolist()
 
 
 def test_assign_cluster_picks_the_closest_centroid_above_threshold():
@@ -109,3 +125,47 @@ def test_mismatched_embedding_dimensions_handled_safely():
     assert len(updated) == 512
 
 
+
+
+def test_threshold_above_035_is_honoured_for_512d():
+    c = ClusterCentroid(1, unit(1), 3)
+    face = mix(unit(1), unit(2), cos=0.45)
+    assert assign_cluster(face, [c], threshold=0.50) is None
+    assert assign_cluster(face, [c], threshold=0.40) == 1
+
+
+def test_effective_threshold_defaults_by_dimension():
+    assert effective_threshold(None, 512) == 0.35
+    assert effective_threshold(None, 128) == 0.64
+    assert effective_threshold(0.55, 512) == 0.55
+    assert effective_threshold(0.30, 512) == 0.30
+
+
+def test_outlier_never_becomes_exemplar():
+    from photocure.clustering.face_identity import update_exemplars
+    cen = unit(1)
+    far = mix(unit(1), unit(9), cos=0.20)
+    assert update_exemplars([cen], far, centroid=cen) == [cen]
+
+
+def test_drift_is_blocked_by_exemplar_rule():
+    from photocure.clustering.face_identity import update_exemplars
+    a = unit(1)
+    b = mix(a, unit(2), cos=0.36)          # barely joins a 10-face cluster around a
+    c = mix(b, unit(3), cos=0.50)          # close to b only; far from a
+    assert float(np.dot(a, c)) < 0.30
+    centroid = update_centroid(a, 10, b)
+    exemplars = update_exemplars([a], b, centroid=centroid)
+    cluster = ClusterCentroid(1, centroid, 11, exemplars=exemplars)
+    assert assign_cluster(c, [cluster], threshold=0.35) is None
+
+
+def test_yearly_mean_is_a_running_mean():
+    from photocure.clustering.face_identity import update_temporal_medoid
+    e1, e2 = unit(1), unit(2)
+    meds, counts = update_temporal_medoid({}, "2020", e1, {})
+    meds, counts = update_temporal_medoid(meds, "2020", e2, counts)
+    assert counts == {"2020": 2}
+    expect = (np.asarray(e1) + np.asarray(e2)) / 2
+    expect /= np.linalg.norm(expect)
+    assert np.allclose(meds["2020"], expect, atol=1e-6)

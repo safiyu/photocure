@@ -73,7 +73,7 @@ class ImageRecord(SQLModel, table=True):
     # "new", "library" or "trash"; the single source of truth for which section a photo is in.
     stage: str = Field(default="new", index=True)
     # Where the file was first scanned, so Return to origin knows where to put it back.
-    origin_path: str | None = Field(default=None)
+    origin_path: str | None = Field(default=None, index=True)
 
     # Scan state machine.
     scan_status: str = Field(default="scanned", index=True)
@@ -81,7 +81,7 @@ class ImageRecord(SQLModel, table=True):
     infer_status: str = Field(default="pending", index=True)
     # Exact duplicate flag (sha256 seen before).
     is_duplicate: bool = Field(default=False, index=True)
-    duplicate_of: int | None = Field(default=None, foreign_key="images.id")
+    duplicate_of: int | None = Field(default=None, foreign_key="images.id", index=True)
 
     # Clustering.
     burst_id: int | None = Field(default=None, index=True)
@@ -99,7 +99,7 @@ class ImageRecord(SQLModel, table=True):
 
     # Perceptual hash (hex) and the image it near-duplicates.
     phash: str | None = Field(default=None, index=True)
-    near_dup_of: int | None = Field(default=None)
+    near_dup_of: int | None = Field(default=None, index=True)
     # Minutes east of UTC for the camera-local taken_at, when known.
     tz_offset_minutes: int | None = Field(default=None)
     # Star rating: 1-5 stars, -1 rejected, None or 0 unrated (from XMP sidecars or set in the UI).
@@ -107,7 +107,7 @@ class ImageRecord(SQLModel, table=True):
     # Human-locked rows are never re-routed by automatic passes.
     locked: bool = Field(default=False)
     # Junk is only staged for deletion (trash) when the user approved it, one by one or in bulk.
-    delete_approved: bool = Field(default=False)
+    delete_approved: bool = Field(default=False, index=True)
     event_id: int | None = Field(default=None, index=True)
 
     # Blink flags (set by photocure.clustering.blinks); faces_schema_version tells which
@@ -259,6 +259,8 @@ class ActionLedger(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     transaction_id: str = Field(index=True)
     image_id: int | None = Field(default=None, foreign_key="images.id", index=True)
+    # Ledger id of the photo's own row when this row moved its .mov/.xmp companion.
+    companion_of: int | None = Field(default=None, index=True)
     source_path: str
     target_path: str
     operation_type: str = Field(default="move")  # move | copy | hardlink | symlink
@@ -295,6 +297,8 @@ class PersonCluster(SQLModel, table=True):
     stage: str = Field(default="library", index=True)
     # Running-mean embedding (same JSON/float16 encoding as FaceDetection.embedding_json).
     centroid_json: str | None = Field(default=None)
+    # Per-year running means: {"2019": {"n": 12, "v": <quantized embedding>}, ...}
+    yearly_json: str | None = Field(default=None)
 
 
 class EventGroup(SQLModel, table=True):

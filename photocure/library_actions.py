@@ -1,7 +1,6 @@
 """Single-photo moves inside the library, each recorded in the ledger so undo keeps working."""
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from sqlmodel import select
@@ -19,25 +18,6 @@ from .rules.taxonomy import CategoryType, get_taxonomy
 
 def _category_enum(cfg: CuratorConfig, category: str) -> CategoryType:
     return get_taxonomy(cfg).category_of(category) or CategoryType.UNKNOWN
-
-
-def _move_sidecar(src: Path, dst: Path) -> None:
-    # Standard XMP sidecars
-    for ext in (".xmp", ".XMP"):
-        xmp = src.with_suffix(ext)
-        if xmp.exists():
-            try:
-                shutil.move(xmp, dst.with_suffix(ext.lower()))
-            except OSError:
-                pass
-    # Live Photo companion video files (.mov, .mp4)
-    for ext in (".mov", ".MOV", ".mp4", ".MP4"):
-        vid = src.with_suffix(ext)
-        if vid.exists() and vid.resolve() != src.resolve():
-            try:
-                shutil.move(vid, dst.with_suffix(ext.lower()))
-            except OSError:
-                pass
 
 
 def _effective_category(rec: M.ImageRecord) -> str:
@@ -65,7 +45,6 @@ def move_to_category(dbp: Path, cfg: CuratorConfig, image_id: int, category: str
     if rep.failures:
         raise OSError(rep.errors[0])
     final = Path(rep.resolved_targets.get(image_id, target))
-    _move_sidecar(src, final)
     return {"ok": True, "moved": True, "transaction_id": rep.transaction_id, "path": str(final)}
 
 
@@ -94,7 +73,6 @@ def trash_image(dbp: Path, cfg: CuratorConfig, image_id: int) -> dict:
         if rep.failures:
             raise OSError(rep.errors[0])
         txn = rep.transaction_id
-        _move_sidecar(src, Path(rep.resolved_targets.get(image_id, target)))
         with get_session(dbp) as s:  # the mark was only set to route this move; undoing it must unmark
             for e in s.exec(select(M.ActionLedger).where(M.ActionLedger.transaction_id == txn)).all():
                 e.prev_delete_approved = False
@@ -169,9 +147,7 @@ def refile_library(dbp: Path, cfg: CuratorConfig, *, root: Path | None = None,
         txn = rep.transaction_id
         moved, failed = rep.executed, rep.failures
         for a in actions:
-            if a.image_id in rep.resolved_targets:
-                _move_sidecar(a.source, Path(rep.resolved_targets[a.image_id]))
-            else:
+            if a.image_id not in rep.resolved_targets:
                 changes.pop(a.image_id, None)  # the file stayed, so its category must too
     with get_session(dbp) as s:
         for iid, (cat, sub) in changes.items():

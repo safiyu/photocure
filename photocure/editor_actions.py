@@ -651,11 +651,37 @@ def _get_migan_session():
     try:
         import onnxruntime as ort
         ort.set_default_logger_severity(3)
-        _MIGAN_SESSION = ort.InferenceSession(str(p), providers=["CPUExecutionProvider"])
+        sess = ort.InferenceSession(str(p), providers=["CPUExecutionProvider"])
+        if not _migan_signature_ok(sess):
+            log.warning("MI-GAN model at %s does not take (image[1,3,H,W], mask[1,1,H,W]); ignoring it", p)
+            return None
+        _MIGAN_SESSION = sess
         return _MIGAN_SESSION
     except Exception as exc:
         log.warning("Failed to initialize MI-GAN inpaint session: %s", exc)
         return None
+
+
+def _migan_signature_ok(sess) -> bool:
+    inputs = sess.get_inputs()
+    if len(inputs) < 2:
+        return False
+    def channels(i) -> int | None:
+        shape = list(getattr(i, "shape", []) or [])
+        return shape[1] if len(shape) == 4 and isinstance(shape[1], int) else None
+    return channels(inputs[0]) in (3, None) and channels(inputs[1]) in (1, None)
+
+
+def _inpaint_window(mask_bin: np.ndarray, h: int, w: int, pad: int = 32, min_side: int = 512) -> tuple[int, int, int, int]:
+    """Square crop (y0, y1, x0, x1) around the dilated mask, at least ``min_side``, clamped to the image."""
+    ys, xs = np.nonzero(mask_bin)
+    cy, cx = (int(ys.mean()), int(xs.mean())) if len(ys) else (h // 2, w // 2)
+    span = max(int(ys.max() - ys.min()) if len(ys) else 0, int(xs.max() - xs.min()) if len(xs) else 0)
+    side = min(max(span + 2 * pad, min_side), max(h, w))
+    half = side // 2
+    y0 = int(np.clip(cy - half, 0, max(0, h - side)))
+    x0 = int(np.clip(cx - half, 0, max(0, w - side)))
+    return y0, min(h, y0 + side), x0, min(w, x0 + side)
 
 
 def inpaint_image(image_bytes: bytes, mask_bytes: bytes) -> tuple[bytes, int, int]:
@@ -686,25 +712,24 @@ def inpaint_image(image_bytes: bytes, mask_bytes: bytes) -> tuple[bytes, int, in
     inpainted = None
     if sess is not None:
         try:
-            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            rgb_512 = cv2.resize(rgb, (512, 512), interpolation=cv2.INTER_AREA)
-            mask_512 = cv2.resize(mask_bin, (512, 512), interpolation=cv2.INTER_NEAREST)
-
+            # Work on a window around the hole so a 12 MP photo keeps its detail outside and inside it.
+            dilated = cv2.dilate(mask_bin, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+            y0, y1, x0, x1 = _inpaint_window(dilated, h, w)
+            win = bgr[y0:y1, x0:x1]
+            win_mask = dilated[y0:y1, x0:x1]
+            wh, ww = win.shape[:2]
+            rgb_512 = cv2.resize(cv2.cvtColor(win, cv2.COLOR_BGR2RGB), (512, 512), interpolation=cv2.INTER_AREA)
+            mask_512 = cv2.resize(win_mask, (512, 512), interpolation=cv2.INTER_NEAREST)
             img_t = ((rgb_512.astype(np.float32) / 127.5) - 1.0).transpose(2, 0, 1)[None, ...]
             mask_t = (mask_512.astype(np.float32) / 255.0)[None, None, ...]
-
             input_names = [i.name for i in sess.get_inputs()]
-            feed = {input_names[0]: img_t}
-            if len(input_names) > 1:
-                feed[input_names[1]] = mask_t
-
-            preds = sess.run(None, feed)[0]
+            preds = sess.run(None, {input_names[0]: img_t, input_names[1]: mask_t})[0]
             out_512 = ((preds[0].transpose(1, 2, 0) + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
-            out_rgb = cv2.cvtColor(out_512, cv2.COLOR_RGB2BGR)
-            out_resized = cv2.resize(out_rgb, (w, h), interpolation=cv2.INTER_CUBIC)
-
-            feather = cv2.GaussianBlur(mask_bin.astype(np.float32) / 255.0, (7, 7), 2.0)[:, :, None]
-            inpainted = (out_resized.astype(np.float32) * feather + bgr.astype(np.float32) * (1.0 - feather)).clip(0, 255).astype(np.uint8)
+            out_win = cv2.resize(cv2.cvtColor(out_512, cv2.COLOR_RGB2BGR), (ww, wh), interpolation=cv2.INTER_CUBIC)
+            feather = cv2.GaussianBlur(win_mask.astype(np.float32) / 255.0, (15, 15), 4.0)[:, :, None]
+            blended = (out_win.astype(np.float32) * feather + win.astype(np.float32) * (1.0 - feather))
+            inpainted = bgr.copy()
+            inpainted[y0:y1, x0:x1] = blended.clip(0, 255).astype(np.uint8)
         except Exception as exc:
             log.warning("MI-GAN inference failed (%s); using cv2.inpaint fallback", exc)
             inpainted = None
@@ -725,7 +750,6 @@ def _get_depth_session():
         return _DEPTH_SESSION
     candidates = [
         Path(__file__).resolve().parent / "models" / "depth_anything_v2_vits.onnx",
-        Path(__file__).resolve().parent / "models" / "depth_anything.onnx",
         Path.home() / ".cache" / "photocure" / "depth_anything_v2_vits.onnx",
     ]
     p = next((c for c in candidates if c.is_file()), None)
@@ -741,6 +765,14 @@ def _get_depth_session():
         return None
 
 
+def _depth_input_size(h: int, w: int, short: int = 518, patch: int = 14) -> tuple[int, int]:
+    """Short side ``short``, both sides multiples of the ViT patch, aspect kept (Depth Anything convention)."""
+    scale = short / max(1, min(h, w))
+    rh = max(patch, int(round(h * scale / patch)) * patch)
+    rw = max(patch, int(round(w * scale / patch)) * patch)
+    return rh, rw
+
+
 def estimate_depth_map(bgr: np.ndarray) -> np.ndarray:
     """Estimate a 0.0 (far background) to 1.0 (near subject) float32 depth map for an image.
 
@@ -751,8 +783,7 @@ def estimate_depth_map(bgr: np.ndarray) -> np.ndarray:
     if sess is not None:
         try:
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            in_h = 518
-            in_w = 518
+            in_h, in_w = _depth_input_size(h, w)
             rgb_resized = cv2.resize(rgb, (in_w, in_h), interpolation=cv2.INTER_CUBIC)
             mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
             std = np.array([0.229, 0.224, 0.225], dtype=np.float32)

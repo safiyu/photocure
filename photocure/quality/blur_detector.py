@@ -125,10 +125,10 @@ class BlurDetector:
 
         # Check directional motion blur (distinguishes motion blur from high-ISO noise)
         aniso = compute_motion_anisotropy(bgr)
-        if aniso > 0.70 and lap_var < hi * 1.5:
+        if aniso > float(getattr(self.t, "motion_anisotropy_min", 0.70)) and lap_var < hi * 1.5:
             if retained is None:
                 retained = compute_blur_retained(bgr)
-            if retained > 0.48:
+            if retained > float(getattr(self.t, "motion_retained_min", 0.48)):
                 blurry = True
                 norm = min(norm, 0.25)
 

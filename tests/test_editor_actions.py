@@ -342,3 +342,54 @@ def test_inpaint_and_bokeh_actions_and_endpoints(env):
     j_bok = r_bok.json()
     assert j_bok["ok"] is True
     assert j_bok["image"].startswith("data:image/jpeg;base64,")
+
+
+class _FakeInput:
+    def __init__(self, name, shape):
+        self.name, self.shape = name, shape
+
+
+class _FakeMigan:
+    """Returns a flat grey image: pixels it touches become (128,128,128)."""
+    def get_inputs(self):
+        return [_FakeInput("image", [1, 3, 512, 512]), _FakeInput("mask", [1, 1, 512, 512])]
+
+    def run(self, _outs, feed):
+        return [np.zeros((1, 3, 512, 512), np.float32)]
+
+
+def test_inpaint_only_changes_pixels_near_mask(monkeypatch):
+    import cv2
+    from photocure import editor_actions as ea
+    monkeypatch.setattr(ea, "_MIGAN_SESSION", _FakeMigan())
+    # a smooth bright gradient: JPEG keeps it almost exactly, and it is far from the fake model's grey
+    ramp = (200 + (np.arange(1200, dtype=np.float32) / 1200.0) * 55)[:, None]
+    bgr = np.repeat(np.repeat(ramp, 1600, axis=1)[:, :, None], 3, axis=2).astype(np.uint8)
+    mask = np.zeros((1200, 1600), np.uint8)
+    mask[500:560, 700:760] = 255
+    ok, img_buf = cv2.imencode(".png", bgr)
+    ok2, mask_buf = cv2.imencode(".png", mask)
+    out, w, h = ea.inpaint_image(img_buf.tobytes(), mask_buf.tobytes())
+    result = cv2.imdecode(np.frombuffer(out, np.uint8), cv2.IMREAD_COLOR)
+    assert (w, h) == (1600, 1200)
+    far = np.abs(result[:300, :300].astype(int) - bgr[:300, :300].astype(int)).mean()
+    near = np.abs(result[510:550, 710:750].astype(int) - bgr[510:550, 710:750].astype(int)).mean()
+    assert far < 3.0 and near > 20.0  # JPEG noise only far away; real change inside the hole
+
+
+def test_depth_input_keeps_aspect():
+    from photocure.editor_actions import _depth_input_size
+    h, w = _depth_input_size(2000, 3000)
+    assert h == 518 and w % 14 == 0 and abs(w / h - 1.5) < 0.03
+    assert _depth_input_size(3000, 2000) == (w, h)
+
+
+def test_migan_session_with_wrong_signature_is_rejected():
+    from photocure.editor_actions import _migan_signature_ok
+
+    class OneInput:
+        def get_inputs(self):
+            return [_FakeInput("x", [1, 4, 512, 512])]
+
+    assert _migan_signature_ok(OneInput()) is False
+    assert _migan_signature_ok(_FakeMigan()) is True

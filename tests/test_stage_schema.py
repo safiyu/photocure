@@ -36,6 +36,7 @@ def test_migrate_backfills_stage_from_route_status(tmp_path):
     init_db(db)
     con = sqlite3.connect(db)
     con.execute("DROP INDEX ix_images_stage")
+    con.execute("DROP INDEX ix_images_origin_path")
     con.execute("DROP INDEX ix_person_clusters_stage")
     con.execute("ALTER TABLE images DROP COLUMN stage")
     con.execute("ALTER TABLE images DROP COLUMN origin_path")
@@ -89,3 +90,10 @@ def test_stats_counts_per_stage(repo, session):
     session.add(_img("/p/gone.jpg", stage="library", scan_status="missing"))
     session.flush()
     assert repo.stats()["stages"] == {"new": 2, "library": 1, "trash": 1}
+
+
+def test_hot_columns_are_indexed(session):
+    from sqlalchemy import inspect
+    names = {i["name"] for i in inspect(session.get_bind()).get_indexes("images")}
+    assert {"ix_images_delete_approved", "ix_images_duplicate_of",
+            "ix_images_near_dup_of", "ix_images_origin_path"} <= names

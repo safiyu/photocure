@@ -80,6 +80,16 @@ UTILITY_VALUES = tuple(c.value for c in CategoryType if c.is_utility)
 
 # Only one long-running task at a time across the whole process.
 _BUSY = threading.Lock()
+_LOG_CAP, _LOG_HEAD = 5000, 2000
+
+
+def jlog(job: dict, msg: str, level: str = "") -> None:
+    log_ = job["log"]
+    log_.append({"t": time.time(), "level": level, "msg": msg})
+    if len(log_) > _LOG_CAP:  # a 100k-file apply must not keep 100k lines per job in memory
+        dropped = len(log_) - _LOG_CAP + 1
+        del log_[_LOG_HEAD:_LOG_HEAD + dropped]
+        log_.insert(_LOG_HEAD, {"t": time.time(), "level": "", "msg": f"... {dropped} log lines truncated ..."})
 
 
 def _pid_file(port: int) -> Path:
@@ -164,6 +174,28 @@ class EventClusterReq(BaseModel):
 
 class RenameReq(BaseModel):
     name: str
+
+
+class ResetReq(BaseModel):
+    stage: Literal["new", "all"] = "all"
+
+
+class CurateBudgetReq(BaseModel):
+    target_count: int | None = Field(None, ge=1)
+    target_percent: float | None = Field(None, gt=0, le=100)
+    event_id: int | None = None
+    stage: StageFilter = "new"
+    action: Literal["preview", "stage_delete", "star_keepers"] = "preview"
+
+
+class FixDatesReq(BaseModel):
+    ids: list[int] | None = Field(None, max_length=50000)
+    shift_hours: float = 0
+    shift_minutes: float = 0
+    shift_seconds: float = 0
+    camera_model: str | None = None
+    ingest_takeout: bool = False
+    write_sidecar: bool = True
 
 
 class FinalizeReq(BaseModel):
@@ -707,8 +739,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
             return JSONResponse({"detail": "invalid host header"}, status_code=400)
         path = request.url.path
         if path not in _OPEN and not path.startswith("/static/"):
-            token = request.headers.get("x-pcur-token") or request.cookies.get(COOKIE_NAME)
-            if not app.state.auth_mgr.validate(token):
+            header = request.headers.get("x-pcur-token")
+            mgr = app.state.auth_mgr
+            ok = mgr.validate(header) if header else mgr.validate_session(request.cookies.get(COOKIE_NAME))
+            if not ok:
                 return JSONResponse({"detail": "missing or invalid token"}, status_code=401)
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
             origin = request.headers.get("origin") or request.headers.get("referer")
@@ -724,19 +758,18 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     auth: list = []  # enforced app-wide by the guard middleware
 
+    def busy_error() -> HTTPException:
+        label = progress_mgr.get().get("task") or "background task"
+        return HTTPException(409, f"Another task is already running ({label}). Please wait for it to finish.")
+
     @contextmanager
     def exclusive(timeout: float = 3.0):
         if not _BUSY.acquire(blocking=True, timeout=timeout):
-            cur = progress_mgr.get()
-            label = cur.get("label") or cur.get("title") or "background task"
-            raise HTTPException(409, f"Another task is already running ({label}). Please wait for it to finish.")
+            raise busy_error()
         try:
             yield
         finally:
             _BUSY.release()
-
-    def jlog(job: dict, msg: str, level: str = ""):
-        job["log"].append({"t": time.time(), "level": level, "msg": msg})
 
     def spawn(kind: str, fn, cancellable: bool = True) -> dict:
         """Run fn(job) in a thread; the caller already holds _BUSY, released here."""
@@ -890,8 +923,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
         resp = Response(status_code=204)
         secure = (request.url.scheme == "https"
                   or request.headers.get("x-forwarded-proto", "").lower() == "https")
-        resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="strict", path="/",
+        resp.set_cookie(COOKIE_NAME, mgr.new_session(), httponly=True, samesite="strict", path="/",
                         secure=secure, max_age=COOKIE_MAX_AGE)
+        return resp
+
+    @app.post("/auth/logout")
+    def logout(request: Request):
+        app.state.auth_mgr.revoke_session(request.cookies.get(COOKIE_NAME))
+        resp = Response(status_code=204)
+        resp.delete_cookie(COOKIE_NAME, path="/")
         return resp
 
     @app.get("/api/config")
@@ -1121,6 +1161,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
         def apply(stmt):
             if need_sem:
                 stmt = stmt.join(M.SemanticScore, M.SemanticScore.image_id == I.id)
+            if highlights:
+                stmt = stmt.outerjoin(M.QualityMetric, M.QualityMetric.image_id == I.id)
             for c in conds:
                 stmt = stmt.where(c)
             return stmt
@@ -1129,7 +1171,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             total = s.exec(apply(select(func.count()).select_from(I))).one()
             if highlights:
                 from ..highlights import highlight_expr
-                expr = highlight_expr(hl_weights())
+                expr = highlight_expr(hl_weights(), with_quality=True)
                 ranked = s.exec(apply(select(I.id, expr)).order_by(expr.desc(), I.id)
                                 .offset(offset).limit(limit)).all()
                 ids = [i for i, _ in ranked]
@@ -1265,7 +1307,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if not app.state.cfg.write_sidecars:
             raise HTTPException(400, "Sidecar writing is turned off in the settings.")
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             verb = "Removing" if body.remove else "Writing"
@@ -1375,25 +1417,19 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "Content-Disposition": f'attachment; filename="highlights-{year}.html"'})
 
     @app.post("/api/curate/budget", dependencies=auth)
-    def curate_budget(payload: dict = Body(default={})):
+    def curate_budget(payload: CurateBudgetReq | None = Body(None)):
         from ..curate_budget import budget_curate
-        target_count = payload.get("target_count")
-        target_percent = payload.get("target_percent")
-        event_id = payload.get("event_id")
-        stage = payload.get("stage", "new")
-        action = payload.get("action", "preview")
-
+        p = payload or CurateBudgetReq()
         with get_session(dbp) as s:
-            res = budget_curate(
+            return budget_curate(
                 session=s,
                 cfg=app.state.cfg,
-                target_count=int(target_count) if target_count is not None else None,
-                target_percent=float(target_percent) if target_percent is not None else None,
-                event_id=int(event_id) if event_id is not None else None,
-                stage=stage,
-                action=action,
+                target_count=p.target_count,
+                target_percent=p.target_percent,
+                event_id=p.event_id,
+                stage=p.stage,
+                action=p.action,
             )
-            return res
 
     @app.get("/api/facets")
     def facets(stage: StageFilter = Query("all")):
@@ -1493,24 +1529,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
             }
 
     @app.post("/api/images/fix-dates", dependencies=auth)
-    def post_fix_dates(payload: dict = Body(default={})):
+    def post_fix_dates(payload: FixDatesReq | None = Body(None)):
         from ..scanner.exif_reader import read_takeout_sidecar
         from ..scanner.xmp import update_xmp_sidecar
-        ids = payload.get("ids")
-        shift_hours = payload.get("shift_hours")
-        shift_minutes = payload.get("shift_minutes")
-        shift_seconds = payload.get("shift_seconds")
-        camera_model = payload.get("camera_model")
-        ingest_takeout = bool(payload.get("ingest_takeout", False))
-        write_sidecar = payload.get("write_sidecar", True)
-
-        total_offset_sec = 0.0
-        if shift_hours is not None:
-            total_offset_sec += float(shift_hours) * 3600.0
-        if shift_minutes is not None:
-            total_offset_sec += float(shift_minutes) * 60.0
-        if shift_seconds is not None:
-            total_offset_sec += float(shift_seconds)
+        p = payload or FixDatesReq()
+        ids, camera_model = p.ids, p.camera_model
+        ingest_takeout, write_sidecar = p.ingest_takeout, p.write_sidecar
+        total_offset_sec = p.shift_hours * 3600.0 + p.shift_minutes * 60.0 + p.shift_seconds
 
         with get_session(dbp) as s:
             query = select(M.ImageRecord).where(M.ImageRecord.scan_status != "missing")
@@ -1919,18 +1944,24 @@ def create_app(db_path: str | None = None) -> FastAPI:
         focus_x = 0.5
         focus_y = 0.5
         aperture = 0.5
+
+        def unit_float(value, default: float) -> float:
+            if value is None:
+                return default
+            try:
+                return min(1.0, max(0.0, float(value)))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "focus_x, focus_y and aperture must be numbers between 0 and 1")
+
         if content_type.startswith("multipart/form-data"):
             form = await request.form()
             file_item = form.get("file")
             if not file_item:
                 raise HTTPException(400, "Missing 'file' in form data")
             image_bytes = await file_item.read()
-            if "focus_x" in form:
-                focus_x = float(form.get("focus_x"))
-            if "focus_y" in form:
-                focus_y = float(form.get("focus_y"))
-            if "aperture" in form:
-                aperture = float(form.get("aperture"))
+            focus_x = unit_float(form.get("focus_x"), 0.5)
+            focus_y = unit_float(form.get("focus_y"), 0.5)
+            aperture = unit_float(form.get("aperture"), 0.5)
         else:
             try:
                 body = await request.json()
@@ -1943,9 +1974,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 image_bytes = base64.b64decode(data_str)
             except Exception:
                 raise HTTPException(400, "Invalid base64 image data")
-            focus_x = float(body.get("focus_x", 0.5))
-            focus_y = float(body.get("focus_y", 0.5))
-            aperture = float(body.get("aperture", 0.5))
+            if not isinstance(body, dict):
+                raise HTTPException(400, "Invalid JSON body")
+            focus_x = unit_float(body.get("focus_x"), 0.5)
+            focus_y = unit_float(body.get("focus_y"), 0.5)
+            aperture = unit_float(body.get("aperture"), 0.5)
 
         try:
             jpg_bytes, w, h = apply_depth_bokeh(
@@ -2061,9 +2094,9 @@ def create_app(db_path: str | None = None) -> FastAPI:
             raise HTTPException(e.status, str(e)) from None
 
     @app.post("/api/people/recluster", dependencies=auth)
-    def recluster_people_endpoint(threshold: float = Query(0.64, ge=0.0, le=1.0),
+    def recluster_people_endpoint(threshold: float | None = Query(None, ge=0.0, le=1.0),
                                   stage: Literal["new", "trash"] = Query("new")):
-        """Recluster all detected faces with strict identity threshold (default 0.64)."""
+        """Recluster all detected faces; the default threshold follows the face model in use."""
         from ..people_actions import recluster_people
         return recluster_people(dbp, threshold=threshold, stage=stage)
 
@@ -2228,7 +2261,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         from ..quality.image_loader import load_image
         c = run_cfg(None)
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             with get_session(dbp) as s:
@@ -2281,7 +2314,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             raise HTTPException(409, "scan these photos for sensitive details first, "
                                      "or choose to export without that check")
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             with get_session(dbp) as s:
@@ -2526,8 +2559,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 M.ImageRecord.route_status.not_in(["trashed", "purged"]) if stage != "trash"
                 else M.ImageRecord.route_status != "purged").group_by(M.ImageRecord.burst_id)).all())
             total_marked = 0
-            for b in repo.all_bursts():
-                best = repo.get_by_id(b.best_shot_id) if b.best_shot_id else None
+            all_b = repo.all_bursts()
+            best_ids = [b.best_shot_id for b in all_b if b.best_shot_id]
+            names = dict(s.exec(select(M.ImageRecord.id, M.ImageRecord.filename).where(
+                col(M.ImageRecord.id).in_(best_ids))).all()) if best_ids else {}
+            for b in all_b:
                 cnt = int(counts.get(b.id, 0))
                 if cnt < (1 if stage == "trash" else 2):  # a lone frame is not a burst
                     continue
@@ -2538,7 +2574,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     "id": b.id, "name": b.name, "image_count": b_count,
                     "marked_delete_count": m_count,
                     "best_shot_id": b.best_shot_id,
-                    "best_shot": best.filename if best else None,
+                    "best_shot": names.get(b.best_shot_id),
                     "start_time": b.start_time.isoformat() if b.start_time else None,
                 })
             return {"count": len(out), "items": out, "total_marked_for_delete": total_marked}
@@ -2657,7 +2693,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         partial targets are removed and marked failed (sources are never touched)."""
         from ..engine.rollback import RollbackEngine, RollbackReport
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
         try:
             rep = RollbackReport(transaction_id=tid)
             with _LEDGER_WRITING, get_session(dbp) as s:
@@ -2670,7 +2706,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def rollback_orphaned(tid: str):
         from ..engine.rollback import RollbackEngine
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
         try:
             rep = RollbackEngine(req_cfg(), dbp).rollback_transaction(tid)
             return {"ok": rep.failures == 0, "transaction_id": tid, "reversed": rep.reversed,
@@ -2832,6 +2868,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
                         records = s.exec(select(M.ImageRecord).where(stage_pred)).all()
                         bursts = [b for b in all_b if b.id in stage_bids]
                 old_best = {b.best_shot_id for b in bursts if b.best_shot_id}
+                # Detect first: the CPU-heavy pass must not run inside the write transaction.
+                active = [r for r in records if r.scan_status != "missing"]
+                results = BurstDetector(c).cluster_records(active)
+                by_id = {r.id: r for r in active}
                 for r in records:
                     r.burst_id = None
                     r.is_best_shot = False
@@ -2839,9 +2879,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 for b in bursts:
                     repo.s.delete(b)
                 s.flush()
-                active = [r for r in records if r.scan_status != "missing"]
-                results = BurstDetector(c).cluster_records(active)
-                by_id = {r.id: r for r in active}
                 sel = BestShotSelector(c)
                 n = seq = 0
                 for res in results:
@@ -3000,13 +3037,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
         return {"ok": True, "stopping": True, "message": "Stop requested"}
 
     @app.post("/api/reset", dependencies=auth)
-    def reset_library(body: dict | None = None, stage: Literal["new", "all"] = Query("all")):
+    def reset_library(body: ResetReq | None = Body(None), stage: Literal["new", "all"] = Query("all")):
         if hasattr(app.state, "watch") and app.state.watch is not None:
             app.state.watch.stop()
         from ..features import save_features
         save_features(dbp, {"watch_enabled": False, "watch_path": ""})
-        # If stage was specified in JSON body, respect that
-        effective_stage = (body.get("stage") if body and "stage" in body else stage)
+        effective_stage = body.stage if body is not None else stage
         with exclusive():
             with get_session(dbp) as s:
                 repo = PhotoRepository(s)
@@ -3302,7 +3338,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         except LibraryRootMissing as e:
             raise HTTPException(409, str(e)) from None
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             progress_mgr.start(label, label, 0, "Working...")
@@ -3369,7 +3405,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if not pv["ok"]:
             raise HTTPException(409, pv["error"])
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             progress_mgr.start("Move library", "Copying the library", pv["files"], "Copying...")
@@ -3417,7 +3453,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if body.trash and not _accepts(planner.execute_plan, "trash"):
             raise _not_impl("trash staging")
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             # Pre-execution backup (C1 §2.5). A failed backup warns but does not block the apply.
@@ -3488,7 +3524,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if not body.verify and not _accepts(planner.undo, "verify"):
             raise _not_impl("undo without verification")
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             with get_session(dbp) as s:
@@ -3530,7 +3566,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if not hasattr(planner, "learn_from_corrections"):
             raise _not_impl("learning from corrections")
         if not _BUSY.acquire(blocking=False):
-            raise HTTPException(409, "another task is already running")
+            raise busy_error()
 
         def work(job: dict) -> dict:
             progress_mgr.start("Learning", "Re-sorting from your choices", 0,

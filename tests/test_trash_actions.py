@@ -222,3 +222,37 @@ def test_api_finalize_endpoint(env):
         assert r.status_code == 200
         assert r.json()["ok"] is True
 
+
+
+def test_finalize_unmarked_ids_lands_in_trash_folder(env):
+    ids = _ids(env)
+    assert _row(env, ids[0])["delete_approved"] is False
+
+    out = trash_actions.finalize_deletes(env.db, _cfg(env), ids=[ids[0]])
+
+    assert out["trashed"] == 1
+    row = _row(env, ids[0])
+    assert row["stage"] == "trash"
+    assert _cfg(env).trash_dir_name in Path(row["path"]).parts
+
+
+def test_finalize_partial_failure_still_finalizes_successes(env, monkeypatch):
+    from photocure.engine.action_engine import ActionEngine
+    ids = _ids(env)
+    ok_id, bad_id = ids[0], ids[1]
+    _mark_delete(env, ok_id)
+    _mark_delete(env, bad_id)
+    bad_path = Path(_row(env, bad_id)["path"])
+    real = ActionEngine._apply
+
+    def flaky(self, action, target, sha=""):
+        if Path(action.source) == bad_path:
+            raise PermissionError("disk says no")
+        return real(self, action, target, sha)
+
+    monkeypatch.setattr(ActionEngine, "_apply", flaky)
+    with pytest.raises(OSError):
+        trash_actions.finalize_deletes(env.db, _cfg(env), ids=[ok_id, bad_id])
+
+    assert _row(env, ok_id)["stage"] == "trash"
+    assert _row(env, bad_id)["stage"] != "trash"

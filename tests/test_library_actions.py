@@ -203,3 +203,23 @@ def test_api_library_reanalyse_runs_infer_cluster_and_refile(lib):
     assert j["processed"] == 4
     assert "moved" in j and "recategorised" in j and "burst_groups" in j
 
+
+
+def test_move_sidecar_helper_is_gone():
+    assert not hasattr(library_actions, "_move_sidecar")
+
+
+def test_move_to_category_never_overwrites_existing_companion(lib):
+    iid = _first(lib)
+    src = Path(_row(lib, iid)["path"])
+    (src.with_suffix(".mov")).write_bytes(b"mine")
+    target_dir = lib.out.resolve() / "Non-Human" / "Scenery"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    other = target_dir / f"{src.stem}.mov"
+    other.write_bytes(b"someone else's video")
+
+    library_actions.move_to_category(lib.db, lib.app.state.cfg, iid, "scenery")
+
+    assert other.read_bytes() == b"someone else's video"
+    assert (target_dir / f"{src.stem} (1).mov").read_bytes() == b"mine"
+    assert not src.with_suffix(".mov").exists()

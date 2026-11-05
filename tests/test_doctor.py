@@ -198,7 +198,7 @@ def test_device_default_is_auto_and_taxonomy_keys_exist():
     t = TaxonomySettings()
     assert t.min_class_floor == 0.25
     assert t.feedback_weight == 0.6
-    assert t.feedback_min_examples == 2
+    assert t.feedback_min_examples == 3
 
 
 def test_device_env_override(monkeypatch):

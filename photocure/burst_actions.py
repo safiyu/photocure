@@ -143,7 +143,7 @@ def finalize_bursts(
     from .rules.decision_matrix import DecisionMatrix
     from .rules.organizer import FolderOrganizer
     from .engine.action_engine import ActionEngine, PlannedAction
-    from .library_actions import _category_enum, _move_sidecar
+    from .library_actions import _category_enum
     from .people_actions import detach_faces
 
     dbp = Path(db_path)
@@ -235,10 +235,6 @@ def finalize_bursts(
         if rep.failures:
             raise ActionError(f"failed to move burst photos: {rep.errors[0]}", 500)
         txn = rep.transaction_id
-
-        for a in actions:
-            dest = Path(rep.resolved_targets.get(a.image_id, a.target))
-            _move_sidecar(a.source, dest)
 
     with get_session(dbp) as s:
         repo = PhotoRepository(s)

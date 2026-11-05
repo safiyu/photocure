@@ -256,18 +256,19 @@ class DecisionMatrix:
             # Dedicated camera guard: physical cameras (Fujifilm, Canon, Sony, Nikon, etc.)
             # take optical camera captures, not computer or mobile OS screenshots.
             if top1_cat == "screenshot" and getattr(rec, "camera_model", None):
+                # A camera photo of a screen is usually a document or slide: try those before leaving the group.
                 dist = _parse_distribution(sem)
-                outside_screen = sorted(
-                    [(v, n) for n, v in dist.items() if self.taxonomy.group_of(n) != SCREEN_GROUP],
-                    key=lambda x: -x[0]
-                )
-                if outside_screen and outside_screen[0][0] >= self.tax.min_class_floor:
-                    top1_cat = outside_screen[0][1]
+                ranked = sorted(((v, n) for n, v in dist.items() if n != "screenshot"), key=lambda x: -x[0])
+                in_group = [x for x in ranked if self.taxonomy.group_of(x[1]) == SCREEN_GROUP]
+                outside = [x for x in ranked if self.taxonomy.group_of(x[1]) != SCREEN_GROUP]
+                pick = next((x for x in in_group + outside if x[0] >= self.tax.min_class_floor), None)
+                if pick is not None:
+                    top1_cat = pick[1]
                 else:
                     return Decision(
                         CategoryType.UNCERTAIN,
                         reason="camera capture cannot be an OS screenshot",
-                        subcategory="scenery" if "scenery" in dist else "uncertain",
+                        subcategory=ranked[0][1] if ranked else "uncertain",
                         confidence=float(sem.top1_score),
                     )
 

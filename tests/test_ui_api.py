@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from sqlmodel import select
+
 from photocure.db import models as M
 from photocure.db.repository import quantize_embedding
 from photocure.db.session import get_session
@@ -74,7 +76,28 @@ MUTATING = [
     ("/api/plan/rebuild", {}), ("/api/plan/diff", {}),
     ("/api/plan/apply", {}), ("/api/undo", {}), ("/api/repair", {}),
     ("/api/events/cluster", {}), ("/api/events/1/rename", {"name": "n"}),
-    ("/api/learn", {}), ("/api/stop", {}), ("/api/reset", {}),
+    ("/api/learn", {}), ("/api/stop", {}), ("/api/reset", {"stage": "all"}),
+    ("/api/browse/mkdir", {"path": "/x"}), ("/api/bursts/finalize-all", {}),
+    ("/api/bursts/1/best-shot", {"image_id": 1}), ("/api/bursts/1/composite", {}),
+    ("/api/bursts/1/finalize", {}), ("/api/bursts/1/reject-blinks", {}), ("/api/bursts/1/restore-blinks", {}),
+    ("/api/curate/budget", {}), ("/api/deletes/approve", {"ids": [1]}),
+    ("/api/duplicates/dismiss", {"ids": [1]}), ("/api/duplicates/resolve", {"ids": [1]}),
+    ("/api/duplicates/resolve-all", {}),
+    ("/api/editor/bokeh", {}), ("/api/editor/inpaint", {}), ("/api/editor/ocr", {}),
+    ("/api/editor/remaster", {}), ("/api/editor/remove-bg", {}),
+    ("/api/export/clean", {"path": "/x"}), ("/api/export/clean/scan", {"path": "/x"}),
+    ("/api/faces/1/reassign", {"person_id": 1}), ("/api/features", {}), ("/api/finalize", {}),
+    ("/api/images/fix-dates", {}), ("/api/images/1", {}), ("/api/images/1/approve-delete", {}),
+    ("/api/images/1/edit-save", {}), ("/api/images/1/favorite", {}), ("/api/images/1/ocr", {}),
+    ("/api/images/1/rating", {"rating": 3}), ("/api/images/1/reject", {}),
+    ("/api/keywords/write", {}), ("/api/library/migrate", {"path": "/x"}),
+    ("/api/library/reanalyse", {}), ("/api/library/sync", {}),
+    ("/api/people/bulk-delete", {"ids": [1]}), ("/api/people/recluster", {}), ("/api/people/1", {}),
+    ("/api/people/1/rename", {"name": "n"}), ("/api/people/1/merge-into/2", {}),
+    ("/api/preferences/learn", {}), ("/api/preferences/reset", {}), ("/api/restart", {}),
+    ("/api/settings", {}), ("/api/transactions/t/resume", {}), ("/api/transactions/t/rollback", {}),
+    ("/api/trash/delete", {"ids": [1]}), ("/api/trash/empty", {}), ("/api/trash/restore", {"ids": [1]}),
+    ("/api/trash/return", {"ids": [1]}), ("/api/watch", {}),
 ]
 
 
@@ -152,7 +175,10 @@ def test_near_dup_highlights_event_filters(env):
         a.event_id = ev.id
         b.event_id = ev.id
         for i, val in zip(ids, (1.0, 2.0, 7.5, 3.0)):
-            s.get(M.ImageRecord, i).semantic.aesthetic = val
+            rec = s.get(M.ImageRecord, i)
+            rec.semantic.aesthetic = val
+            if rec.quality is not None:
+                rec.quality.quality_score = 1.0  # equal technical quality: the order is the aesthetic order
         eid = ev.id
     c = env.client
     assert [i["id"] for i in c.get("/api/images?near_dup=true").json()["items"]] == [ids[1]]
@@ -875,3 +901,85 @@ def test_move_to_output_dir_and_trash_index_removal_with_undo(env):
     assert c.get("/api/overview").json()["total"] == 4
 
 
+
+
+# ---------------------------------------------------------------- request validation
+def test_reset_rejects_unknown_stage_in_body(env):
+    r = env.client.post("/api/reset", json={"stage": "library"})
+    assert r.status_code == 422
+    assert env.client.get("/api/images?limit=50").json()["items"]  # nothing was cleared
+
+
+def test_fix_dates_rejects_non_numeric_shift(env):
+    assert env.client.post("/api/images/fix-dates", json={"shift_hours": "abc"}).status_code == 422
+
+
+def test_curate_budget_rejects_bad_action(env):
+    assert env.client.post("/api/curate/budget", json={"action": "delete_all"}).status_code == 422
+
+
+def test_bokeh_rejects_non_numeric_focus(env):
+    import base64
+    import cv2
+    import numpy as np
+    ok, buf = cv2.imencode(".png", np.zeros((8, 8, 3), np.uint8))
+    img = base64.b64encode(buf.tobytes()).decode()
+    r = env.client.post("/api/editor/bokeh", json={"image": img, "focus_x": "x"})
+    assert r.status_code == 400
+
+
+# ---------------------------------------------------------------- bursts
+def _seed_burst_groups(env, n):
+    ids = sorted(i["id"] for i in env.client.get("/api/images?limit=50").json()["items"])
+    with get_session(env.db) as s:
+        for k in range(n):
+            s.add(M.BurstGroup(name=f"Burst_seed_{k:04d}", image_count=2, best_shot_id=ids[k % len(ids)]))
+        s.flush()
+        first = s.exec(select(M.BurstGroup).where(M.BurstGroup.name == "Burst_seed_0000")).one()
+        for iid in ids[:2]:
+            s.get(M.ImageRecord, iid).burst_id = first.id
+        s.commit()
+    return ids[:2]
+
+
+def test_bursts_endpoint_issues_bounded_queries(env, query_counter):
+    _seed_burst_groups(env, 30)
+    with query_counter() as q:
+        r = env.client.get("/api/bursts")
+    assert r.status_code == 200 and r.json()["count"] == 1
+    assert q.count <= 6, q.count
+
+
+def test_cluster_runs_detector_before_touching_rows(env, monkeypatch):
+    from photocure.clustering.burst_detector import BurstDetector
+    members = set(_seed_burst_groups(env, 1))
+    seen = {}
+
+    def detector(self, records):
+        seen["intact"] = all(r.burst_id is not None for r in records if r.id in members)
+        return []
+
+    monkeypatch.setattr(BurstDetector, "cluster_records", detector)
+    assert env.client.post("/api/cluster", json={"stage": "all"}).status_code == 200
+    assert seen["intact"] is True
+
+
+# ---------------------------------------------------------------- server plumbing
+def test_busy_message_names_the_task(env):
+    env.app.state.progress.start("Clustering", "Burst detection...", 1)
+    assert ui_app._BUSY.acquire(blocking=False)
+    try:
+        r = env.client.post("/api/trash/empty", json={})
+    finally:
+        ui_app._BUSY.release()
+        env.app.state.progress.reset()
+    assert r.status_code == 409 and "Clustering" in r.json()["detail"]
+
+
+def test_job_log_is_capped():
+    from photocure.ui.app import jlog
+    job = {"log": []}
+    for i in range(20000):
+        jlog(job, str(i))
+    assert len(job["log"]) <= 5000
+    assert job["log"][0]["msg"] == "0" and job["log"][-1]["msg"] == "19999"

@@ -283,3 +283,27 @@ def test_the_encoder_is_created_once_when_first_searches_arrive_together(env, mo
     [t.start() for t in threads]
     [t.join(timeout=20) for t in threads]
     assert statuses == [200] * 6 and len(made) == 1
+
+
+def test_second_search_does_not_decode_json(session, monkeypatch):
+    from photocure.inference import embedding_cache
+    embedding_cache.invalidate()
+    added = {i: _add(session, 700 + i, _axis(i)).id for i in range(1, 6)}
+    session.commit()
+    search_embeddings(session, _axis(1), k=3)
+    calls = []
+    real = embedding_cache.dequantize_embedding
+    monkeypatch.setattr(embedding_cache, "dequantize_embedding", lambda b: calls.append(1) or real(b))
+    res = search_embeddings(session, _axis(2), k=3)
+    assert res[0][0] == added[2] and calls == []
+
+
+def test_cache_refreshes_after_reanalysis(session):
+    from photocure.inference import embedding_cache
+    embedding_cache.invalidate()
+    a = _add(session, 801, _axis(0))
+    session.commit()
+    assert [i for i, _ in search_embeddings(session, _axis(0), k=3)] == [a.id]
+    b = _add(session, 802, _axis(0))
+    session.commit()
+    assert {i for i, _ in search_embeddings(session, _axis(0), k=3)} == {a.id, b.id}

@@ -112,3 +112,31 @@ def test_snapshot_rotation_keeps_newest(tmp_path):
         (bk / f"r_2020010{i % 10}T0000{i:02d}Z.bak.db").write_bytes(b"x")
     snapshot_database(db, bk, keep=5)
     assert len(list(bk.glob("r_*.bak.db"))) == 5
+
+
+def test_cookie_is_not_the_master_token(app):
+    c = TestClient(app)
+    r = c.post("/auth/exchange", json={"code": "otc-for-test"})
+    assert r.status_code == 204
+    sid = c.cookies.get("pcur_session")
+    assert sid and sid != app.state.auth_mgr.token
+    assert c.get("/api/images").status_code == 200
+
+
+def test_logout_revokes_cookie(app):
+    c = TestClient(app)
+    assert c.post("/auth/exchange", json={"code": "otc-for-test"}).status_code == 204
+    assert c.get("/api/images").status_code == 200
+    sid = c.cookies.get("pcur_session")
+    assert c.post("/auth/logout").status_code == 204
+    c.cookies.set("pcur_session", sid)  # a copied cookie must be dead too, not just cleared
+    assert c.get("/api/images").status_code == 401
+
+
+def test_validate_session_checks_every_entry(app):
+    mgr = app.state.auth_mgr
+    sids = [mgr.new_session() for _ in range(3)]
+    assert all(mgr.validate_session(s) for s in sids)
+    assert mgr.validate_session("not-a-session") is False
+    mgr.revoke_session(sids[1])
+    assert mgr.validate_session(sids[1]) is False and mgr.validate_session(sids[2]) is True

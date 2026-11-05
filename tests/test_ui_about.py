@@ -61,3 +61,20 @@ def test_downloaded_models_are_listed_only_when_present(tmp_path, monkeypatch):
     (home / "a.onnx").write_bytes(b"x")
     monkeypatch.setenv("U2NET_HOME", str(home))
     assert [m["name"] for m in models.downloaded_models(tmp_path)] == ["A"]
+
+
+def test_readme_does_not_claim_unshipped_models():
+    text = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
+    for word in ("SigLIP", "TOPIQ", "LIQE", "multilingual"):
+        assert word not in text, word
+
+
+def test_manifest_and_notice_have_no_siglip_entry():
+    root = Path(__file__).resolve().parent.parent
+    assert "siglip" not in (root / "photocure/models/MANIFEST.json").read_text(encoding="utf-8").lower()
+    assert "SigLIP" not in (root / "NOTICE").read_text(encoding="utf-8")
+
+
+def test_model_path_has_no_developer_paths():
+    root = Path(__file__).resolve().parent.parent
+    assert "/home/safiyu" not in (root / "photocure/models/__init__.py").read_text(encoding="utf-8")

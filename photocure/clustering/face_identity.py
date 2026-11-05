@@ -24,18 +24,32 @@ def cosine(a: list[float], b: list[float]) -> float:
     return float(np.dot(av, bv) / (na * nb))
 
 
+DEFAULT_THRESHOLD_512 = 0.35  # ArcFace-class models: strangers sit well below, same person above
+DEFAULT_THRESHOLD_128 = 0.64  # SFace
+
+
+def effective_threshold(threshold: float | None, dim: int,
+                        default_512: float = DEFAULT_THRESHOLD_512,
+                        default_128: float = DEFAULT_THRESHOLD_128) -> float:
+    """The caller's threshold when given, else the per-model default. Never silently clamped."""
+    if threshold is not None:
+        return float(threshold)
+    return default_512 if dim >= 512 else default_128
+
+
 @dataclass
 class ClusterCentroid:
     person_id: int
     centroid: list[float]
     face_count: int
     exemplars: list[list[float]] | None = None  # Diverse member embeddings for multi-exemplar matching
-    temporal_medoids: dict[str, list[float]] | None = None  # Chronological/yearly medoid vectors
+    temporal_medoids: dict[str, list[float]] | None = None  # per-year running means
+    temporal_counts: dict[str, int] | None = None  # faces behind each per-year mean
     image_ids: set[int] | None = None  # Set of image_ids already in this cluster (co-occurrence veto)
 
 
 def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
-                   threshold: float,
+                   threshold: float | None,
                    similarity_boosts: dict[int, float] | None = None,
                    image_id: int | None = None,
                    time_bucket: str | None = None) -> int | None:
@@ -44,15 +58,9 @@ def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
     Supports:
     - Sibling Protection / Cannot-Link Veto: strictly forbids assigning if image_id is already in the cluster.
     - Chronological Medoid Chaining: compares against adjacent yearly medoids for childhood growth bridging.
-    - Calibrated Operating Point: scales threshold from 0.55 down to 0.38 for 512-D ArcFace vectors.
     """
     dim = len(embedding)
-    # Calibrate threshold for 512-D ArcFace vectors vs 128-D SFace
-    if dim >= 512:
-        # Standard ArcFace operating point: strangers are < 0.20, same person is > 0.35
-        eff_threshold = min(threshold, 0.35)
-    else:
-        eff_threshold = threshold
+    eff_threshold = effective_threshold(threshold, dim)
 
     best_id, best_score = None, eff_threshold
     boosts = similarity_boosts or {}
@@ -100,24 +108,27 @@ def assign_cluster(embedding: list[float], centroids: Sequence[ClusterCentroid],
 
 def update_temporal_medoid(current_medoids: dict[str, list[float]] | None,
                            time_bucket: str | None,
-                           new_embedding: list[float]) -> dict[str, list[float]]:
-    """Update or add a yearly/chronological medoid vector for a cluster."""
-    import numpy as np
-
+                           new_embedding: Sequence[float],
+                           counts: dict[str, int] | None) -> tuple[dict[str, list[float]], dict[str, int]]:
+    """Fold one face into its year's running mean (weight 1/n), renormalized."""
+    meds = {k: list(v) for k, v in (current_medoids or {}).items()}
+    cnt = dict(counts or {})
     if not time_bucket:
-        return current_medoids or {}
-    meds = dict(current_medoids or {})
-    if time_bucket not in meds or len(meds[time_bucket]) != len(new_embedding):
-        meds[time_bucket] = list(new_embedding)
-    else:
-        old_vec = np.array(meds[time_bucket], dtype=np.float32)
-        new_vec = np.array(new_embedding, dtype=np.float32)
-        blended = old_vec * 0.7 + new_vec * 0.3
-        norm = float(np.linalg.norm(blended))
-        if norm > 1e-6:
-            blended /= norm
-        meds[time_bucket] = blended.tolist()
-    return meds
+        return meds, cnt
+    new_vec = np.asarray(new_embedding, dtype=np.float32)
+    n = cnt.get(time_bucket, 0)
+    if time_bucket not in meds or len(meds[time_bucket]) != len(new_vec) or n <= 0:
+        meds[time_bucket] = new_vec.tolist()
+        cnt[time_bucket] = 1
+        return meds, cnt
+    old_vec = np.asarray(meds[time_bucket], dtype=np.float32)
+    old_norm = float(np.linalg.norm(old_vec))
+    old_vec = old_vec / old_norm if old_norm > 1e-6 else old_vec
+    mean = (old_vec * n + new_vec) / (n + 1)
+    norm = float(np.linalg.norm(mean))
+    meds[time_bucket] = (mean / norm if norm > 1e-6 else mean).tolist()
+    cnt[time_bucket] = n + 1
+    return meds, cnt
 
 
 def update_centroid(old_centroid: list[float], old_count: int,
@@ -129,31 +140,24 @@ def update_centroid(old_centroid: list[float], old_count: int,
     return [(c * old_count + e) / n for c, e in zip(old_centroid, new_embedding)]
 
 
-def update_exemplars(current_exemplars: list[list[float]] | None,
-                     new_embedding: list[float],
+def update_exemplars(current_exemplars: Sequence[Sequence[float]] | None,
+                     new_embedding: Sequence[float],
+                     centroid: Sequence[float],
                      max_exemplars: int = 5,
-                     diversity_min_cosine: float = 0.88) -> list[list[float]]:
-    """Maintain a small diverse set of exemplars (different poses/angles/lighting).
-
-    Adds ``new_embedding`` if the current pool is not full, or if it represents a sufficiently
-    different pose from all existing exemplars (cosine < diversity_min_cosine).
-    """
+                     min_centroid_cosine: float = 0.45) -> list[list[float]]:
+    """Exemplars stay close to the centroid; an outlier that barely joined must never anchor matches."""
     dim = len(new_embedding)
-    exemplars = [ex for ex in (current_exemplars or []) if len(ex) == dim]
-    if not exemplars:
-        return [list(new_embedding)]
-    # Check similarity to existing exemplars
-    max_sim = max(cosine(new_embedding, ex) for ex in exemplars)
-    if max_sim < diversity_min_cosine:
-        # Novel pose / angle: add it
-        if len(exemplars) < max_exemplars:
-            exemplars.append(list(new_embedding))
-        else:
-            # Replace the most redundant pair or oldest non-seed
-            exemplars.pop(1 if len(exemplars) > 1 else 0)
-            exemplars.append(list(new_embedding))
-    elif len(exemplars) < max_exemplars:
+    exemplars = [list(ex) for ex in (current_exemplars or []) if len(ex) == dim]
+    new_sim = cosine(list(new_embedding), list(centroid))
+    if new_sim < min_centroid_cosine:
+        return exemplars
+    if len(exemplars) < max_exemplars:
         exemplars.append(list(new_embedding))
+        return exemplars
+    sims = [cosine(ex, list(centroid)) for ex in exemplars]
+    worst = min(range(len(sims)), key=sims.__getitem__)
+    if new_sim > sims[worst]:
+        exemplars[worst] = list(new_embedding)
     return exemplars
 
 
@@ -178,9 +182,8 @@ def remap_person_ids(old_faces: Sequence[OldFace], new_faces: Sequence[NewFace],
     reused once claimed.
     """
     pairs = []
-    is_512 = any(len(f.embedding) >= 512 for f in new_faces if f.embedding is not None) or \
-             any(len(f.embedding) >= 512 for f in old_faces if f.embedding is not None)
-    eff_threshold = min(threshold, 0.42) if is_512 else threshold
+    dims = [len(f.embedding) for f in (*new_faces, *old_faces) if f.embedding is not None]
+    eff_threshold = effective_threshold(threshold, max(dims) if dims else 0)
 
     for oi, old in enumerate(old_faces):
         for new in new_faces:

@@ -165,23 +165,10 @@ class SemanticEngine:
 
     # --------------------------------------------------------------- helpers
     @staticmethod
-    def _bgr_to_tensor(bgr: np.ndarray, preprocess, naflex: bool = False) -> object:
-        """Run the val transform on a PIL image (works on all versions).
-
-        OpenCLIP ViT-B-16 is trained on natural images resized/center-cropped without
-        artificial grey letterbox borders (which confuse CLIP into predicting screenshots/graphics).
-        """
+    def _bgr_to_tensor(bgr: np.ndarray, preprocess) -> object:
+        """Run the val transform on a PIL image (resize + center crop, as CLIP was trained)."""
         from PIL import Image
-        h, w = bgr.shape[:2]
         rgb = np.ascontiguousarray(bgr[:, :, ::-1])
-        if naflex and abs(h - w) > max(h, w) * 0.05:
-            max_dim = max(h, w)
-            padded = np.zeros((max_dim, max_dim, 3), dtype=np.uint8)
-            padded[:] = (128, 128, 128)
-            y_off = (max_dim - h) // 2
-            x_off = (max_dim - w) // 2
-            padded[y_off:y_off + h, x_off:x_off + w] = rgb
-            return preprocess(Image.fromarray(padded))
         return preprocess(Image.fromarray(rgb))
 
     # ------------------------------------------------------------ inference
@@ -201,7 +188,7 @@ class SemanticEngine:
         for start in range(0, len(images), batch_size):
             chunk = images[start:start + batch_size]
             tensors = torch.stack(
-                [self._bgr_to_tensor(b, self._preprocess, naflex=getattr(self.cfg, "naflex", False)) for b in chunk]
+                [self._bgr_to_tensor(b, self._preprocess) for b in chunk]
             ).to(self._device)
             ctx = self._autocast or torch.autocast(device_type="cpu", enabled=False)
             with torch.no_grad(), ctx:
@@ -349,9 +336,18 @@ def rescore_from_embeddings(session, cfg: CuratorConfig | None = None,
         engine.release()
 
 
+def feedback_bonus(sim: float, min_cosine: float, weight: float, max_bonus: float) -> float:
+    """Logit bonus from a correction prototype: zero below ``min_cosine``, never above ``max_bonus``."""
+    if sim <= min_cosine:
+        return 0.0
+    return min(max_bonus, weight * 100.0 * (sim - min_cosine))
+
+
 def _write_result(row, res: SemanticResult) -> None:
     """Copy a classification result onto a SemanticScore row."""
     import json
+    from ..db.models import utcnow
+    row.computed_at = utcnow()
     row.top1_category = res.top1_name
     row.top1_score = res.top1_score
     row.top2_category = res.top2_name
@@ -377,8 +373,9 @@ def learn_from_corrections(session, cfg: CuratorConfig | None = None,
     cfg = cfg or CuratorConfig()
     tcfg = cfg.taxonomy
     weight = float(getattr(tcfg, "feedback_weight", 0.6))
-    min_examples = int(getattr(tcfg, "feedback_min_examples", 2))
-    min_cosine = float(getattr(tcfg, "feedback_min_cosine", 0.60))
+    min_examples = int(getattr(tcfg, "feedback_min_examples", 3))
+    min_cosine = float(getattr(tcfg, "feedback_min_cosine", 0.70))
+    max_bonus = float(getattr(tcfg, "feedback_max_bonus", 3.0))
     summary = {"updated": 0, "classes_used": 0, "examples": 0}
 
     engine = SemanticEngine(cfg, backend=backend)
@@ -428,9 +425,7 @@ def learn_from_corrections(session, cfg: CuratorConfig | None = None,
                 continue
             logits = (text @ e) * 100.0
             for ci, proto in protos.items():
-                sim = float(proto @ e)
-                if sim > min_cosine:
-                    logits[ci] += weight * 100.0 * (sim - min_cosine)
+                logits[ci] += feedback_bonus(float(proto @ e), min_cosine, weight, max_bonus)
             logits -= logits.max()
             probs = np.exp(logits)
             probs /= probs.sum()

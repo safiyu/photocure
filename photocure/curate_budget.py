@@ -100,12 +100,11 @@ def budget_curate(
     # 3. Fetch scale labels for candidates if available
     scales_by_id: dict[int, str] = {}
     try:
-        from .search import make_text_encoder
-        encoder = make_text_encoder(cfg.backend)
-        scales = scale_labels(session, rec_ids, encoder)
+        from .search import default_encoder
+        scales = scale_labels(session, rec_ids, default_encoder(cfg))
         if scales:
             scales_by_id = scales
-    except Exception as e:
+    except (ImportError, RuntimeError, OSError) as e:
         log.debug("Scale classification unavailable for budget curation: %s", e)
 
     # 4. Build candidate objects and compute ranking scores

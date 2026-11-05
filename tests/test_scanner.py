@@ -419,3 +419,23 @@ def test_modified_original_clears_stale_links(cfg, tmp_db, tmp_path):
     rows = _rows(tmp_db)
     assert not rows[dup].is_duplicate and rows[dup].duplicate_of is None
     assert not rows[keeper].is_duplicate
+
+
+def test_renamed_file_is_not_a_duplicate_of_its_old_row(cfg, tmp_db, tmp_path):
+    from photocure.db.repository import PhotoRepository
+    from photocure.db.session import get_session
+    root = tmp_path / "lib"
+    make_image(root / "IMG_1.jpg", rng_seed=7)
+    assert _scan(cfg, root, tmp_db).new == 1
+    from photocure.engine.hash import file_sha256
+    with get_session(tmp_db) as s:  # hashed earlier (apply time or a past collision), as library rows are
+        PhotoRepository(s).all_images()[0].sha256 = file_sha256(root / "IMG_1.jpg")
+        s.commit()
+    (root / "IMG_1.jpg").rename(root / "trip.jpg")
+
+    res = _scan(cfg, root, tmp_db)  # a watcher or /api/scan pass: nothing is pruned
+
+    assert res.duplicates == 0
+    with get_session(tmp_db) as s:
+        rec = next(r for r in PhotoRepository(s).all_images() if r.filename == "trip.jpg")
+        assert rec.is_duplicate is False and rec.duplicate_of is None

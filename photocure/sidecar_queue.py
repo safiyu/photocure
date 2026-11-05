@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .db.models import ImageRecord
 from .db.session import get_session
-from .sidecar_sync import WRITTEN, SyncResult, sync_sidecar
+from .sidecar_sync import SKIPPED, WRITTEN, SyncResult, sync_sidecar
 
 log = logging.getLogger("photocure.sidecars")
 
@@ -74,6 +74,9 @@ class SidecarQueue:
                 with self.io_lock, get_session(self.db_path) as s:  # the commit happens inside the lock
                     rec = s.get(ImageRecord, image_id)
                     if rec is None:
+                        continue
+                    if not Path(rec.path).exists():  # moved by the engine meanwhile: no orphan sidecar
+                        results[image_id] = SyncResult(SKIPPED, "file not at its recorded path")
                         continue
                     rating = rec.rating
                     if rating is None and rec.xmp_written_rating not in (None, 0):

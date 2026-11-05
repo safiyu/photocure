@@ -29,12 +29,12 @@ Photocure analyzes your photos locally, identifies subject matter, picks the sha
 Works with JPEG, PNG, WebP, TIFF, HEIC and common RAW formats (CR2, NEF, ARW, DNG). Libraries of 100,000+ photos scroll smoothly.
 
 **New in 3.x:**
-- **AuraFace 512-D Face Engine:** Next-generation ArcFace facial identity with chronological medoid growth chaining, co-occurrence sibling protection, and geometric landmark plausibility filters.
-- **SigLIP 2 Multilingual Vision-Language AI:** Dynamic native aspect ratio zero-shot categorization and multilingual natural language photo search across English, French, Arabic, Spanish, and more.
+- **AuraFace 512-D Face Engine:** ArcFace facial identity with per-year identity averaging, co-occurrence sibling protection, and geometric landmark plausibility filters.
+- **CLIP Vision-Language AI:** Zero-shot categorization and natural language photo search (English) with OpenAI CLIP ViT-B/16, with prompt ensembling and learned corrections.
 - **BiRefNet Lite & Studio Matting:** Commercial-grade hair, fur, and edge precision in the Remove BG tool.
 - **MI-GAN Magic Eraser:** Real-time neural inpainting to erase unwanted background objects or people with seamless background reconstruction.
 - **Depth Anything V2 Portrait Bokeh:** Monocular depth estimation for progressive aperture bokeh blur in portraits.
-- **Joint Technical & Aesthetic Quality:** Dual blur/noise evaluation with TOPIQ/LIQE scoring so motion-blurred shots never crowd Highlights.
+- **Joint Technical & Aesthetic Quality:** Laplacian sharpness, re-blur and motion checks combined with a LAION aesthetic predictor so blurred shots never crowd Highlights.
 
 ## Install
 
