@@ -149,3 +149,18 @@ def test_blurred_scene_is_still_blurry():
     cv2.fillPoly(img, [np.array([[0, 600], [300, 330], [650, 560], [900, 300], [1200, 600]])], (250, 250, 250))
     res = BlurDetector().evaluate(cv2.GaussianBlur(img, (0, 0), 6))
     assert res["is_blurry"] is True and res["blur_retained"] >= 0.58
+
+
+def test_motion_rule_thresholds_come_from_config():
+    import cv2
+    import numpy as np
+    from photocure.config import QualityThresholds
+    from photocure.quality.blur_detector import BlurDetector
+    rng = np.random.default_rng(0)
+    frame = rng.integers(0, 255, (256, 256), dtype=np.uint8)
+    streaky = cv2.blur(frame, (41, 1))  # strong horizontal motion blur
+    bgr = cv2.cvtColor(streaky, cv2.COLOR_GRAY2BGR)
+    default = BlurDetector(QualityThresholds()).evaluate(bgr)
+    off = BlurDetector(QualityThresholds(motion_anisotropy_min=0.99)).evaluate(bgr)
+    assert default["motion_anisotropy"] > 0.70
+    assert off["is_blurry"] is False or off["sharpness_norm"] >= default["sharpness_norm"]

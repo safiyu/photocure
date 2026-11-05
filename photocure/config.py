@@ -104,6 +104,9 @@ class QualityThresholds(BaseSettings):
     blur_high: float = 250.0    # at/above this -> "sharp"
     # Blurry also needs this share of edge energy to survive a re-blur (sharp is 0.2 to 0.45).
     blur_retained_min: float = 0.58
+    # Motion blur: directional streak share of gradient energy, and the re-blur share it must keep.
+    motion_anisotropy_min: float = 0.70
+    motion_retained_min: float = 0.48
     # Luminance (0-255 grayscale mean).
     brightness_min: float = 18.0   # below -> pitch-black (accidental/lens cap)
     brightness_max: float = 245.0  # above -> blown-out
@@ -228,9 +231,12 @@ class TaxonomySettings(BaseSettings):
     # Weight of the learned (corrections) prototype scores versus zero-shot.
     feedback_weight: float = 0.6
     # Corrected photos needed in a class before it is learned from.
-    feedback_min_examples: int = 2
-    # Minimum prototype cosine similarity required before learned feedback applies to a photo.
-    feedback_min_cosine: float = 0.60
+    feedback_min_examples: int = 3
+    # Minimum prototype cosine similarity required before learned feedback applies to a photo
+    # (unrelated indoor snapshots already sit at 0.65 to 0.75 image-to-image).
+    feedback_min_cosine: float = 0.70
+    # Largest logit bonus a prototype may add: about one typical gap between neighbouring classes.
+    feedback_max_bonus: float = 3.0
     clip_model_name: str = "ViT-B-16"
     clip_pretrained: str = "openai"
 

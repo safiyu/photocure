@@ -248,3 +248,10 @@ def test_effective_clip_batch():
     assert effective_clip_batch(8, "cpu") == 8
     assert effective_clip_batch(0, "cuda") == 1
 
+
+
+def test_feedback_bonus_is_capped():
+    from photocure.inference.semantic_engine import feedback_bonus
+    assert feedback_bonus(0.65, 0.70, 0.6, 3.0) == 0.0
+    assert feedback_bonus(0.72, 0.70, 0.6, 3.0) == pytest.approx(1.2)
+    assert feedback_bonus(0.95, 0.70, 0.6, 3.0) == 3.0
