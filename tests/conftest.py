@@ -115,3 +115,29 @@ def _pretend_in_venv(monkeypatch, request):
         return
     from photocure.inference import backends
     monkeypatch.setattr(backends, "in_venv", lambda: True)
+
+
+@pytest.fixture()
+def query_counter():
+    """Counts SQL statements executed on any engine while the context is open."""
+    from contextlib import contextmanager
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    class Counter:
+        count = 0
+
+    @contextmanager
+    def counting():
+        c = Counter()
+
+        def tick(*_a, **_k):
+            c.count += 1
+
+        event.listen(Engine, "before_cursor_execute", tick)
+        try:
+            yield c
+        finally:
+            event.remove(Engine, "before_cursor_execute", tick)
+
+    return counting

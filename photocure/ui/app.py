@@ -2539,8 +2539,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 M.ImageRecord.route_status.not_in(["trashed", "purged"]) if stage != "trash"
                 else M.ImageRecord.route_status != "purged").group_by(M.ImageRecord.burst_id)).all())
             total_marked = 0
-            for b in repo.all_bursts():
-                best = repo.get_by_id(b.best_shot_id) if b.best_shot_id else None
+            all_b = repo.all_bursts()
+            best_ids = [b.best_shot_id for b in all_b if b.best_shot_id]
+            names = dict(s.exec(select(M.ImageRecord.id, M.ImageRecord.filename).where(
+                col(M.ImageRecord.id).in_(best_ids))).all()) if best_ids else {}
+            for b in all_b:
                 cnt = int(counts.get(b.id, 0))
                 if cnt < (1 if stage == "trash" else 2):  # a lone frame is not a burst
                     continue
@@ -2551,7 +2554,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     "id": b.id, "name": b.name, "image_count": b_count,
                     "marked_delete_count": m_count,
                     "best_shot_id": b.best_shot_id,
-                    "best_shot": best.filename if best else None,
+                    "best_shot": names.get(b.best_shot_id),
                     "start_time": b.start_time.isoformat() if b.start_time else None,
                 })
             return {"count": len(out), "items": out, "total_marked_for_delete": total_marked}
@@ -2845,6 +2848,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
                         records = s.exec(select(M.ImageRecord).where(stage_pred)).all()
                         bursts = [b for b in all_b if b.id in stage_bids]
                 old_best = {b.best_shot_id for b in bursts if b.best_shot_id}
+                # Detect first: the CPU-heavy pass must not run inside the write transaction.
+                active = [r for r in records if r.scan_status != "missing"]
+                results = BurstDetector(c).cluster_records(active)
+                by_id = {r.id: r for r in active}
                 for r in records:
                     r.burst_id = None
                     r.is_best_shot = False
@@ -2852,9 +2859,6 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 for b in bursts:
                     repo.s.delete(b)
                 s.flush()
-                active = [r for r in records if r.scan_status != "missing"]
-                results = BurstDetector(c).cluster_records(active)
-                by_id = {r.id: r for r in active}
                 sel = BestShotSelector(c)
                 n = seq = 0
                 for res in results:

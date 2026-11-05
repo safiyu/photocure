@@ -11,6 +11,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from sqlmodel import select
+
 from photocure.db import models as M
 from photocure.db.repository import quantize_embedding
 from photocure.db.session import get_session
@@ -900,3 +902,39 @@ def test_bokeh_rejects_non_numeric_focus(env):
     img = base64.b64encode(buf.tobytes()).decode()
     r = env.client.post("/api/editor/bokeh", json={"image": img, "focus_x": "x"})
     assert r.status_code == 400
+
+
+# ---------------------------------------------------------------- bursts
+def _seed_burst_groups(env, n):
+    ids = sorted(i["id"] for i in env.client.get("/api/images?limit=50").json()["items"])
+    with get_session(env.db) as s:
+        for k in range(n):
+            s.add(M.BurstGroup(name=f"Burst_seed_{k:04d}", image_count=2, best_shot_id=ids[k % len(ids)]))
+        s.flush()
+        first = s.exec(select(M.BurstGroup).where(M.BurstGroup.name == "Burst_seed_0000")).one()
+        for iid in ids[:2]:
+            s.get(M.ImageRecord, iid).burst_id = first.id
+        s.commit()
+    return ids[:2]
+
+
+def test_bursts_endpoint_issues_bounded_queries(env, query_counter):
+    _seed_burst_groups(env, 30)
+    with query_counter() as q:
+        r = env.client.get("/api/bursts")
+    assert r.status_code == 200 and r.json()["count"] == 1
+    assert q.count <= 6, q.count
+
+
+def test_cluster_runs_detector_before_touching_rows(env, monkeypatch):
+    from photocure.clustering.burst_detector import BurstDetector
+    members = set(_seed_burst_groups(env, 1))
+    seen = {}
+
+    def detector(self, records):
+        seen["intact"] = all(r.burst_id is not None for r in records if r.id in members)
+        return []
+
+    monkeypatch.setattr(BurstDetector, "cluster_records", detector)
+    assert env.client.post("/api/cluster", json={"stage": "all"}).status_code == 200
+    assert seen["intact"] is True
